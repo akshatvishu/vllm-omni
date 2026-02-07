@@ -566,6 +566,164 @@ def extract_zimage_context(
     )
 
 
+def extract_stable_audio_context(
+    module: nn.Module,
+    hidden_states: torch.Tensor,
+    timestep: torch.Tensor,
+    encoder_hidden_states: torch.Tensor,
+    global_hidden_states: torch.Tensor | None = None,
+    rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
+    return_dict: bool = True,
+    attention_mask: torch.Tensor | None = None,
+    encoder_attention_mask: torch.Tensor | None = None,
+    **kwargs: Any,
+) -> CacheContext:
+    """
+    Extract cache context for Stable Audio DiT model.
+
+    This function encapsulates all model-specific preprocessing, defines the
+    transformer execution callable, and postprocessing callable for TeaCache.
+
+    Args:
+        module: StableAudioDiTModel instance
+        hidden_states: Input latent tensor [B, C, L] (C=in_channels=64)
+        timestep: Timestep tensor [B] or [1]
+        encoder_hidden_states: Text embeddings [B, S, D]
+        global_hidden_states: Global conditioning (duration) [B, 1, D]
+        rotary_embedding: Precomputed rotary embeddings (cos, sin)
+        return_dict: Whether to return Transformer2DModelOutput
+        attention_mask: Attention mask for self-attention
+        encoder_attention_mask: Attention mask for cross-attention
+        **kwargs: Additional arguments (ignored)
+
+    Returns:
+        CacheContext containing:
+            - modulated_input: Tensor for cache decision
+            - hidden_states: Preprocessed hidden states
+            - encoder_hidden_states: None (not dual-stream)
+            - temb: Combined global+time embedding
+            - run_transformer_blocks: Callable to execute transformer
+            - postprocess: Callable to apply final transformations
+
+    Architecture Notes:
+        - Stable Audio uses standard LayerNorm (not AdaLayerNorm)
+        - Timestep conditioning via global_hidden_states prepended to sequence
+        - Single-stream model (cross-attention handled separately)
+        - Input: [B, C, L] -> transpose -> [B, L, C] -> project -> [B, L, inner_dim]
+        - Global states prepended: [B, 1+L, inner_dim]
+    """
+    if not hasattr(module, "transformer_blocks") or len(module.transformer_blocks) == 0:
+        raise ValueError("Module must have transformer_blocks attribute with at least one block")
+
+    cross_attention_hidden_states = module.cross_attention_proj(encoder_hidden_states)
+
+    # 2. Global embedding projection [B, 1, D] -> [B, 1, inner_dim]
+    global_hidden_states = module.global_proj(global_hidden_states)
+
+    # 3. Time embedding: timestep -> time_proj -> timestep_proj
+    time_hidden_states = module.timestep_proj(module.time_proj(timestep.to(module.dtype)))
+
+    # 4. Combine global and time embeddings [B, 1, inner_dim]
+    # This is the "timestep embedding" for TeaCache purposes
+    temb = global_hidden_states + time_hidden_states.unsqueeze(1)
+
+    # 5. Pre-process with residual conv: [B, C, L]
+    hidden_states = module.preprocess_conv(hidden_states) + hidden_states
+
+    # 6. Transpose: [B, C, L] -> [B, L, C]
+    hidden_states = hidden_states.transpose(1, 2)
+
+    # 7. Project to inner_dim: [B, L, C] -> [B, L, inner_dim]
+    hidden_states = module.proj_in(hidden_states)
+
+    # 8. Prepend global states to hidden states: [B, 1+L, inner_dim]
+    hidden_states = torch.cat([temb, hidden_states], dim=1)
+
+    # 9. Update attention mask if provided to account for prepended global token
+    if attention_mask is not None:
+        prepend_mask = torch.ones(
+            (hidden_states.shape[0], 1),
+            device=hidden_states.device,
+            dtype=torch.bool,
+        )
+        attention_mask = torch.cat([prepend_mask, attention_mask], dim=-1)
+
+    # ============================================================================
+    # EXTRACT MODULATED INPUT for cache decision
+    # ============================================================================
+    # Since Stable Audio uses standard LayerNorm (not AdaLayerNorm), we extract
+    # the normalized input from the first transformer block's first norm layer.
+    # This represents the "modulated" features that will be used for similarity
+    # comparison across timesteps.
+
+    first_block = module.transformer_blocks[0]
+    modulated_input = first_block.norm1(hidden_states)
+
+    # ============================================================================
+    # DEFINE TRANSFORMER EXECUTION CALLABLE
+    # ============================================================================
+    def run_transformer_blocks() -> tuple[torch.Tensor]:
+        """
+        Execute all Stable Audio transformer blocks.
+
+        Returns:
+            Tuple containing only hidden_states (single-stream model).
+            Format: (hidden_states,)
+        """
+        h = hidden_states
+
+        for block in module.transformer_blocks:
+            h = block(
+                hidden_states=h,
+                encoder_hidden_states=cross_attention_hidden_states,
+                rotary_embedding=rotary_embedding,
+                attention_mask=attention_mask,
+                encoder_attention_mask=encoder_attention_mask,
+            )
+
+        return (h,)
+
+    # ============================================================================
+    # DEFINE POSTPROCESSING CALLABLE
+    # ============================================================================
+    def postprocess(h: torch.Tensor) -> Any:
+        """
+        Apply Stable Audio-specific output postprocessing.
+
+        Args:
+            h: Hidden states from transformer blocks [B, 1+L, inner_dim]
+
+        Returns:
+            Transformer2DModelOutput or tuple based on return_dict
+        """
+        from diffusers.models.modeling_outputs import Transformer2DModelOutput
+
+        # 1. Project back to out_channels: [B, 1+L, inner_dim] -> [B, 1+L, out_channels]
+        h = module.proj_out(h)
+
+        # 2. Transpose and remove prepended global token: [B, L, out_channels] -> [B, out_channels, L]
+        h = h.transpose(1, 2)[:, :, 1:]
+
+        # 3. Post-process with residual conv: [B, out_channels, L]
+        output = module.postprocess_conv(h) + h
+
+        if return_dict:
+            return Transformer2DModelOutput(sample=output)
+        return (output,)
+
+    # ============================================================================
+    # RETURN CACHE CONTEXT
+    # ============================================================================
+    return CacheContext(
+        modulated_input=modulated_input,
+        hidden_states=hidden_states,
+        encoder_hidden_states=None,  # Single-stream model (cross-attn is separate)
+        temb=temb,
+        run_transformer_blocks=run_transformer_blocks,
+        postprocess=postprocess,
+    )
+
+
 # Registry for model-specific extractors
 # Key: Transformer class name
 # Value: extractor function with signature (module, *args, **kwargs) -> CacheContext
@@ -576,6 +734,7 @@ EXTRACTOR_REGISTRY: dict[str, Callable] = {
     "QwenImageTransformer2DModel": extract_qwen_context,
     "Bagel": extract_bagel_context,
     "ZImageTransformer2DModel": extract_zimage_context,
+    "StableAudioDiTModel": extract_stable_audio_context,
     # Future models:
     # "FluxTransformer2DModel": extract_flux_context,
     # "CogVideoXTransformer3DModel": extract_cogvideox_context,

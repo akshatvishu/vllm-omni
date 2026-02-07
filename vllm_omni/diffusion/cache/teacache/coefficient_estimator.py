@@ -82,6 +82,28 @@ class BagelAdapter:
         transformer._forward_flow = transformer.forward
 
 
+class StableAudioAdapter:
+    """Adapter for Stable Audio Open 1.0 coefficient estimation."""
+
+    @staticmethod
+    def load_pipeline(model_path: str, device: str = "cuda", dtype: torch.dtype = torch.float16) -> Any:
+        from vllm_omni.diffusion.models.stable_audio.pipeline_stable_audio import StableAudioPipeline
+
+        od_config = OmniDiffusionConfig.from_kwargs(model=model_path, dtype=dtype)
+        pipeline = StableAudioPipeline(od_config=od_config)
+        pipeline.to(device)
+        return pipeline
+
+    @staticmethod
+    def get_transformer(pipeline: Any) -> tuple[Any, str]:
+        return pipeline.transformer, "StableAudioDiTModel"
+
+    @staticmethod
+    def install_hook(transformer: Any, hook: DataCollectionHook) -> None:
+        registry = HookRegistry.get_or_create(transformer)
+        registry.register_hook(hook._HOOK_NAME, hook)
+
+
 class DefaultAdapter:
     """Default adapter for standard diffusers pipelines."""
 
@@ -101,6 +123,7 @@ class DefaultAdapter:
 
 _MODEL_ADAPTERS: dict[str, type] = {
     "Bagel": BagelAdapter,
+    "StableAudio": StableAudioAdapter,
 }
 
 _EPSILON = 1e-6
