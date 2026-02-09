@@ -617,29 +617,22 @@ def extract_stable_audio_context(
 
     cross_attention_hidden_states = module.cross_attention_proj(encoder_hidden_states)
 
-    # 2. Global embedding projection [B, 1, D] -> [B, 1, inner_dim]
     global_hidden_states = module.global_proj(global_hidden_states)
 
-    # 3. Time embedding: timestep -> time_proj -> timestep_proj
     time_hidden_states = module.timestep_proj(module.time_proj(timestep.to(module.dtype)))
 
-    # 4. Combine global and time embeddings [B, 1, inner_dim]
-    # This is the "timestep embedding" for TeaCache purposes
+    # Combine global and time embeddings [B, 1, inner_dim]
     temb = global_hidden_states + time_hidden_states.unsqueeze(1)
 
-    # 5. Pre-process with residual conv: [B, C, L]
     hidden_states = module.preprocess_conv(hidden_states) + hidden_states
 
-    # 6. Transpose: [B, C, L] -> [B, L, C]
     hidden_states = hidden_states.transpose(1, 2)
 
-    # 7. Project to inner_dim: [B, L, C] -> [B, L, inner_dim]
     hidden_states = module.proj_in(hidden_states)
 
-    # 8. Prepend global states to hidden states: [B, 1+L, inner_dim]
     hidden_states = torch.cat([temb, hidden_states], dim=1)
 
-    # 9. Update attention mask if provided to account for prepended global token
+    # Update attention mask if provided to account for prepended global token
     if attention_mask is not None:
         prepend_mask = torch.ones(
             (hidden_states.shape[0], 1),
@@ -648,20 +641,11 @@ def extract_stable_audio_context(
         )
         attention_mask = torch.cat([prepend_mask, attention_mask], dim=-1)
 
-    # ============================================================================
-    # EXTRACT MODULATED INPUT for cache decision
-    # ============================================================================
-    # Since Stable Audio uses standard LayerNorm (not AdaLayerNorm), we extract
+    # Since Stable Audio uses standard LayerNorm , we extract
     # the normalized input from the first transformer block's first norm layer.
-    # This represents the "modulated" features that will be used for similarity
-    # comparison across timesteps.
-
     first_block = module.transformer_blocks[0]
     modulated_input = first_block.norm1(hidden_states)
 
-    # ============================================================================
-    # DEFINE TRANSFORMER EXECUTION CALLABLE
-    # ============================================================================
     def run_transformer_blocks() -> tuple[torch.Tensor]:
         """
         Execute all Stable Audio transformer blocks.
@@ -683,9 +667,6 @@ def extract_stable_audio_context(
 
         return (h,)
 
-    # ============================================================================
-    # DEFINE POSTPROCESSING CALLABLE
-    # ============================================================================
     def postprocess(h: torch.Tensor) -> Any:
         """
         Apply Stable Audio-specific output postprocessing.
@@ -698,26 +679,20 @@ def extract_stable_audio_context(
         """
         from diffusers.models.modeling_outputs import Transformer2DModelOutput
 
-        # 1. Project back to out_channels: [B, 1+L, inner_dim] -> [B, 1+L, out_channels]
         h = module.proj_out(h)
 
-        # 2. Transpose and remove prepended global token: [B, L, out_channels] -> [B, out_channels, L]
         h = h.transpose(1, 2)[:, :, 1:]
 
-        # 3. Post-process with residual conv: [B, out_channels, L]
         output = module.postprocess_conv(h) + h
 
         if return_dict:
             return Transformer2DModelOutput(sample=output)
         return (output,)
 
-    # ============================================================================
-    # RETURN CACHE CONTEXT
-    # ============================================================================
     return CacheContext(
         modulated_input=modulated_input,
         hidden_states=hidden_states,
-        encoder_hidden_states=None,  # Single-stream model (cross-attn is separate)
+        encoder_hidden_states=None,
         temb=temb,
         run_transformer_blocks=run_transformer_blocks,
         postprocess=postprocess,
