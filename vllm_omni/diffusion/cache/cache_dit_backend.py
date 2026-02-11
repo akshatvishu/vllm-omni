@@ -395,7 +395,11 @@ def enable_cache_for_stable_audio_open(pipeline: Any, cache_config: Any) -> Call
             num_inference_steps: New number of inference steps.
             verbose: Whether to log refresh operations.
         """
-        if cache_config.scm_steps_mask_policy is None:
+        scm_policy = cache_config.get("scm_steps_mask_policy")
+        is_supported_scm_step = num_inference_steps >= 8 or num_inference_steps in (4, 6)
+        use_scm = scm_policy is not None and is_supported_scm_step
+
+        if not use_scm:
             cache_dit.refresh_context(pipeline.transformer, num_inference_steps=num_inference_steps, verbose=verbose)
         else:
             cache_dit.refresh_context(
