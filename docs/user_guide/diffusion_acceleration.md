@@ -72,6 +72,12 @@ The following table shows which models are currently supported by each accelerat
 |-------|------------------|:--------:|:---------:|:----------:|:--------------:|:----------------:|
 | **Wan2.2** | `Wan-AI/Wan2.2-T2V-A14B-Diffusers` | ❌ | ✅ | ✅ | ✅ | ✅ |
 
+### AudioGen
+
+| Model | Model Identifier | TeaCache | Cache-DiT | Ulysses-SP | Ring-Attention |CFG-Parallel |Tensor-Parallel |
+|-------|------------------|:--------:|:---------:|:----------:|:--------------:|:----------------:|:----------------:|
+| **Stable-Audio-Open** | `stabilityai/stable-audio-open-1.0` | | ✅ | ✅ | ❓ | ❓ | ❓ |  ❌ |
+
 ### Quantization
 
 | Model | Model Identifier | FP8 |
