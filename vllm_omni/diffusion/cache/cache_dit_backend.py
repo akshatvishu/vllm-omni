@@ -385,6 +385,7 @@ def enable_cache_for_stable_audio_open(pipeline: Any, cache_config: Any) -> Call
                 )
             ],
         ),
+        cache_config=db_cache_config,
     )
 
     def refresh_cache_context(pipeline: Any, num_inference_steps: int, verbose: bool = True) -> None:
