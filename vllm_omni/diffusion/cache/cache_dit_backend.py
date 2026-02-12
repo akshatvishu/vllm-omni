@@ -371,13 +371,17 @@ def enable_cache_for_stable_audio_open(pipeline: Any, cache_config: Any) -> Call
         f"W={db_cache_config.max_warmup_steps}, "
     )
 
-    # StableAudioDiTBlock.forward has two required positional args.
-    # Pattern_2 intercepts both, treating the 1st as residual and 2nd as context.
+    # StableAudio is officially registered in CacheDiT as Pattern_3:
+    # https://github.com/vipshop/cache-dit/blob/69e82bd1/src/cache_dit/caching/block_adapters/__init__.py#L562
+    #
+    # Pattern_3 is required because StableAudioDiT uses cross-attention
+    # with static encoder_hidden_states that do not change inside the
+    # transformer block loop.
     cache_dit.enable_cache(
         BlockAdapter(
             transformer=pipeline.transformer,
             blocks=pipeline.transformer.transformer_blocks,
-            forward_pattern=ForwardPattern.Pattern_2,
+            forward_pattern=ForwardPattern.Pattern_3,
             params_modifiers=[
                 ParamsModifier(
                     cache_config=db_cache_config,
