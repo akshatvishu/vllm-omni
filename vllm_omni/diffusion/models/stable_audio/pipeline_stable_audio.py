@@ -136,6 +136,8 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
             subfolder="scheduler",
             local_files_only=local_files_only,
         )
+        # Inside __init__, after self.scheduler is defined
+        self.scheduler.config.sigma_min = 0.02
 
         # Compute rotary embedding dimension
         self.rotary_embed_dim = self.transformer.config.attention_head_dim // 2
@@ -283,6 +285,7 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
                 attention_mask = torch.cat([negative_attention_mask, attention_mask])
 
         # Project embeddings
+
         prompt_embeds = self.projection_model(
             text_hidden_states=prompt_embeds,
         ).text_hidden_states
@@ -290,7 +293,7 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
         if attention_mask is not None:
             prompt_embeds = prompt_embeds * attention_mask.unsqueeze(-1).to(prompt_embeds.dtype)
 
-        return prompt_embeds
+        return prompt_embeds, negative_prompt_embeds
 
     def encode_duration(
         self,
@@ -335,16 +338,28 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
         generator: torch.Generator | list[torch.Generator] | None,
         latents: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Prepare initial latent noise."""
         shape = (batch_size, num_channels_vae, sample_size)
 
         if latents is None:
-            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-        else:
+            # Fixes hardware-level RNG desynchronization across Tensor Parallel ranks.
+            # PyTorch's `cuRAND` does not guarantee bit-for-bit identical tensors across
+            # different physical GPUs due to micro-thread scheduling variations.
+            # Reference: https://pytorch.org/docs/stable/notes/randomness.html
+            # By forcing generation on the Host CPU first, we guarantee strictly
+            # deterministic IEEE-754 bit-strings before transferring to the GPUs.
+            if isinstance(generator, list):
+                cpu_generator = [torch.Generator("cpu").manual_seed(g.initial_seed()) for g in generator]
+            else:
+                seed = generator.initial_seed() if generator is not None else 42
+                cpu_generator = torch.Generator("cpu").manual_seed(seed)
+
+            latents = randn_tensor(shape, generator=cpu_generator, device=torch.device("cpu"), dtype=dtype)
             latents = latents.to(device)
 
-        # Scale by scheduler's noise sigma
-        latents = latents * self.scheduler.init_noise_sigma
+            latents = latents * self.scheduler.init_noise_sigma
+        else:
+            latents = latents.to(device=device, dtype=dtype)
+
         return latents
 
     def forward(
@@ -397,10 +412,48 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
         if req.sampling_params.guidance_scale_provided:
             guidance_scale = req.sampling_params.guidance_scale
 
+        # Fixes IPC (Inter-Process Communication) pointer crashes and SDE desynchronization.
+        # When users pass a `cuda:0` generator to a distributed pipeline, `cuda:1` workers
+        # cannot access the memory pointer, leading to unseeded fallbacks and audio static.
+        # We intercept the object, extract the raw seed, and rebuild localized generators.
         if generator is None:
             generator = req.sampling_params.generator
-        if generator is None and req.sampling_params.seed is not None:
-            generator = torch.Generator(device=self.device).manual_seed(req.sampling_params.seed)
+
+        active_seeds = []
+        if req.sampling_params.seed is not None:
+            active_seeds = [req.sampling_params.seed]
+        elif generator is not None:
+            if isinstance(generator, list):
+                active_seeds = [g.initial_seed() for g in generator]
+            else:
+                active_seeds = [generator.initial_seed()]
+        else:
+            active_seeds = [42]
+
+        if len(active_seeds) > 1:
+            safe_generator = [torch.Generator(device=self.device).manual_seed(s) for s in active_seeds]
+        else:
+            safe_generator = torch.Generator(device=self.device).manual_seed(active_seeds[0])
+
+        # Stable Audio's CosineDPMSolverMultistepScheduler is a Stochastic (SDE) solver,
+        # meaning it relies on global torch states (like `torchsde`) during execution.
+        # We must lock the specific hardware backend vLLM is running on so Rank 0 and
+        # Rank X compute mathematically identical Brownian noise trajectories.
+        global_lock_seed = active_seeds[0]
+        torch.manual_seed(global_lock_seed)
+
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(global_lock_seed)
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            torch.xpu.manual_seed_all(global_lock_seed)
+        if hasattr(torch, "npu") and torch.npu.is_available():
+            torch.npu.manual_seed_all(global_lock_seed)
+        elif hasattr(torch, "npu_is_available") and torch.npu_is_available():
+            import torch_npu
+
+            torch_npu.npu.manual_seed_all(global_lock_seed)
+
+        generator = safe_generator
 
         # Get audio duration from request extra params or defaults
         audio_start_in_s = req.sampling_params.extra_args.get("audio_start_in_s", audio_start_in_s)
@@ -446,7 +499,7 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
         self._guidance_scale = guidance_scale
 
         # Encode prompt
-        prompt_embeds = self.encode_prompt(
+        prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt,
             device,
             do_classifier_free_guidance,
@@ -464,23 +517,27 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
             batch_size,
         )
 
-        # Create combined embeddings
+        # Create combined embeddings (NO duplication yet)
+
         text_audio_duration_embeds = torch.cat(
             [prompt_embeds, seconds_start_hidden_states, seconds_end_hidden_states],
             dim=1,
         )
+
         audio_duration_embeds = torch.cat(
             [seconds_start_hidden_states, seconds_end_hidden_states],
             dim=2,
         )
 
-        # Handle CFG without negative prompt
+        # Handle CFG when NO negative prompt was provided
         if do_classifier_free_guidance and negative_prompt_embeds is None and negative_prompt is None:
             negative_text_audio_duration_embeds = torch.zeros_like(text_audio_duration_embeds)
+
             text_audio_duration_embeds = torch.cat(
                 [negative_text_audio_duration_embeds, text_audio_duration_embeds],
                 dim=0,
             )
+
             audio_duration_embeds = torch.cat(
                 [audio_duration_embeds, audio_duration_embeds],
                 dim=0,
@@ -501,6 +558,7 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
         # Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
         timesteps = self.scheduler.timesteps
+
         self._num_timesteps = len(timesteps)
 
         # Prepare latents
@@ -529,30 +587,48 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
         )
 
         # Denoising loop
-        for t in timesteps:
+        for step_index, t in enumerate(timesteps):
             self._current_timestep = t
 
-            # Expand latents for CFG
+            # Expand for CFG
             latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-            latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
-            # Predict noise
+            #
+            latent_model_input = self.scheduler.scale_model_input(
+                latent_model_input,
+                t,  # SCALAR
+            )
+
+            # Batched timestep only for transformer
+            timestep = torch.full(
+                (latent_model_input.shape[0],),
+                t,
+                device=device,
+                dtype=latents.dtype,
+            )
+
             noise_pred = self.transformer(
                 latent_model_input,
-                t.unsqueeze(0),
+                timestep,
                 encoder_hidden_states=text_audio_duration_embeds,
                 global_hidden_states=audio_duration_embeds,
                 rotary_embedding=rotary_embedding,
                 return_dict=False,
             )[0]
 
-            # Perform CFG
             if do_classifier_free_guidance:
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                 noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-            # Scheduler step
-            latents = self.scheduler.step(noise_pred, t, latents).prev_sample
+            # Unlike standard ODE diffusion, this SDE solver requires the `generator`
+            # parameter at every step to seed the BrownianTreeNoiseSampler. Omitting it
+            # causes fallback to unseeded system entropy.
+            latents = self.scheduler.step(
+                noise_pred,
+                t,  # SCALAR
+                latents,
+                generator=generator,
+            ).prev_sample
 
         self._current_timestep = None
 

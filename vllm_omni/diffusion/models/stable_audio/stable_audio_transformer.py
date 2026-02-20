@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 """
-Stable Audio DiT Model for vLLM-Omni.
+Stable Audio DiT Model (Tensor-Parallel version)
 """
 
 import math
@@ -11,8 +11,19 @@ from collections.abc import Iterable
 import torch
 import torch.nn as nn
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
+from vllm.distributed import (
+    get_tensor_model_parallel_rank,
+    get_tensor_model_parallel_world_size,
+    get_tp_group,
+)
 from vllm.logger import init_logger
-from vllm.model_executor.layers.linear import ReplicatedLinear
+from vllm.model_executor.layers.linear import (
+    ColumnParallelLinear,
+    MergedColumnParallelLinear,
+    QKVParallelLinear,
+    ReplicatedLinear,
+    RowParallelLinear,
+)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.layer import Attention
@@ -21,334 +32,305 @@ from vllm_omni.diffusion.data import OmniDiffusionConfig
 logger = init_logger(__name__)
 
 
-def apply_rotary_emb_stable_audio(
-    hidden_states: torch.Tensor,
-    freqs_cis: tuple[torch.Tensor, torch.Tensor],
-) -> torch.Tensor:
-    """
-    Apply rotary embeddings to input tensors for Stable Audio.
+# ============================================================
+# Rotary Embedding
+# ============================================================
 
-    Args:
-        hidden_states: Input tensor of shape [B, S, H, D] where D is head_dim
-        freqs_cis: Tuple of (cos, sin) frequency tensors of shape [S, rotary_dim]
-                   where rotary_dim = head_dim // 2
 
-    Returns:
-        Tensor with rotary embeddings applied to first rotary_dim dimensions only.
-        The remaining dimensions are left unchanged (pass-through).
-    """
-    cos, sin = freqs_cis  # [S, rotary_dim]
+def apply_rotary_emb_stable_audio(hidden_states, freqs_cis):
+    cos, sin = freqs_cis
     rotary_dim = cos.shape[-1]
 
-    # Rotate only the first rotary_dim entries; leave the rest unchanged
     x_rot = hidden_states[..., :rotary_dim]
     x_pass = hidden_states[..., rotary_dim:]
 
-    cos = cos[None, :, None, :]  # [1, S, 1, rotary_dim]
-    sin = sin[None, :, None, :]  # [1, S, 1, rotary_dim]
+    cos = cos[None, :, None, :]
+    sin = sin[None, :, None, :]
 
-    # [B, S, H, rotary_dim] -> [B, S, H, 2, rotary_dim//2] -> two halves
     x_real, x_imag = x_rot.reshape(*x_rot.shape[:-1], 2, rotary_dim // 2).unbind(-2)
-    x_rotated = torch.cat([-x_imag, x_real], dim=-1)
 
+    x_rotated = torch.cat([-x_imag, x_real], dim=-1)
     x_rot = (x_rot.float() * cos + x_rotated.float() * sin).to(hidden_states.dtype)
+
     return torch.cat([x_rot, x_pass], dim=-1)
 
 
+# ============================================================
+# Gaussian Fourier Projection
+# ============================================================
+
+
 class StableAudioGaussianFourierProjection(nn.Module):
-    """Gaussian Fourier embeddings for noise levels.
-
-    Matches diffusers StableAudioGaussianFourierProjection with:
-    - flip_sin_to_cos=True (output is [cos, sin] not [sin, cos])
-    - log=False (no log transformation of input)
-    """
-
-    def __init__(self, embedding_size: int = 256, scale: float = 1.0):
+    def __init__(self, embedding_size=256, scale=1.0):
         super().__init__()
-        self.weight = nn.Parameter(torch.randn(embedding_size) * scale, requires_grad=False)
+        tp_group = get_tp_group()
+        device = tp_group.device
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x shape: [batch] or [batch, 1]
-        # Output: [batch, embedding_size * 2]
+        gen = torch.Generator(device=device).manual_seed(42)
+        self.weight = nn.Parameter(
+            torch.randn(embedding_size, generator=gen) * scale,
+            requires_grad=False,
+        )
+        # Add this diagnostic
+
+    def forward(self, x):
         x_proj = 2 * math.pi * x[:, None] @ self.weight[None, :]
-        # flip_sin_to_cos=True means cos comes first
         return torch.cat([torch.cos(x_proj), torch.sin(x_proj)], dim=-1)
 
 
 class StableAudioSelfAttention(nn.Module):
-    """
-    Optimized self-attention for Stable Audio using vLLM layers.
-
-    Self-attention uses full attention (all heads for Q, K, V).
-    GQA is only used for cross-attention.
-    """
-
     def __init__(
         self,
-        dim: int,
-        num_attention_heads: int,
-        num_key_value_attention_heads: int,
-        attention_head_dim: int,
-        dropout: float = 0.0,
+        dim,
+        num_attention_heads,
+        num_key_value_attention_heads,
+        attention_head_dim,
+        dropout=0.0,
     ):
         super().__init__()
-
-        self.dim = dim
-        self.num_heads = num_attention_heads
         self.head_dim = attention_head_dim
         self.inner_dim = num_attention_heads * attention_head_dim
 
-        # All projections use inner_dim for output
-        self.to_q = ReplicatedLinear(dim, self.inner_dim, bias=False)
-        self.to_k = ReplicatedLinear(dim, self.inner_dim, bias=False)
-        self.to_v = ReplicatedLinear(dim, self.inner_dim, bias=False)
+        self.to_qkv = QKVParallelLinear(
+            hidden_size=dim,
+            head_size=attention_head_dim,
+            total_num_heads=num_attention_heads,
+            total_num_kv_heads=num_key_value_attention_heads,
+            bias=False,
+            return_bias=False,
+        )
+        self.local_heads = self.to_qkv.num_heads
+        self.local_kv_heads = self.to_qkv.num_kv_heads
 
-        # Output projection
+        self.attn = Attention(
+            num_heads=self.local_heads,
+            head_size=attention_head_dim,
+            softmax_scale=1.0 / (attention_head_dim**0.5),
+            causal=False,
+            num_kv_heads=self.local_kv_heads,
+        )
         self.to_out = nn.ModuleList(
             [
-                ReplicatedLinear(self.inner_dim, dim, bias=False),
+                RowParallelLinear(self.inner_dim, dim, bias=False, input_is_parallel=True),
                 nn.Dropout(dropout),
             ]
         )
 
-        # Full attention (no GQA for self-attention)
-        self.attn = Attention(
-            num_heads=num_attention_heads,
-            head_size=attention_head_dim,
-            softmax_scale=1.0 / (attention_head_dim**0.5),
-            causal=False,
-            num_kv_heads=num_attention_heads,  # Same as query heads
-        )
+    def forward(self, hidden_states, rotary_emb=None):
+        B, S, _ = hidden_states.shape
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        batch_size, seq_len, _ = hidden_states.shape
+        # Projections: With attn1 set to MHA (24 heads each for Q, K, V),
+        # all split sizes are now equal to q_size.
+        qkv = self.to_qkv(hidden_states)
 
-        # Projections - all output inner_dim
-        query, _ = self.to_q(hidden_states)
-        key, _ = self.to_k(hidden_states)
-        value, _ = self.to_v(hidden_states)
+        q_size = self.local_heads * self.head_dim
 
-        # Reshape for multi-head attention (all use full heads)
-        query = query.view(batch_size, seq_len, self.num_heads, self.head_dim)
-        key = key.view(batch_size, seq_len, self.num_heads, self.head_dim)
-        value = value.view(batch_size, seq_len, self.num_heads, self.head_dim)
+        # Slicing must use equal sizes for Q, K, and V in MHA.
+        q, k, v = qkv.split([q_size, q_size, q_size], dim=-1)
 
-        # Apply rotary embeddings
+        q = q.view(B, S, self.local_heads, self.head_dim)
+        k = k.view(B, S, self.local_heads, self.head_dim)
+        v = v.view(B, S, self.local_heads, self.head_dim)
+
         if rotary_emb is not None:
-            query = apply_rotary_emb_stable_audio(query, rotary_emb)
-            key = apply_rotary_emb_stable_audio(key, rotary_emb)
+            # Rotary embeddings are applied only to the first rotary_dim.
+            q = apply_rotary_emb_stable_audio(q, rotary_emb)
+            k = apply_rotary_emb_stable_audio(k, rotary_emb)
 
-        # Compute attention
-        hidden_states = self.attn(query, key, value)
-        hidden_states = hidden_states.view(batch_size, seq_len, self.inner_dim)
+        # Kernel Execution: SDPA backend handles the sharded tensors.
+        hidden_states = self.attn(q, k, v)
+        hidden_states = hidden_states.view(B, S, -1)
 
-        # Output projection
+        # Output Projection: RowParallelLinear all-reduces to full dim.
         hidden_states, _ = self.to_out[0](hidden_states)
+
         hidden_states = self.to_out[1](hidden_states)
 
         return hidden_states
 
 
 class StableAudioCrossAttention(nn.Module):
-    """
-    Optimized cross-attention for Stable Audio using vLLM layers.
-
-    For cross-attention:
-    - Q projection: outputs inner_dim (full heads)
-    - K/V projections: outputs kv_dim (reduced heads for GQA)
-
-    GQA is handled by manually expanding K/V heads to match Q heads
-    since the SDPA backend doesn't handle this automatically.
-    """
-
     def __init__(
         self,
-        dim: int,
-        num_attention_heads: int,
-        num_key_value_attention_heads: int,
-        attention_head_dim: int,
-        cross_attention_dim: int,
-        dropout: float = 0.0,
+        dim,
+        num_attention_heads,
+        num_key_value_attention_heads,
+        attention_head_dim,
+        cross_attention_dim,
+        dropout=0.0,
     ):
         super().__init__()
 
-        self.dim = dim
-        self.num_heads = num_attention_heads
-        self.num_kv_heads = num_key_value_attention_heads
         self.head_dim = attention_head_dim
         self.inner_dim = num_attention_heads * attention_head_dim
-        self.kv_dim = num_key_value_attention_heads * attention_head_dim
+        kv_size = num_key_value_attention_heads * attention_head_dim
 
-        # Number of times to repeat KV heads
-        self.num_kv_groups = num_attention_heads // num_key_value_attention_heads
+        self.to_q = ColumnParallelLinear(dim, num_attention_heads * attention_head_dim, bias=False, gather_output=False)
+        self.to_kv = MergedColumnParallelLinear(
+            cross_attention_dim,
+            [kv_size, kv_size],  # [K_size, V_size]
+            bias=False,
+            gather_output=False,
+        )
 
-        # Q outputs inner_dim, K/V output kv_dim (GQA)
-        self.to_q = ReplicatedLinear(dim, self.inner_dim, bias=False)
-        self.to_k = ReplicatedLinear(cross_attention_dim, self.kv_dim, bias=False)
-        self.to_v = ReplicatedLinear(cross_attention_dim, self.kv_dim, bias=False)
+        self.local_heads = self.to_q.output_size_per_partition // attention_head_dim
+        tp_size = get_tensor_model_parallel_world_size()
+        self.local_kv_heads = num_key_value_attention_heads // tp_size
 
-        # Output projection
+        tp_size = get_tensor_model_parallel_world_size()
+
+        self.attn = Attention(
+            num_heads=self.local_heads,
+            head_size=attention_head_dim,
+            num_kv_heads=self.local_heads,
+            softmax_scale=1.0 / (attention_head_dim**0.5),
+            causal=False,
+        )
+
         self.to_out = nn.ModuleList(
             [
-                ReplicatedLinear(self.inner_dim, dim, bias=False),
+                RowParallelLinear(self.inner_dim, dim, bias=False, input_is_parallel=True),
                 nn.Dropout(dropout),
             ]
         )
 
-        # Use full heads for attention (KV will be expanded)
-        self.attn = Attention(
-            num_heads=num_attention_heads,
-            head_size=attention_head_dim,
-            softmax_scale=1.0 / (attention_head_dim**0.5),
-            causal=False,
-            num_kv_heads=num_attention_heads,  # After expansion
-        )
+    def forward(self, hidden_states, encoder_hidden_states):
+        B, Sq, _ = hidden_states.shape
+        Sk = encoder_hidden_states.shape[1]
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        attention_mask: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        batch_size, seq_len, _ = hidden_states.shape
-        encoder_seq_len = encoder_hidden_states.shape[1]
+        # ----------------------------------------------------
+        # 1. Projections
+        # ----------------------------------------------------
+        q, _ = self.to_q(hidden_states)
 
-        # Projections
-        query, _ = self.to_q(hidden_states)
-        key, _ = self.to_k(encoder_hidden_states)
-        value, _ = self.to_v(encoder_hidden_states)
+        kv, _ = self.to_kv(encoder_hidden_states)
 
-        # Reshape for multi-head attention
-        query = query.view(batch_size, seq_len, self.num_heads, self.head_dim)
-        key = key.view(batch_size, encoder_seq_len, self.num_kv_heads, self.head_dim)
-        value = value.view(batch_size, encoder_seq_len, self.num_kv_heads, self.head_dim)
+        # Split KV
+        kv_size = self.local_kv_heads * self.head_dim
+        k, v = kv.split([kv_size, kv_size], dim=-1)
 
-        # Expand K/V heads to match Q heads for GQA
-        # [B, S, kv_heads, D] -> [B, S, kv_heads, 1, D] -> [B, S, kv_heads, groups, D] -> [B, S, num_heads, D]
-        key = key.unsqueeze(3).expand(-1, -1, -1, self.num_kv_groups, -1)
-        key = key.reshape(batch_size, encoder_seq_len, self.num_heads, self.head_dim)
-        value = value.unsqueeze(3).expand(-1, -1, -1, self.num_kv_groups, -1)
-        value = value.reshape(batch_size, encoder_seq_len, self.num_heads, self.head_dim)
+        # ----------------------------------------------------
+        # 2. Reshape into head format (LOCAL heads)
+        # ----------------------------------------------------
+        q = q.view(B, Sq, self.local_heads, self.head_dim)
+        k = k.view(B, Sk, self.local_kv_heads, self.head_dim)
+        v = v.view(B, Sk, self.local_kv_heads, self.head_dim)
 
-        # Compute attention
-        hidden_states = self.attn(query, key, value)
-        hidden_states = hidden_states.view(batch_size, seq_len, self.inner_dim)
+        # ----------------------------------------------------
+        # 3. GQA expansion (local version of original logic)
+        #
+        # Original model:
+        #   Expand KV to match full Q heads.
+        #
+        # TP version:
+        #   Expand LOCAL KV to match LOCAL Q heads.
+        # ----------------------------------------------------
+        if self.local_kv_heads != self.local_heads:
+            num_groups = self.local_heads // self.local_kv_heads
 
-        # Output projection
+            k = k.unsqueeze(3).expand(-1, -1, -1, num_groups, -1)
+            k = k.reshape(B, Sk, self.local_heads, self.head_dim)
+
+            v = v.unsqueeze(3).expand(-1, -1, -1, num_groups, -1)
+            v = v.reshape(B, Sk, self.local_heads, self.head_dim)
+
+        # ----------------------------------------------------
+        # 4. Attention
+        # ----------------------------------------------------
+        hidden_states = self.attn(q, k, v)
+
+        hidden_states = hidden_states.view(B, Sq, -1)
+
+        # ----------------------------------------------------
+        # 5. Output projection (RowParallel → all-reduce)
+        # ----------------------------------------------------
         hidden_states, _ = self.to_out[0](hidden_states)
+
         hidden_states = self.to_out[1](hidden_states)
 
         return hidden_states
 
 
-class SwiGLU(nn.Module):
-    """SwiGLU activation - matches diffusers structure."""
-
-    def __init__(self, dim_in: int, dim_out: int, bias: bool = True):
-        super().__init__()
-        self.proj = nn.Linear(dim_in, dim_out * 2, bias=bias)
-        self.activation = nn.SiLU()
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.proj(hidden_states)
-        hidden_states, gate = hidden_states.chunk(2, dim=-1)
-        return hidden_states * self.activation(gate)
-
-
 class StableAudioFeedForward(nn.Module):
-    """
-    Feed-forward network with SwiGLU activation for Stable Audio.
-    Matches diffusers FeedForward structure with activation_fn="swiglu".
-    """
-
-    def __init__(self, dim: int, inner_dim: int, bias: bool = True):
+    def __init__(self, dim, inner_dim):
         super().__init__()
-        # Structure matches diffusers FeedForward:
-        # net.0 = SwiGLU (proj.weight, proj.bias)
-        # net.1 = Dropout
-        # net.2 = Linear (weight, bias)
+
         self.net = nn.Sequential(
-            SwiGLU(dim, inner_dim, bias=bias),
-            nn.Dropout(0.0),
-            nn.Linear(inner_dim, dim, bias=bias),
+            nn.ModuleDict(
+                {
+                    "proj": MergedColumnParallelLinear(
+                        dim,
+                        [inner_dim, inner_dim],  # [hidden_size, gate_size]
+                        bias=True,
+                        gather_output=False,
+                    )
+                }
+            ),
+            RowParallelLinear(
+                inner_dim,
+                dim,
+                bias=True,
+                input_is_parallel=True,
+            ),
         )
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        return self.net(hidden_states)
+    def forward(self, hidden_states):
+        # ColumnParallelLinear
+        hidden_states, _ = self.net[0]["proj"](hidden_states)
+
+        hidden, gate = hidden_states.chunk(2, dim=-1)
+
+        hidden_states = hidden * torch.nn.functional.silu(gate)
+
+        # RowParallelLinear
+        hidden_states, _ = self.net[1](hidden_states)
+
+        return hidden_states
 
 
 class StableAudioDiTBlock(nn.Module):
-    """
-    Stable Audio DiT block with self-attention, cross-attention, and FFN.
-    """
-
     def __init__(
         self,
-        dim: int,
-        num_attention_heads: int,
-        num_key_value_attention_heads: int,
-        attention_head_dim: int,
-        cross_attention_dim: int,
-        ff_mult: int = 4,
+        dim,
+        num_attention_heads,
+        num_key_value_attention_heads,
+        attention_head_dim,
+        cross_attention_dim,
+        ff_mult=4,
     ):
         super().__init__()
 
-        # Self-attention with layer norm
-        self.norm1 = nn.LayerNorm(dim, elementwise_affine=True)
+        self.norm1 = nn.LayerNorm(dim)
         self.attn1 = StableAudioSelfAttention(
-            dim=dim,
-            num_attention_heads=num_attention_heads,
-            num_key_value_attention_heads=num_key_value_attention_heads,
-            attention_head_dim=attention_head_dim,
+            dim,
+            num_attention_heads,
+            num_attention_heads,
+            attention_head_dim,
         )
 
-        # Cross-attention with layer norm
-        self.norm2 = nn.LayerNorm(dim, elementwise_affine=True)
+        self.norm2 = nn.LayerNorm(dim)
         self.attn2 = StableAudioCrossAttention(
-            dim=dim,
-            num_attention_heads=num_attention_heads,
-            num_key_value_attention_heads=num_key_value_attention_heads,
-            attention_head_dim=attention_head_dim,
-            cross_attention_dim=cross_attention_dim,
+            dim,
+            num_attention_heads,
+            num_key_value_attention_heads,
+            attention_head_dim,
+            cross_attention_dim,
         )
 
-        # Feed-forward with SwiGLU activation
-        # inner_dim = dim * ff_mult (e.g., 1536 * 4 = 6144)
-        self.norm3 = nn.LayerNorm(dim, elementwise_affine=True)
-        self.ff = StableAudioFeedForward(dim, inner_dim=dim * ff_mult)
+        self.norm3 = nn.LayerNorm(dim)
+        self.ff = StableAudioFeedForward(dim, dim * ff_mult)
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        # Self-attention with skip connection
+    def forward(self, hidden_states, encoder_hidden_states, rotary_embedding=None):
         residual = hidden_states
         hidden_states = self.norm1(hidden_states)
-        hidden_states = self.attn1(hidden_states, rotary_emb=rotary_embedding, attention_mask=attention_mask)
+        hidden_states = self.attn1(hidden_states, rotary_embedding)
         hidden_states = residual + hidden_states
 
-        # Cross-attention with skip connection
         residual = hidden_states
         hidden_states = self.norm2(hidden_states)
-        hidden_states = self.attn2(
-            hidden_states,
-            encoder_hidden_states,
-            attention_mask=attention_mask,
-            encoder_attention_mask=encoder_attention_mask,
-        )
+        hidden_states = self.attn2(hidden_states, encoder_hidden_states)
         hidden_states = residual + hidden_states
 
-        # Feed-forward with skip connection
         residual = hidden_states
         hidden_states = self.norm3(hidden_states)
         hidden_states = self.ff(hidden_states)
@@ -358,23 +340,6 @@ class StableAudioDiTBlock(nn.Module):
 
 
 class StableAudioDiTModel(nn.Module):
-    """
-    Optimized Stable Audio DiT model using vLLM layers.
-
-    This is an optimized version of the diffusers StableAudioDiTModel that uses
-    vLLM's efficient linear layers and attention implementations.
-
-    Architecture:
-    - Input: [B, in_channels, L] (e.g., [B, 64, L])
-    - preprocess_conv: residual conv layer (keeps 64 channels)
-    - proj_in: projects 64 -> 1536 (inner_dim)
-    - Global+time embeddings prepended to sequence
-    - Transformer blocks work on 1536-dim
-    - proj_out: projects 1536 -> 64 (out_channels)
-    - postprocess_conv: residual conv layer (keeps 64 channels)
-    - Output: [B, out_channels, L]
-    """
-
     def __init__(
         self,
         od_config: OmniDiffusionConfig | None = None,
@@ -392,17 +357,13 @@ class StableAudioDiTModel(nn.Module):
     ):
         super().__init__()
 
-        self.sample_size = sample_size
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.num_layers = num_layers
-        self.attention_head_dim = attention_head_dim
-        self.num_attention_heads = num_attention_heads
+        tp_size = get_tensor_model_parallel_world_size()
 
-        # inner_dim is the transformer hidden dimension
+        assert num_attention_heads % tp_size == 0
+        assert num_key_value_attention_heads % tp_size == 0
+
         self.inner_dim = num_attention_heads * attention_head_dim
 
-        # Store config for compatibility
         self.config = type(
             "Config",
             (),
@@ -421,142 +382,187 @@ class StableAudioDiTModel(nn.Module):
             },
         )()
 
-        # Time projection (Gaussian Fourier features)
-        # time_proj_dim is the OUTPUT dimension (after sin/cos concatenation)
-        # So embedding_size = time_proj_dim // 2
+        self.activation = nn.SiLU()
+
+        # Time embedding
         self.time_proj = StableAudioGaussianFourierProjection(embedding_size=time_proj_dim // 2)
-
-        # Timestep projection: time_proj_dim -> inner_dim
-        self.timestep_proj = nn.Sequential(
-            nn.Linear(time_proj_dim, self.inner_dim, bias=True),
-            nn.SiLU(),
-            nn.Linear(self.inner_dim, self.inner_dim, bias=True),
+        self.timestep_proj_0 = ColumnParallelLinear(
+            time_proj_dim,
+            self.inner_dim,
+            bias=True,
+            gather_output=False,
+        )
+        self.timestep_proj_2 = RowParallelLinear(
+            self.inner_dim,
+            self.inner_dim,
+            bias=True,  # checkpoint has bias; vLLM requires reduce_results=True with bias
+            input_is_parallel=True,
+            reduce_results=True,  # must be True when bias=True (vLLM enforces this)
         )
 
-        # Global states projection (for audio duration conditioning)
-        # Output is inner_dim, added to time embedding
-        self.global_proj = nn.Sequential(
-            nn.Linear(global_states_input_dim, self.inner_dim, bias=False),
-            nn.SiLU(),
-            nn.Linear(self.inner_dim, self.inner_dim, bias=False),
+        # Global embedding
+        self.global_proj_0 = ColumnParallelLinear(
+            global_states_input_dim,
+            self.inner_dim,
+            bias=False,
+            gather_output=False,
+        )
+        self.global_proj_2 = RowParallelLinear(
+            self.inner_dim,
+            self.inner_dim,
+            bias=False,
+            input_is_parallel=True,
+            reduce_results=True,  # must match timestep_proj_2 — both FULL for the add + cat
         )
 
-        # Cross-attention input projection
-        # Always use Sequential(Linear, SiLU, Linear) to match diffusers structure
+        # Cross attention conditioning (not TP — encoder states are replicated)
+
         self.cross_attention_proj = nn.Sequential(
-            nn.Linear(cross_attention_input_dim, cross_attention_dim, bias=False),
+            ReplicatedLinear(cross_attention_input_dim, cross_attention_dim, bias=False, return_bias=False),
             nn.SiLU(),
-            nn.Linear(cross_attention_dim, cross_attention_dim, bias=False),
+            ReplicatedLinear(cross_attention_dim, cross_attention_dim, bias=False, return_bias=False),
+        )
+        # -----------------------------
+        # Input projection
+        # -----------------------------
+        self.preprocess_conv = nn.Conv1d(in_channels, in_channels, 1, bias=False)
+        self.proj_in = ColumnParallelLinear(
+            in_channels,
+            self.inner_dim,
+            bias=False,
+            gather_output=True,  # must be FULL to cat with global_hidden_states (also FULL after reduce_results=True)
         )
 
-        # Pre-processing conv (residual connection)
-        self.preprocess_conv = nn.Conv1d(in_channels, in_channels, 1, bias=False)
-
-        # Input projection: in_channels -> inner_dim (64 -> 1536)
-        self.proj_in = nn.Linear(in_channels, self.inner_dim, bias=False)
-
-        # Transformer blocks - work on inner_dim (1536)
+        # -----------------------------
+        # Transformer blocks
+        # -----------------------------
         self.transformer_blocks = nn.ModuleList(
             [
                 StableAudioDiTBlock(
-                    dim=self.inner_dim,
-                    num_attention_heads=num_attention_heads,
-                    num_key_value_attention_heads=num_key_value_attention_heads,
-                    attention_head_dim=attention_head_dim,
-                    cross_attention_dim=cross_attention_dim,
+                    self.inner_dim,
+                    num_attention_heads,
+                    num_key_value_attention_heads,
+                    attention_head_dim,
+                    cross_attention_dim,
                 )
                 for _ in range(num_layers)
             ]
         )
 
-        # Output projection: inner_dim -> out_channels (1536 -> 64)
-        self.proj_out = nn.Linear(self.inner_dim, out_channels, bias=False)
+        # -----------------------------
+        # Output projection
+        # -----------------------------
+        # Each block's to_out RowParallelLinear all-reduces back to FULL dim,
+        # so proj_out receives a FULL tensor → input_is_parallel=False.
+        self.proj_out = ReplicatedLinear(
+            self.inner_dim,
+            out_channels,
+            bias=False,
+        )
 
-        # Post-processing conv (residual connection)
         self.postprocess_conv = nn.Conv1d(out_channels, out_channels, 1, bias=False)
 
-    @property
-    def dtype(self) -> torch.dtype:
-        """Return the dtype of the model parameters."""
-        return next(self.parameters()).dtype
+    # ======================================================
+    # Forward
+    # ======================================================
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
-        timestep: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        global_hidden_states: torch.Tensor | None = None,
-        rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
-        return_dict: bool = True,
-        attention_mask: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor | Transformer2DModelOutput:
-        """
-        Forward pass of the Stable Audio DiT model.
+        hidden_states,
+        timestep,
+        encoder_hidden_states,
+        global_hidden_states,
+        rotary_embedding=None,
+        return_dict=True,
+    ):
+        tp_size = get_tensor_model_parallel_world_size()
+        tp_group = get_tp_group() if tp_size > 1 else None
 
-        Args:
-            hidden_states: Input latent tensor [B, C, L] (C=in_channels=64)
-            timestep: Timestep tensor [B] or [1]
-            encoder_hidden_states: Text/condition embeddings [B, S, D]
-            global_hidden_states: Global conditioning (duration) [B, 1, D]
-            rotary_embedding: Precomputed rotary embeddings (cos, sin)
-            return_dict: Whether to return a dataclass or tuple
-            attention_mask: Attention mask for self-attention
-            encoder_attention_mask: Attention mask for cross-attention
-
-        Returns:
-            Denoised latent tensor
-        """
-        # Project cross-attention inputs
+        # ------------------------------------------
+        # Cross attention conditioning (replicated)
+        # ------------------------------------------
         cross_attention_hidden_states = self.cross_attention_proj(encoder_hidden_states)
 
-        # Global embedding projection [B, 1, D] -> [B, 1, inner_dim]
-        global_hidden_states = self.global_proj(global_hidden_states)
+        # ------------------------------------------
+        # Time embedding (safe fp32 Fourier)
+        # ------------------------------------------
 
-        # Time embedding: timestep -> time_proj -> timestep_proj
-        time_hidden_states = self.timestep_proj(self.time_proj(timestep.to(self.dtype)))
+        # Save original dtype
+        model_dtype = hidden_states.dtype
 
-        # Combine global and time embeddings [B, 1, inner_dim]
+        # Run Fourier projection in float32 safely
+        timestep_fp32 = timestep.float()
+
+        # Manually compute Fourier with casted weight
+        fourier_weight = self.time_proj.weight.float()
+        x_proj = 2 * math.pi * timestep_fp32[:, None] @ fourier_weight[None, :]
+        time_hidden_states = torch.cat([torch.cos(x_proj), torch.sin(x_proj)], dim=-1)
+
+        # Cast back to model dtype
+        time_hidden_states = time_hidden_states.to(model_dtype)
+
+        # Continue normal MLP
+        time_hidden_states, _ = self.timestep_proj_0(time_hidden_states)
+        time_hidden_states = self.activation(time_hidden_states)
+        time_hidden_states, _ = self.timestep_proj_2(time_hidden_states)
+
+        # ------------------------------------------
+        # Global embedding  [B, 1, global_dim] → sharded [B, 1, shard_dim]
+        # ------------------------------------------
+        global_hidden_states, _ = self.global_proj_0(global_hidden_states)
+
+        global_hidden_states = self.activation(global_hidden_states)
+        global_hidden_states, _ = self.global_proj_2(global_hidden_states)
+
+        # Invariant: timestep and global are FULL (reduce_results=True), proj_in is FULL (gather_output=True)
+        assert time_hidden_states.shape[-1] == self.inner_dim
+        assert global_hidden_states.shape[-1] == self.inner_dim
+
+        # Combine time into global token
         global_hidden_states = global_hidden_states + time_hidden_states.unsqueeze(1)
-
-        # Pre-process with residual: [B, C, L]
+        # Fixes floating-point non-associativity accumulation drift.
+        # Tensor Parallel `All-Reduce` sums matrices across GPUs. Because FP16/FP32
+        # addition is order-dependent, a microscopic precision error occurs on Rank 1.
+        # We broadcast the identical Rank 0 tensor to kill the SDE butterfly effect.
+        if tp_group is not None:
+            tp_group.broadcast(global_hidden_states, src=0)
+        # ------------------------------------------
+        # Audio latent  [B, C, T] → sharded [B, T, shard_dim]
+        # ------------------------------------------
         hidden_states = self.preprocess_conv(hidden_states) + hidden_states
-
-        # Transpose: [B, C, L] -> [B, L, C]
         hidden_states = hidden_states.transpose(1, 2)
 
-        # Project to inner_dim: [B, L, C] -> [B, L, inner_dim]
-        hidden_states = self.proj_in(hidden_states)
+        hidden_states, _ = self.proj_in(hidden_states)
 
-        # Prepend global states to hidden states: [B, 1+L, inner_dim]
+        # Prepend global token: [B, 1+T, inner_dim] — already FULL, no all-gather needed
         hidden_states = torch.cat([global_hidden_states, hidden_states], dim=1)
 
-        # Update attention mask if provided
-        if attention_mask is not None:
-            prepend_mask = torch.ones(
-                (hidden_states.shape[0], 1),
-                device=hidden_states.device,
-                dtype=torch.bool,
-            )
-            attention_mask = torch.cat([prepend_mask, attention_mask], dim=-1)
-
+        # ------------------------------------------
         # Transformer blocks
-        for block in self.transformer_blocks:
+        # hidden_states is FULL [B, 1+T, inner_dim] after all-gather above.
+        # Each block: LayerNorm(FULL) → attn/ff sharded → to_out all-reduce → FULL
+        # ------------------------------------------
+
+        for i, block in enumerate(self.transformer_blocks):
+            # ---- Log block 0 input (once) ----
+
             hidden_states = block(
                 hidden_states,
                 cross_attention_hidden_states,
-                rotary_embedding=rotary_embedding,
-                attention_mask=attention_mask,
-                encoder_attention_mask=encoder_attention_mask,
+                rotary_embedding,
             )
+            # Re-synchronize state before the next block's LayerNorm consumes it
+            if tp_group is not None:
+                tp_group.broadcast(hidden_states, src=0)
 
-        # Project back to out_channels: [B, 1+L, inner_dim] -> [B, 1+L, out_channels]
-        hidden_states = self.proj_out(hidden_states)
+        # ------------------------------------------
+        # Output projection  FULL [B, 1+T, inner_dim] → [B, 1+T, out_channels]
+        # ------------------------------------------
 
-        # Transpose and remove prepended global token: [B, L, C] -> [B, C, L]
+        hidden_states, _ = self.proj_out(hidden_states)
+
+        # Drop global token, restore [B, C, T]
         hidden_states = hidden_states.transpose(1, 2)[:, :, 1:]
-
-        # Post-process with residual: [B, C, L]
         hidden_states = self.postprocess_conv(hidden_states) + hidden_states
 
         if return_dict:
@@ -564,39 +570,118 @@ class StableAudioDiTModel(nn.Module):
         return (hidden_states,)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-        """
-        Load weights from a pretrained model.
+        tp_rank = get_tensor_model_parallel_rank()
 
-        Maps diffusers weight names to our module structure.
-
-        Returns:
-            Set of parameter names that were successfully loaded.
-        """
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
+        checkpoint_keys_used: set[str] = set()
 
-        # Weight name mapping from diffusers to our implementation
         name_mapping = {
-            # Timestep projection - diffusers uses index-based naming
-            "timestep_proj.linear_1.weight": "timestep_proj.0.weight",
-            "timestep_proj.linear_1.bias": "timestep_proj.0.bias",
-            "timestep_proj.linear_2.weight": "timestep_proj.2.weight",
-            "timestep_proj.linear_2.bias": "timestep_proj.2.bias",
-            # Global projection - diffusers uses index-based naming
-            "global_proj.linear_1.weight": "global_proj.0.weight",
-            "global_proj.linear_2.weight": "global_proj.2.weight",
+            "timestep_proj.0.weight": "timestep_proj_0.weight",
+            "timestep_proj.0.bias": "timestep_proj_0.bias",
+            "timestep_proj.2.weight": "timestep_proj_2.weight",
+            "timestep_proj.2.bias": "timestep_proj_2.bias",
+            "global_proj.0.weight": "global_proj_0.weight",
+            "global_proj.2.weight": "global_proj_2.weight",
         }
 
-        for name, loaded_weight in weights:
-            # Apply name mapping if needed
-            mapped_name = name_mapping.get(name, name)
+        def remap_name(n: str) -> str:
+            n = name_mapping.get(n, n)
+            if ".ff.net.2." in n:
+                n = n.replace(".ff.net.2.", ".ff.net.1.")
+            return n
 
-            if mapped_name in params_dict:
+        qkv_buffer: dict[str, dict[str, torch.Tensor]] = {}
+
+        all_checkpoint_keys: set[str] = set()  # track all keys seen to detect unexpected ones
+
+        for name, loaded_weight in weights:
+            all_checkpoint_keys.add(name)
+            mapped_name = remap_name(name)
+
+            # Self-attention QKV fusion
+
+            if ".attn1.to_" in mapped_name and any(x in mapped_name for x in ("q.", "k.", "v.")):
+                checkpoint_keys_used.add(name)
+                shard_id = "q" if ".to_q." in mapped_name else ("k" if ".to_k." in mapped_name else "v")
+                fused_name = mapped_name.replace(f".to_{shard_id}.", ".to_qkv.")
+                qkv_buffer.setdefault(fused_name, {})[shard_id] = loaded_weight
+
+                if len(qkv_buffer[fused_name]) == 3:
+                    if fused_name not in params_dict:
+                        logger.error(f"[QKV ERROR] Missing fused param {fused_name}")
+                        continue
+                    param = params_dict[fused_name]
+                    weight_loader = getattr(param, "weight_loader", default_weight_loader)
+
+                    q_shape = qkv_buffer[fused_name]["q"].shape
+                    k_shape = qkv_buffer[fused_name]["k"].shape
+                    v_shape = qkv_buffer[fused_name]["v"].shape
+                    if not (q_shape == k_shape == v_shape):
+                        logger.error(
+                            f"[QKV SHAPE MISMATCH][rank={tp_rank}] {fused_name} Q={q_shape} K={k_shape} V={v_shape}"
+                        )
+                    for sid in ("q", "k", "v"):
+                        weight_loader(param, qkv_buffer[fused_name][sid], sid)
+                    loaded_params.add(fused_name)
+                    del qkv_buffer[fused_name]
+                continue
+
+            #  Cross-attention Q
+
+            if ".attn2.to_q." in mapped_name:
+                checkpoint_keys_used.add(name)
+                if mapped_name not in params_dict:
+                    logger.error(f"[ATTN2-Q] Missing param {mapped_name}")
+                    continue
                 param = params_dict[mapped_name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
                 loaded_params.add(mapped_name)
-            else:
-                logger.debug(f"Skipping weight {name} - not found in model")
+                continue
+
+            #  Cross-attention KV fusion
+
+            if any(f".attn2.{x}.weight" in mapped_name for x in ("to_k", "to_v")):
+                checkpoint_keys_used.add(name)
+                shard_id = 0 if ".to_k." in mapped_name else 1
+                fused_name = mapped_name.replace(".to_k.weight", ".to_kv.weight").replace(
+                    ".to_v.weight", ".to_kv.weight"
+                )
+
+                if fused_name not in params_dict:
+                    continue
+                param = params_dict[fused_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+
+                weight_loader(param, loaded_weight, loaded_shard_id=shard_id)
+                loaded_params.add(fused_name)
+                continue
+
+            #  GLU FFN
+
+            if ".ff.net.0.proj." in mapped_name:
+                checkpoint_keys_used.add(name)
+                if mapped_name not in params_dict:
+                    continue
+                param = params_dict[mapped_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+
+                hidden_w, gate_w = loaded_weight.chunk(2, dim=0)
+
+                weight_loader(param, hidden_w, loaded_shard_id=0)
+                weight_loader(param, gate_w, loaded_shard_id=1)
+
+                loaded_params.add(mapped_name)
+                continue
+
+            # Standard loader
+
+            if mapped_name in params_dict:
+                checkpoint_keys_used.add(name)
+                param = params_dict[mapped_name]
+                weight_loader = getattr(param, "weight_loader", default_weight_loader)
+                weight_loader(param, loaded_weight)
+                loaded_params.add(mapped_name)
 
         return loaded_params

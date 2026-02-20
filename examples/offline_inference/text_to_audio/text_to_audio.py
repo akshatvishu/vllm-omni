@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from vllm_omni.diffusion.data import DiffusionParallelConfig
 from vllm_omni.entrypoints.omni import Omni
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
 from vllm_omni.platforms import current_omni_platform
@@ -90,6 +91,12 @@ def parse_args() -> argparse.Namespace:
         default=44100,
         help="Sample rate for output audio (Stable Audio uses 44100 Hz).",
     )
+    parser.add_argument(
+        "--tensor-parallel-size",
+        type=int,
+        default=1,
+        help="Number of GPUs used for tensor parallelism (TP).",
+    )
     return parser.parse_args()
 
 
@@ -103,17 +110,12 @@ def save_audio(audio_data: np.ndarray, output_path: str, sample_rate: int = 4410
         try:
             import scipy.io.wavfile as wav
 
-            # Ensure audio is in the correct format for scipy
             if audio_data.dtype == np.float32 or audio_data.dtype == np.float64:
-                # Normalize to int16 range
                 audio_data = np.clip(audio_data, -1.0, 1.0)
                 audio_data = (audio_data * 32767).astype(np.int16)
             wav.write(output_path, sample_rate, audio_data)
         except ImportError:
-            raise ImportError(
-                "Either 'soundfile' or 'scipy' is required to save audio files. "
-                "Install with: pip install soundfile or pip install scipy"
-            )
+            raise ImportError("Either 'soundfile' or 'scipy' is required to save audio files.")
 
 
 def main():
@@ -124,24 +126,23 @@ def main():
     print("Stable Audio Open - Text-to-Audio Generation")
     print(f"{'=' * 60}")
     print(f"  Model: {args.model}")
+    print(f"  Tensor Parallel Size: {args.tensor_parallel_size}")
     print(f"  Prompt: {args.prompt}")
-    print(f"  Negative prompt: {args.negative_prompt}")
     print(f"  Audio length: {args.audio_length}s")
-    print(f"  Inference steps: {args.num_inference_steps}")
-    print(f"  Guidance scale: {args.guidance_scale}")
-    print(f"  Seed: {args.seed}")
     print(f"{'=' * 60}\n")
 
-    # Initialize Omni with Stable Audio model
-    omni = Omni(model=args.model)
+    parallel_config = DiffusionParallelConfig(
+        tensor_parallel_size=args.tensor_parallel_size,
+    )
 
-    # Calculate audio end time
+    omni = Omni(
+        model=args.model,
+        parallel_config=parallel_config,
+    )
+
     audio_end_in_s = args.audio_start + args.audio_length
-
-    # Time profiling for generation
     generation_start = time.perf_counter()
 
-    # Generate audio
     outputs = omni.generate(
         {
             "prompt": args.prompt,
@@ -161,58 +162,31 @@ def main():
 
     generation_end = time.perf_counter()
     generation_time = generation_end - generation_start
-
     print(f"Total generation time: {generation_time:.2f} seconds")
 
-    # Process and save audio
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    suffix = output_path.suffix or ".wav"
-    stem = output_path.stem or "stable_audio_output"
-
-    # Extract audio from omni.generate() outputs
     if not outputs:
         raise ValueError("No output generated from omni.generate()")
 
     output = outputs[0]
-    if not hasattr(output, "request_output") or not output.request_output:
-        raise ValueError("No request_output found in OmniRequestOutput")
     request_output = output.request_output[0]
-    if not hasattr(request_output, "multimodal_output"):
-        raise ValueError("No multimodal_output found in request_output")
-
     audio = request_output.multimodal_output.get("audio")
-    if audio is None:
-        raise ValueError("No audio output found in request_output")
 
-    # Handle different output formats
     if isinstance(audio, torch.Tensor):
         audio = audio.cpu().float().numpy()
 
-    # Audio shape is typically [batch, channels, samples] or [channels, samples]
-    if audio.ndim == 3:
-        # [batch, channels, samples]
-        if args.num_waveforms <= 1:
-            audio_data = audio[0].T  # [samples, channels]
-            save_audio(audio_data, str(output_path), args.sample_rate)
-            print(f"Saved generated audio to {output_path}")
-        else:
-            for idx in range(audio.shape[0]):
-                audio_data = audio[idx].T  # [samples, channels]
-                save_path = output_path.parent / f"{stem}_{idx}{suffix}"
-                save_audio(audio_data, str(save_path), args.sample_rate)
-                print(f"Saved generated audio to {save_path}")
-    elif audio.ndim == 2:
-        # [channels, samples]
-        audio_data = audio.T  # [samples, channels]
-        save_audio(audio_data, str(output_path), args.sample_rate)
-        print(f"Saved generated audio to {output_path}")
-    else:
-        # [samples] - mono audio
-        save_audio(audio, str(output_path), args.sample_rate)
-        print(f"Saved generated audio to {output_path}")
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"\nGenerated {args.audio_length}s of audio at {args.sample_rate} Hz")
+    if audio.ndim == 3:
+        audio_data = audio[0].T
+        save_audio(audio_data, str(output_path), args.sample_rate)
+    elif audio.ndim == 2:
+        audio_data = audio.T
+        save_audio(audio_data, str(output_path), args.sample_rate)
+    else:
+        save_audio(audio, str(output_path), args.sample_rate)
+
+    print(f"Saved generated audio to {output_path}")
 
 
 if __name__ == "__main__":
