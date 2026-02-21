@@ -374,10 +374,11 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
 
             latents = randn_tensor(shape, generator=cpu_generator, device=torch.device("cpu"), dtype=dtype)
             latents = latents.to(device)
-
-            latents = latents * self.scheduler.init_noise_sigma
         else:
             latents = latents.to(device=device, dtype=dtype)
+
+        # Scale the noise by the scheduler's initial sigma.
+        latents = latents * self.scheduler.init_noise_sigma
 
         return latents
 
