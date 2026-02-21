@@ -370,8 +370,7 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
             if isinstance(generator, list):
                 cpu_generator = [torch.Generator("cpu").manual_seed(g.initial_seed()) for g in generator]
             else:
-                seed = generator.initial_seed() if generator is not None else 42
-                cpu_generator = torch.Generator("cpu").manual_seed(seed)
+                cpu_generator = torch.Generator("cpu").manual_seed(generator.initial_seed())
 
             latents = randn_tensor(shape, generator=cpu_generator, device=torch.device("cpu"), dtype=dtype)
             latents = latents.to(device)
