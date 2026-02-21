@@ -208,8 +208,6 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
     ) -> torch.Tensor:
         """Encode text prompt to embeddings."""
 
-        # Explicitly initialize variables to handle cases where CFG is False
-        # or when embeddings are passed directly, preventing downstream reference bugs.
         if negative_prompt_embeds is None:
             negative_prompt_embeds = None
         if negative_attention_mask is None:

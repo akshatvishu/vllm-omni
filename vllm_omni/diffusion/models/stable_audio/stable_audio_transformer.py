@@ -571,7 +571,14 @@ class StableAudioDiTModel(nn.Module):
         loaded_params: set[str] = set()
         checkpoint_keys_used: set[str] = set()
 
-        name_mapping = name_mapping = {
+        name_mapping = {
+            "timestep_proj.0.weight": "timestep_proj_0.weight",
+            "timestep_proj.0.bias": "timestep_proj_0.bias",
+            "timestep_proj.2.weight": "timestep_proj_2.weight",
+            "timestep_proj.2.bias": "timestep_proj_2.bias",
+            "global_proj.0.weight": "global_proj_0.weight",
+            "global_proj.2.weight": "global_proj_2.weight",
+            # legacy keys
             "timestep_proj.linear_1.weight": "timestep_proj_0.weight",
             "timestep_proj.linear_1.bias": "timestep_proj_0.bias",
             "timestep_proj.linear_2.weight": "timestep_proj_2.weight",
