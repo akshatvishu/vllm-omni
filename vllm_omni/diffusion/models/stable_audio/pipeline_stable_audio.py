@@ -436,6 +436,7 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
         # request's noise state and ignore the new seed.
         if hasattr(self.scheduler, "noise_sampler"):
             self.scheduler.noise_sampler = None
+
         # Fixes IPC (Inter-Process Communication) pointer crashes and SDE desynchronization.
         # When users pass a `cuda:0` generator to a distributed pipeline, `cuda:1` workers
         # cannot access the memory pointer, leading to unseeded fallbacks and audio static.
@@ -493,6 +494,8 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
                 f"Requested audio length ({audio_end_in_s - audio_start_in_s}s) exceeds "
                 f"maximum ({max_audio_length_in_s}s)"
             )
+
+        num_waveforms_per_prompt = getattr(req.sampling_params, "num_outputs_per_prompt", num_waveforms_per_prompt)
 
         waveform_start = int(audio_start_in_s * self.vae.config.sampling_rate)
         waveform_end = int(audio_end_in_s * self.vae.config.sampling_rate)
