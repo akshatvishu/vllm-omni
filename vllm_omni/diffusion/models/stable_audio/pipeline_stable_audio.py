@@ -381,6 +381,7 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
 
         return latents
 
+    @torch.inference_mode()
     def forward(
         self,
         req: OmniDiffusionRequest,
@@ -655,10 +656,22 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput):
         if output_type == "latent":
             audio = latents
         else:
-            # Convert latents to VAE dtype (VAE may use float32)
+            # Convert latents to VAE dtype (VAE uses float32)
             latents_for_vae = latents.to(dtype=self.vae.dtype)
-            audio = self.vae.decode(latents_for_vae).sample
 
+            # Memory Optimization: Decode latents in chunks to prevent VAE OOM spikes.
+            # Note: Safe default for 47s audio on T4.
+            chunk_size = 1
+            decoded_audio = []
+
+            for i in range(0, latents_for_vae.shape[0], chunk_size):
+                chunk = latents_for_vae[i : i + chunk_size]
+                decoded = self.vae.decode(chunk).sample
+                decoded_audio.append(decoded)
+
+            audio = torch.cat(decoded_audio, dim=0)
+
+        # Trim to requested length
         audio = audio[:, :, waveform_start:waveform_end]
 
         return DiffusionOutput(output=audio)
