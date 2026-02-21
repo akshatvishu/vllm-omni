@@ -14,7 +14,6 @@ from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from vllm.distributed import (
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
-    get_tp_group,
 )
 from vllm.logger import init_logger
 from vllm.model_executor.layers.linear import (
@@ -32,12 +31,15 @@ from vllm_omni.diffusion.data import OmniDiffusionConfig
 logger = init_logger(__name__)
 
 
-# ============================================================
-# Rotary Embedding
-# ============================================================
-
-
 def apply_rotary_emb_stable_audio(hidden_states, freqs_cis):
+    """
+    Applies Rotary Positional Embeddings (RoPE) to the hidden states.
+
+    Unlike standard RoPE which rotates the entire head dimension,
+    Stable Audio applies rotation only to the first `rotary_dim` elements of
+    the head, concatenating them with the remaining unchanged elements (`x_pass`).
+    Computation is forced to float32 to prevent precision degradation in trigonometric ops.
+    """
     cos, sin = freqs_cis
     rotary_dim = cos.shape[-1]
 
@@ -55,30 +57,43 @@ def apply_rotary_emb_stable_audio(hidden_states, freqs_cis):
     return torch.cat([x_rot, x_pass], dim=-1)
 
 
-# ============================================================
-# Gaussian Fourier Projection
-# ============================================================
-
-
 class StableAudioGaussianFourierProjection(nn.Module):
+    """
+    Gaussian Fourier embeddings for continuous noise levels (timesteps).
+
+    Projects scalar diffusion timesteps into higher-dimensional periodic
+    representations using randomly initialized Fourier features.
+    """
+
     def __init__(self, embedding_size=256, scale=1.0):
         super().__init__()
-        tp_group = get_tp_group()
-        device = tp_group.device
-
-        gen = torch.Generator(device=device).manual_seed(42)
+        # Standard initialization. Checkpoint load_weights will overwrite this.
         self.weight = nn.Parameter(
-            torch.randn(embedding_size, generator=gen) * scale,
+            torch.randn(embedding_size) * scale,
             requires_grad=False,
         )
-        # Add this diagnostic
 
     def forward(self, x):
-        x_proj = 2 * math.pi * x[:, None] @ self.weight[None, :]
-        return torch.cat([torch.cos(x_proj), torch.sin(x_proj)], dim=-1)
+        # Run Fourier projection in float32 safely to prevent precision overflow
+        x_fp32 = x.float()
+        fourier_weight = self.weight.float()
+        x_proj = 2 * math.pi * x_fp32[:, None] @ fourier_weight[None, :]
+
+        out = torch.cat([torch.cos(x_proj), torch.sin(x_proj)], dim=-1)
+        # Cast back to the model's original dtype
+        return out.to(x.dtype)
 
 
 class StableAudioSelfAttention(nn.Module):
+    """
+    Optimized self-attention for Stable Audio using vLLM layers.
+
+    Self-attention intentionally uses Multi-Head Attention (MHA),
+    meaning all heads are used for Q, K, and V. Grouped-Query Attention (GQA)
+    is strictly reserved for cross-attention. This matches the mathematical
+    architecture of the original Stable Audio Open model.
+    """
+
     def __init__(
         self,
         dim,
@@ -150,6 +165,15 @@ class StableAudioSelfAttention(nn.Module):
 
 
 class StableAudioCrossAttention(nn.Module):
+    """
+    Optimized cross-attention for Stable Audio using vLLM layers.
+
+    Cross-attention utilizes Grouped-Query Attention (GQA).
+    To support Tensor Parallelism with the SDPA backend, the
+    sharded (local) K/V heads are manually expanded to match the local Q heads
+    before computing attention.
+    """
+
     def __init__(
         self,
         dim,
@@ -177,8 +201,6 @@ class StableAudioCrossAttention(nn.Module):
         tp_size = get_tensor_model_parallel_world_size()
         self.local_kv_heads = num_key_value_attention_heads // tp_size
 
-        tp_size = get_tensor_model_parallel_world_size()
-
         self.attn = Attention(
             num_heads=self.local_heads,
             head_size=attention_head_dim,
@@ -198,33 +220,19 @@ class StableAudioCrossAttention(nn.Module):
         B, Sq, _ = hidden_states.shape
         Sk = encoder_hidden_states.shape[1]
 
-        # ----------------------------------------------------
-        # 1. Projections
-        # ----------------------------------------------------
         q, _ = self.to_q(hidden_states)
 
         kv, _ = self.to_kv(encoder_hidden_states)
 
-        # Split KV
         kv_size = self.local_kv_heads * self.head_dim
         k, v = kv.split([kv_size, kv_size], dim=-1)
 
-        # ----------------------------------------------------
-        # 2. Reshape into head format (LOCAL heads)
-        # ----------------------------------------------------
         q = q.view(B, Sq, self.local_heads, self.head_dim)
         k = k.view(B, Sk, self.local_kv_heads, self.head_dim)
         v = v.view(B, Sk, self.local_kv_heads, self.head_dim)
 
-        # ----------------------------------------------------
-        # 3. GQA expansion (local version of original logic)
-        #
-        # Original model:
-        #   Expand KV to match full Q heads.
-        #
-        # TP version:
-        #   Expand LOCAL KV to match LOCAL Q heads.
-        # ----------------------------------------------------
+        # GQA expansion
+        # Expand LOCAL KV to match LOCAL Q heads.
         if self.local_kv_heads != self.local_heads:
             num_groups = self.local_heads // self.local_kv_heads
 
@@ -234,16 +242,11 @@ class StableAudioCrossAttention(nn.Module):
             v = v.unsqueeze(3).expand(-1, -1, -1, num_groups, -1)
             v = v.reshape(B, Sk, self.local_heads, self.head_dim)
 
-        # ----------------------------------------------------
-        # 4. Attention
-        # ----------------------------------------------------
         hidden_states = self.attn(q, k, v)
 
         hidden_states = hidden_states.view(B, Sq, -1)
 
-        # ----------------------------------------------------
-        # 5. Output projection (RowParallel → all-reduce)
-        # ----------------------------------------------------
+        # Output projection (RowParallel → all-reduce)
         hidden_states, _ = self.to_out[0](hidden_states)
 
         hidden_states = self.to_out[1](hidden_states)
@@ -252,6 +255,18 @@ class StableAudioCrossAttention(nn.Module):
 
 
 class StableAudioFeedForward(nn.Module):
+    """
+    Tensor-parallel implementation of the SwiGLU feed-forward network.
+
+    To reduce GPU communication overhead, the original separate projection
+    and gate linear layers are fused into a single `MergedColumnParallelLinear`
+    layer. The combined output is chunked into (hidden, gate), the gate is
+    activated with SiLU, and the elementwise product implements SwiGLU.
+
+    The final projection uses `RowParallelLinear`, which performs the
+    cross-rank reduction required in tensor parallelism.
+    """
+
     def __init__(self, dim, inner_dim):
         super().__init__()
 
@@ -289,6 +304,15 @@ class StableAudioFeedForward(nn.Module):
 
 
 class StableAudioDiTBlock(nn.Module):
+    """
+    A single Diffusion Transformer (DiT) block for Stable Audio Open.
+
+    Applies three components sequentially with residual connections:
+    1. Self-attention (multi-head, with rotary embeddings)
+    2. Cross-attention (grouped-query, attends to text/duration conditioning)
+    3. Feed-forward (SwiGLU, expands dimension by `ff_mult`)
+    """
+
     def __init__(
         self,
         dim,
@@ -301,6 +325,7 @@ class StableAudioDiTBlock(nn.Module):
         super().__init__()
 
         self.norm1 = nn.LayerNorm(dim)
+        # Self-attention in Stable Audio Open uses MHA (num_heads == num_kv_heads)
         self.attn1 = StableAudioSelfAttention(
             dim,
             num_attention_heads,
@@ -340,6 +365,17 @@ class StableAudioDiTBlock(nn.Module):
 
 
 class StableAudioDiTModel(nn.Module):
+    """
+    Diffusion Transformer (DiT) model for Stable Audio Open.
+
+    Processes audio latents of shape [B, C, T], prepends global and
+    timestep embeddings, applies a stack of DiT blocks, and projects
+    back to the original channel dimension.
+
+    Linear projections are implemented using tensor-parallel vLLM
+    layers to support multi-GPU execution.
+    """
+
     def __init__(
         self,
         od_config: OmniDiffusionConfig | None = None,
@@ -359,8 +395,15 @@ class StableAudioDiTModel(nn.Module):
 
         tp_size = get_tensor_model_parallel_world_size()
 
-        assert num_attention_heads % tp_size == 0
-        assert num_key_value_attention_heads % tp_size == 0
+        if num_attention_heads % tp_size != 0:
+            raise ValueError(
+                f"num_attention_heads ({num_attention_heads}) must be divisible by tensor parallel size ({tp_size})."
+            )
+        if num_key_value_attention_heads % tp_size != 0:
+            raise ValueError(
+                f"num_key_value_attention_heads ({num_key_value_attention_heads}) must be "
+                f"divisible by tensor parallel size ({tp_size})."
+            )
 
         self.inner_dim = num_attention_heads * attention_head_dim
 
@@ -412,30 +455,26 @@ class StableAudioDiTModel(nn.Module):
             self.inner_dim,
             bias=False,
             input_is_parallel=True,
-            reduce_results=True,  # must match timestep_proj_2 — both FULL for the add + cat
+            # Force All-Reduce to full-dimension. Must match timestep_proj_2
+            # so they can be added and concatenated with the un-sharded global token.
+            reduce_results=True,
         )
-
-        # Cross attention conditioning (not TP — encoder states are replicated)
 
         self.cross_attention_proj = nn.Sequential(
-            ReplicatedLinear(cross_attention_input_dim, cross_attention_dim, bias=False, return_bias=False),
+            nn.Linear(cross_attention_input_dim, cross_attention_dim, bias=False),
             nn.SiLU(),
-            ReplicatedLinear(cross_attention_dim, cross_attention_dim, bias=False, return_bias=False),
+            nn.Linear(cross_attention_dim, cross_attention_dim, bias=False),
         )
-        # -----------------------------
-        # Input projection
-        # -----------------------------
+
         self.preprocess_conv = nn.Conv1d(in_channels, in_channels, 1, bias=False)
         self.proj_in = ColumnParallelLinear(
             in_channels,
             self.inner_dim,
             bias=False,
-            gather_output=True,  # must be FULL to cat with global_hidden_states (also FULL after reduce_results=True)
+            # Force full-dimension output so it can be concatenated with the full global token
+            gather_output=True,
         )
 
-        # -----------------------------
-        # Transformer blocks
-        # -----------------------------
         self.transformer_blocks = nn.ModuleList(
             [
                 StableAudioDiTBlock(
@@ -449,9 +488,6 @@ class StableAudioDiTModel(nn.Module):
             ]
         )
 
-        # -----------------------------
-        # Output projection
-        # -----------------------------
         # Each block's to_out RowParallelLinear all-reduces back to FULL dim,
         # so proj_out receives a FULL tensor → input_is_parallel=False.
         self.proj_out = ReplicatedLinear(
@@ -462,10 +498,6 @@ class StableAudioDiTModel(nn.Module):
 
         self.postprocess_conv = nn.Conv1d(out_channels, out_channels, 1, bias=False)
 
-    # ======================================================
-    # Forward
-    # ======================================================
-
     def forward(
         self,
         hidden_states,
@@ -475,90 +507,53 @@ class StableAudioDiTModel(nn.Module):
         rotary_embedding=None,
         return_dict=True,
     ):
-        tp_size = get_tensor_model_parallel_world_size()
-        tp_group = get_tp_group() if tp_size > 1 else None
-
-        # ------------------------------------------
         # Cross attention conditioning (replicated)
-        # ------------------------------------------
         cross_attention_hidden_states = self.cross_attention_proj(encoder_hidden_states)
 
-        # ------------------------------------------
-        # Time embedding (safe fp32 Fourier)
-        # ------------------------------------------
+        # Time embedding
+        time_hidden_states = self.time_proj(timestep)
 
-        # Save original dtype
-        model_dtype = hidden_states.dtype
-
-        # Run Fourier projection in float32 safely
-        timestep_fp32 = timestep.float()
-
-        # Manually compute Fourier with casted weight
-        fourier_weight = self.time_proj.weight.float()
-        x_proj = 2 * math.pi * timestep_fp32[:, None] @ fourier_weight[None, :]
-        time_hidden_states = torch.cat([torch.cos(x_proj), torch.sin(x_proj)], dim=-1)
-
-        # Cast back to model dtype
-        time_hidden_states = time_hidden_states.to(model_dtype)
-
-        # Continue normal MLP
+        # MLP
         time_hidden_states, _ = self.timestep_proj_0(time_hidden_states)
         time_hidden_states = self.activation(time_hidden_states)
         time_hidden_states, _ = self.timestep_proj_2(time_hidden_states)
 
-        # ------------------------------------------
         # Global embedding  [B, 1, global_dim] → sharded [B, 1, shard_dim]
-        # ------------------------------------------
         global_hidden_states, _ = self.global_proj_0(global_hidden_states)
 
         global_hidden_states = self.activation(global_hidden_states)
         global_hidden_states, _ = self.global_proj_2(global_hidden_states)
 
         # Invariant: timestep and global are FULL (reduce_results=True), proj_in is FULL (gather_output=True)
-        assert time_hidden_states.shape[-1] == self.inner_dim
-        assert global_hidden_states.shape[-1] == self.inner_dim
+        if time_hidden_states.shape[-1] != self.inner_dim:
+            raise RuntimeError(
+                f"time_hidden_states dimension mismatch: expected {self.inner_dim}, got {time_hidden_states.shape[-1]}"
+            )
+        if global_hidden_states.shape[-1] != self.inner_dim:
+            raise RuntimeError(
+                f"global_hidden_states dimension mismatch: expected {self.inner_dim}, "
+                f"got {global_hidden_states.shape[-1]}"
+            )
 
-        # Combine time into global token
         global_hidden_states = global_hidden_states + time_hidden_states.unsqueeze(1)
-        # Fixes floating-point non-associativity accumulation drift.
-        # Tensor Parallel `All-Reduce` sums matrices across GPUs. Because FP16/FP32
-        # addition is order-dependent, a microscopic precision error occurs on Rank 1.
-        # We broadcast the identical Rank 0 tensor to kill the SDE butterfly effect.
-        if tp_group is not None:
-            tp_group.broadcast(global_hidden_states, src=0)
-        # ------------------------------------------
+
         # Audio latent  [B, C, T] → sharded [B, T, shard_dim]
-        # ------------------------------------------
         hidden_states = self.preprocess_conv(hidden_states) + hidden_states
         hidden_states = hidden_states.transpose(1, 2)
 
         hidden_states, _ = self.proj_in(hidden_states)
 
-        # Prepend global token: [B, 1+T, inner_dim] — already FULL, no all-gather needed
+        # Prepend global token: [B, 1+T, inner_dim]
         hidden_states = torch.cat([global_hidden_states, hidden_states], dim=1)
 
-        # ------------------------------------------
-        # Transformer blocks
-        # hidden_states is FULL [B, 1+T, inner_dim] after all-gather above.
-        # Each block: LayerNorm(FULL) → attn/ff sharded → to_out all-reduce → FULL
-        # ------------------------------------------
-
-        for i, block in enumerate(self.transformer_blocks):
-            # ---- Log block 0 input (once) ----
-
+        for block in self.transformer_blocks:
             hidden_states = block(
                 hidden_states,
                 cross_attention_hidden_states,
                 rotary_embedding,
             )
-            # Re-synchronize state before the next block's LayerNorm consumes it
-            if tp_group is not None:
-                tp_group.broadcast(hidden_states, src=0)
 
-        # ------------------------------------------
         # Output projection  FULL [B, 1+T, inner_dim] → [B, 1+T, out_channels]
-        # ------------------------------------------
-
         hidden_states, _ = self.proj_out(hidden_states)
 
         # Drop global token, restore [B, C, T]
