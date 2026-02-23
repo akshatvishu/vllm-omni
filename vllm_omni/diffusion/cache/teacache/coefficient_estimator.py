@@ -189,12 +189,15 @@ class TeaCacheCoefficientEstimator:
 
     def collect_from_prompt(self, prompt: str, **generate_kwargs):
         self.hook.start_collection()
+        from vllm_omni.diffusion.data import OmniDiffusionSamplingParams
         from vllm_omni.diffusion.request import OmniDiffusionRequest
 
         req = OmniDiffusionRequest(
-            prompt=prompt,
-            num_inference_steps=generate_kwargs.get("num_inference_steps", 20),
-            seed=generate_kwargs.get("seed", 42),
+            prompts=[prompt],
+            sampling_params=OmniDiffusionSamplingParams(
+                num_inference_steps=generate_kwargs.get("num_inference_steps", 20),
+                seed=generate_kwargs.get("seed", 42),
+            ),
         )
         self.pipeline.forward(req)
         trajectory = self.hook.stop_collection()
