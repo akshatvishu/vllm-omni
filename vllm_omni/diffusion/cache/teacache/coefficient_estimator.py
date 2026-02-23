@@ -13,6 +13,7 @@ from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.hooks import HookRegistry, ModelHook
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.models.bagel.pipeline_bagel import BagelPipeline
+from vllm_omni.diffusion.models.stable_audio.pipeline_stable_audio import StableAudioPipeline
 
 
 class DataCollectionHook(ModelHook):
@@ -86,16 +87,11 @@ class StableAudioAdapter:
     """Adapter for Stable Audio Open 1.0 coefficient estimation."""
 
     @staticmethod
-    def load_pipeline(model_path: str, device: str = "cuda", dtype: torch.dtype = torch.float16) -> Any:
-        from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
-        from vllm_omni.diffusion.models.stable_audio.pipeline_stable_audio import StableAudioPipeline
-
+    def load_pipeline(model_path: str, device: str = "cuda", dtype: torch.dtype = torch.bfloat16) -> Any:
         od_config = OmniDiffusionConfig.from_kwargs(model=model_path, dtype=dtype)
         pipeline = StableAudioPipeline(od_config=od_config)
-
-        loader = DiffusersPipelineLoader(pipeline)
-        loader.load_weights()
-
+        loader = DiffusersPipelineLoader(LoadConfig())
+        loader.load_weights(pipeline)
         pipeline.to(device)
         return pipeline
 

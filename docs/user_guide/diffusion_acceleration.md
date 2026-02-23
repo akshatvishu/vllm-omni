@@ -61,9 +61,9 @@ The following table shows which models are currently supported by each accelerat
 
 ### AudioGen
 
-| Model | Model Identifier | TeaCache | Cache-DiT | Ulysses-SP | Ring-Attention |CFG-Parallel |
-|-------|------------------|:--------:|:---------:|:----------:|:--------------:|:----------------:|
-| **Stable-Audio-Open** | `stabilityai/stable-audio-open-1.0` | ✅ | ❌| ❓ | ❓ | ❌ |
+| Model                  | Model Identifier                         | TeaCache | Cache-DiT | Ulysses-SP | Ring-Attention | CFG-Parallel |
+|------------------------|------------------------------------------|:--------:|:---------:|:----------:|:--------------:|:------------:|
+| **Stable-Audio-Open**  | `stabilityai/stable-audio-open-1.0`      |    ✅    |           |            |                |              |
 
 ## Performance Benchmarks
 
