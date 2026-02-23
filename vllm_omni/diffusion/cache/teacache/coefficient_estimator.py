@@ -14,6 +14,8 @@ from vllm_omni.diffusion.hooks import HookRegistry, ModelHook
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.models.bagel.pipeline_bagel import BagelPipeline
 from vllm_omni.diffusion.models.stable_audio.pipeline_stable_audio import StableAudioPipeline
+from vllm_omni.diffusion.request import OmniDiffusionRequest
+from vllm_omni.inputs.data import OmniDiffusionSamplingParams
 
 
 class DataCollectionHook(ModelHook):
@@ -189,8 +191,6 @@ class TeaCacheCoefficientEstimator:
 
     def collect_from_prompt(self, prompt: str, **generate_kwargs):
         self.hook.start_collection()
-        from vllm_omni.diffusion.data import OmniDiffusionSamplingParams
-        from vllm_omni.diffusion.request import OmniDiffusionRequest
 
         req = OmniDiffusionRequest(
             prompts=[prompt],
