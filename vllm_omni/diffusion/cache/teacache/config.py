@@ -37,9 +37,14 @@ _MODEL_COEFFICIENTS = {
         3.20000000e00,
         -2.00000000e-02,
     ],
-    # TODO: Estimate TeaCache polynomial coefficients for StableAudioDiTModel.
-    # Placeholder identity coefficients used for functional validation only.
-    "StableAudioDiTModel": [0.0, 0.0, 0.0, 1.0, 0.0],
+    # Estimated TeaCache polynomial coefficients for StableAudioDiTModel.
+    "StableAudioDiTModel": [
+        121.77490545701518,
+        -153.7449426160371,
+        68.05368574596551,
+        -12.281286412689623,
+        1.0733905006198015,
+    ],
 }
 
 
