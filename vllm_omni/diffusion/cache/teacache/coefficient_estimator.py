@@ -195,7 +195,6 @@ class TeaCacheCoefficientEstimator:
 
     def collect_from_prompt(self, prompt: str, **generate_kwargs):
         self.hook.start_collection()
-
         req = OmniDiffusionRequest(
             prompts=[prompt],
             sampling_params=OmniDiffusionSamplingParams(
@@ -203,10 +202,12 @@ class TeaCacheCoefficientEstimator:
                 seed=generate_kwargs.get("seed", 42),
             ),
         )
-        self.pipeline.forward(req)
+        with torch.no_grad():
+            self.pipeline.forward(req)
         trajectory = self.hook.stop_collection()
         if trajectory:
             self.collected_data.append(trajectory)
+        torch.cuda.empty_cache()
 
     def estimate(self, poly_order: int = 4) -> list[float]:
         """Estimate polynomial coefficients from collected data.
