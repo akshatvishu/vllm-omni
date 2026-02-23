@@ -393,27 +393,20 @@ def enable_cache_for_stable_audio_open(pipeline: Any, cache_config: Any) -> Call
             num_inference_steps: New number of inference steps.
             verbose: Whether to log refresh operations.
         """
-        if cache_config.scm_steps_mask_policy is None:
+        # Bypass SCM for step counts that don't support predefined masks (e.g., vLLM's 1-step dummy run)
+        scm_supported_steps = num_inference_steps >= 8 or num_inference_steps in (4, 6)
+
+        if cache_config.scm_steps_mask_policy is None or not scm_supported_steps:
             cache_dit.refresh_context(pipeline.transformer, num_inference_steps=num_inference_steps, verbose=verbose)
         else:
-            # 1. Generate the mask explicitly to log it
-            generated_mask = cache_dit.steps_mask(
-                mask_policy=cache_config.scm_steps_mask_policy,
-                total_steps=num_inference_steps,
-            )
-
-            # 2. Log SCM debug information
-            logger.info(f"DEBUG SCM: Total Steps={num_inference_steps}")
-            logger.info(f"DEBUG SCM: Generated Mask={generated_mask}")
-
-            # 3. FIX: Use the existing db_cache_config from the outer scope!
             updated_scm_config = db_cache_config.reset(
                 num_inference_steps=num_inference_steps,
-                steps_computation_mask=generated_mask,
+                steps_computation_mask=cache_dit.steps_mask(
+                    mask_policy=cache_config.scm_steps_mask_policy,
+                    total_steps=num_inference_steps,
+                ),
                 steps_computation_policy=cache_config.scm_steps_policy,
             )
-
-            logger.info(f"DEBUG SCM: Active Warmup Steps in Config={updated_scm_config.max_warmup_steps}")
 
             cache_dit.refresh_context(
                 pipeline.transformer,
