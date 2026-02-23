@@ -346,6 +346,7 @@ def enable_cache_for_flux(pipeline: Any, cache_config: Any) -> Callable[[int], N
     return refresh_cache_context
 
 
+
 def enable_cache_for_stable_audio_open(pipeline: Any, cache_config: Any) -> Callable[[int], None]:
     """Enable cache-dit for Stable Audio Open pipeline.
 
@@ -363,13 +364,6 @@ def enable_cache_for_stable_audio_open(pipeline: Any, cache_config: Any) -> Call
         taylorseer_order = cache_config.taylorseer_order
         calibrator_config = TaylorSeerCalibratorConfig(taylorseer_order=taylorseer_order)
         logger.info(f"TaylorSeer enabled with order={taylorseer_order}")
-
-    logger.info(
-        f"Enabling cache-dit on Stable Audio transformer: "
-        f"Fn={db_cache_config.Fn_compute_blocks}, "
-        f"Bn={db_cache_config.Bn_compute_blocks}, "
-        f"W={db_cache_config.max_warmup_steps}, "
-    )
 
     # StableAudio is officially registered in CacheDiT as Pattern_3:
     # https://github.com/vipshop/cache-dit/blob/69e82bd1/src/cache_dit/caching/block_adapters/__init__.py#L562
@@ -403,16 +397,28 @@ def enable_cache_for_stable_audio_open(pipeline: Any, cache_config: Any) -> Call
         if cache_config.scm_steps_mask_policy is None:
             cache_dit.refresh_context(pipeline.transformer, num_inference_steps=num_inference_steps, verbose=verbose)
         else:
+            # 1. Generate the mask explicitly to log it
+            generated_mask = cache_dit.steps_mask(
+                mask_policy=cache_config.scm_steps_mask_policy,
+                total_steps=num_inference_steps,
+            )
+
+            # 2. Log SCM debug information
+            logger.info(f"DEBUG SCM: Total Steps={num_inference_steps}")
+            logger.info(f"DEBUG SCM: Generated Mask={generated_mask}")
+
+            # 3. FIX: Use the existing db_cache_config from the outer scope!
+            updated_scm_config = db_cache_config.reset(
+                num_inference_steps=num_inference_steps,
+                steps_computation_mask=generated_mask,
+                steps_computation_policy=cache_config.scm_steps_policy,
+            )
+
+            logger.info(f"DEBUG SCM: Active Warmup Steps in Config={updated_scm_config.max_warmup_steps}")
+
             cache_dit.refresh_context(
                 pipeline.transformer,
-                cache_config=DBCacheConfig().reset(
-                    num_inference_steps=num_inference_steps,
-                    steps_computation_mask=cache_dit.steps_mask(
-                        mask_policy=cache_config.scm_steps_mask_policy,
-                        total_steps=num_inference_steps,
-                    ),
-                    steps_computation_policy=cache_config.scm_steps_policy,
-                ),
+                cache_config=updated_scm_config,
                 verbose=verbose,
             )
 
