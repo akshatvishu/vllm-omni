@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import torch
 from vllm.config import LoadConfig
+from vllm.utils.torch_utils import set_default_torch_dtype
 
 from vllm_omni.diffusion.cache.teacache.extractors import get_extractor
 from vllm_omni.diffusion.data import OmniDiffusionConfig
@@ -89,13 +90,17 @@ class StableAudioAdapter:
     """Adapter for Stable Audio Open 1.0 coefficient estimation."""
 
     @staticmethod
-    def load_pipeline(model_path: str, device: str = "cuda", dtype: torch.dtype = torch.bfloat16) -> Any:
+    def load_pipeline(model_path: str, device: str = "cuda", dtype: torch.dtype = torch.float16) -> Any:
         od_config = OmniDiffusionConfig.from_kwargs(model=model_path, dtype=dtype)
+
+    # Strictly necessary because we bypass loader.load_model()
+    with set_default_torch_dtype(dtype):
         pipeline = StableAudioPipeline(od_config=od_config)
-        loader = DiffusersPipelineLoader(LoadConfig())
-        loader.load_weights(pipeline)
-        pipeline.to(device)
-        return pipeline
+
+    loader = DiffusersPipelineLoader(LoadConfig())
+    loader.load_weights(pipeline)
+    pipeline.to(device)
+    return pipeline
 
     @staticmethod
     def get_transformer(pipeline: Any) -> tuple[Any, str]:
