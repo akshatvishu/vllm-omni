@@ -591,6 +591,12 @@ def extract_stable_audio_context(
     if not hasattr(module, "transformer_blocks") or len(module.transformer_blocks) == 0:
         raise ValueError("Module must have transformer_blocks attribute with at least one block")
 
+    # Cast inputs to match model weights dtype
+    hidden_states = hidden_states.to(module.dtype)
+    encoder_hidden_states = encoder_hidden_states.to(module.dtype)
+    if global_hidden_states is not None:
+        global_hidden_states = global_hidden_states.to(module.dtype)
+
     cross_attention_hidden_states = module.cross_attention_proj(encoder_hidden_states)
     global_hidden_states = module.global_proj(global_hidden_states)
     time_hidden_states = module.timestep_proj(module.time_proj(timestep.to(module.dtype)))
