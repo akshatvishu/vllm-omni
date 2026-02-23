@@ -93,14 +93,14 @@ class StableAudioAdapter:
     def load_pipeline(model_path: str, device: str = "cuda", dtype: torch.dtype = torch.float16) -> Any:
         od_config = OmniDiffusionConfig.from_kwargs(model=model_path, dtype=dtype)
 
-    # Strictly necessary because we bypass loader.load_model()
-    with set_default_torch_dtype(dtype):
-        pipeline = StableAudioPipeline(od_config=od_config)
+        # Strictly necessary because we bypass loader.load_model()
+        with set_default_torch_dtype(dtype):
+            pipeline = StableAudioPipeline(od_config=od_config)
 
-    loader = DiffusersPipelineLoader(LoadConfig())
-    loader.load_weights(pipeline)
-    pipeline.to(device)
-    return pipeline
+        loader = DiffusersPipelineLoader(LoadConfig())
+        loader.load_weights(pipeline)
+        pipeline.to(device)
+        return pipeline
 
     @staticmethod
     def get_transformer(pipeline: Any) -> tuple[Any, str]:
