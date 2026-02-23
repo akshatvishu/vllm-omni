@@ -346,7 +346,6 @@ def enable_cache_for_flux(pipeline: Any, cache_config: Any) -> Callable[[int], N
     return refresh_cache_context
 
 
-
 def enable_cache_for_stable_audio_open(pipeline: Any, cache_config: Any) -> Callable[[int], None]:
     """Enable cache-dit for Stable Audio Open pipeline.
 
