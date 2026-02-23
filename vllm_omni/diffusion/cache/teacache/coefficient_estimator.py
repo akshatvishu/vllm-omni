@@ -36,16 +36,15 @@ class DataCollectionHook(ModelHook):
 
     def new_forward(self, module: torch.nn.Module, *args: Any, **kwargs: Any) -> Any:
         ctx = self.extractor_fn(module, *args, **kwargs)
-        modulated_input_cpu = ctx.modulated_input.detach().cpu().numpy()
+        modulated_input_cpu = ctx.modulated_input.detach().float().cpu().numpy()
 
         outputs = ctx.run_transformer_blocks()
         ctx.hidden_states = outputs[0]
         if len(outputs) > 1 and ctx.encoder_hidden_states is not None:
             ctx.encoder_hidden_states = outputs[1]
 
-        model_output_cpu = ctx.hidden_states.detach().cpu().numpy()
+        model_output_cpu = ctx.hidden_states.detach().float().cpu().numpy()
         self.current_trajectory.append((modulated_input_cpu, model_output_cpu))
-
         return ctx.postprocess(ctx.hidden_states)
 
     def start_collection(self):
