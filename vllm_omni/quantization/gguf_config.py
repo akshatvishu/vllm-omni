@@ -61,15 +61,26 @@ class DiffusionGGUFLinearMethod(GGUFLinearMethod):
 
 
 class DiffusionGGUFConfig(GGUFConfig):
-    """GGUF config that carries gguf_model path and uses dequant+GEMM."""
+    """GGUF config that carries GGUF refs and uses dequant+GEMM.
+
+    Args:
+        gguf_model: GGUF model path or HF reference (repo/file or repo:quant_type)
+        gguf_models: Optional per-source GGUF refs keyed by component subfolder
+            such as `transformer` or `transformer_2`.
+        unquantized_modules: Optional list of module name patterns to skip GGUF
+            quantization. Note: diffusion linear layers often use short prefixes
+            (e.g., "to_qkv"), so these patterns are matched as substrings.
+    """
 
     def __init__(
         self,
         gguf_model: str | None = None,
+        gguf_models: dict[str, str] | None = None,
         unquantized_modules: list[str] | None = None,
     ) -> None:
         super().__init__(unquantized_modules=unquantized_modules or [])
         self.gguf_model = gguf_model
+        self.gguf_models = dict(gguf_models) if gguf_models is not None else None
 
     def get_quant_method(self, layer: torch.nn.Module, prefix: str) -> QuantizeMethodBase | None:
         if isinstance(layer, LinearBase):

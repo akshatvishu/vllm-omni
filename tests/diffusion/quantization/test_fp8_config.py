@@ -399,3 +399,78 @@ def test_multi_component_model_routing():
                 assert resolved.get_name() == "fp8"
             elif name.startswith("vae"):
                 assert resolved is None, f"{name} should NOT be quantized"
+
+
+def test_gguf_config_creation_with_per_source_models():
+    """Test GGUF config can carry both fallback and per-source GGUF refs."""
+    from vllm_omni.quantization import build_quant_config
+
+    config = build_quant_config(
+        {
+            "method": "gguf",
+            "gguf_model": "repo/default.gguf",
+            "gguf_models": {
+                "transformer": "repo/high.gguf",
+                "transformer_2": "repo/low.gguf",
+            },
+        }
+    )
+
+    assert config is not None
+    assert config.get_name() == "gguf"
+    assert config.gguf_model == "repo/default.gguf"
+    assert config.gguf_models == {
+        "transformer": "repo/high.gguf",
+        "transformer_2": "repo/low.gguf",
+    }
+
+
+def test_gguf_quantization_integration_with_per_source_models():
+    """Test gguf_models flow through OmniDiffusionConfig without mutating input."""
+    from vllm_omni.diffusion.data import OmniDiffusionConfig
+
+    original_dict = {
+        "method": "gguf",
+        "gguf_model": "repo/default.gguf",
+        "gguf_models": {
+            "transformer": "repo/high.gguf",
+            "transformer_2": "repo/low.gguf",
+        },
+    }
+    original_copy = {
+        "method": "gguf",
+        "gguf_model": "repo/default.gguf",
+        "gguf_models": {
+            "transformer": "repo/high.gguf",
+            "transformer_2": "repo/low.gguf",
+        },
+    }
+
+    config = OmniDiffusionConfig(model="test", quantization_config=original_dict)
+
+    assert config.quantization_config is not None
+    assert config.quantization_config.get_name() == "gguf"
+    assert config.quantization_config.gguf_model == "repo/default.gguf"
+    assert config.quantization_config.gguf_models == {
+        "transformer": "repo/high.gguf",
+        "transformer_2": "repo/low.gguf",
+    }
+    assert original_dict == original_copy
+
+
+def test_gguf_config_copies_per_source_mapping():
+    """Test gguf_models are copied rather than retained by reference."""
+    from vllm_omni.quantization import build_quant_config
+
+    gguf_models = {
+        "transformer": "repo/high.gguf",
+        "transformer_2": "repo/low.gguf",
+    }
+
+    config = build_quant_config({"method": "gguf", "gguf_models": gguf_models})
+    gguf_models["transformer"] = "repo/changed.gguf"
+
+    assert config.gguf_models == {
+        "transformer": "repo/high.gguf",
+        "transformer_2": "repo/low.gguf",
+    }
