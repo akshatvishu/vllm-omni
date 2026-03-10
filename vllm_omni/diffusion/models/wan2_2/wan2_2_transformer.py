@@ -995,7 +995,7 @@ class WanTransformer3DModel(nn.Module):
 
             # Handle QKV fusion
             for param_name, weight_name, shard_id in stacked_params_mapping:
-                if weight_name not in original_name:
+                if weight_name not in original_name or param_name in original_name:
                     continue
                 lookup_name = original_name.replace(weight_name, param_name)
                 param = params_dict[lookup_name]
