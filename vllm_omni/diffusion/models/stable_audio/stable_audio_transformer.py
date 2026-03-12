@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 """
-Stable Audio DiT Model (Tensor-Parallel version)
+Stable Audio DiT Model for vLLM-Omni.
 """
 
 import math
@@ -192,7 +192,7 @@ class StableAudioCrossAttention(nn.Module):
         self.to_q = ColumnParallelLinear(dim, num_attention_heads * attention_head_dim, bias=False, gather_output=False)
         self.to_kv = MergedColumnParallelLinear(
             cross_attention_dim,
-            [kv_size, kv_size],  # [K_size, V_size]
+            [kv_size, kv_size],
             bias=False,
             gather_output=False,
         )
@@ -438,9 +438,9 @@ class StableAudioDiTModel(nn.Module):
         self.timestep_proj_2 = RowParallelLinear(
             self.inner_dim,
             self.inner_dim,
-            bias=True,  # checkpoint has bias; vLLM requires reduce_results=True with bias
+            bias=True,
             input_is_parallel=True,
-            reduce_results=True,  # must be True when bias=True (vLLM enforces this)
+            reduce_results=True,
         )
 
         # Global embedding
@@ -569,7 +569,6 @@ class StableAudioDiTModel(nn.Module):
 
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
-        checkpoint_keys_used: set[str] = set()
 
         name_mapping = {
             "timestep_proj.0.weight": "timestep_proj_0.weight",
@@ -597,16 +596,12 @@ class StableAudioDiTModel(nn.Module):
 
         qkv_buffer: dict[str, dict[str, torch.Tensor]] = {}
 
-        all_checkpoint_keys: set[str] = set()  # track all keys seen to detect unexpected ones
-
         for name, loaded_weight in weights:
-            all_checkpoint_keys.add(name)
             mapped_name = remap_name(name)
 
             # Self-attention QKV fusion
 
             if ".attn1.to_" in mapped_name and any(x in mapped_name for x in ("q.", "k.", "v.")):
-                checkpoint_keys_used.add(name)
                 shard_id = "q" if ".to_q." in mapped_name else ("k" if ".to_k." in mapped_name else "v")
                 fused_name = mapped_name.replace(f".to_{shard_id}.", ".to_qkv.")
                 qkv_buffer.setdefault(fused_name, {})[shard_id] = loaded_weight
@@ -634,7 +629,6 @@ class StableAudioDiTModel(nn.Module):
             #  Cross-attention Q
 
             if ".attn2.to_q." in mapped_name:
-                checkpoint_keys_used.add(name)
                 if mapped_name not in params_dict:
                     logger.error(f"[ATTN2-Q] Missing param {mapped_name}")
                     continue
@@ -647,7 +641,6 @@ class StableAudioDiTModel(nn.Module):
             #  Cross-attention KV fusion
 
             if any(f".attn2.{x}.weight" in mapped_name for x in ("to_k", "to_v")):
-                checkpoint_keys_used.add(name)
                 shard_id = 0 if ".to_k." in mapped_name else 1
                 fused_name = mapped_name.replace(".to_k.weight", ".to_kv.weight").replace(
                     ".to_v.weight", ".to_kv.weight"
@@ -665,7 +658,6 @@ class StableAudioDiTModel(nn.Module):
             #  GLU FFN
 
             if ".ff.net.0.proj." in mapped_name:
-                checkpoint_keys_used.add(name)
                 if mapped_name not in params_dict:
                     continue
                 param = params_dict[mapped_name]
@@ -682,7 +674,6 @@ class StableAudioDiTModel(nn.Module):
             # Standard loader
 
             if mapped_name in params_dict:
-                checkpoint_keys_used.add(name)
                 param = params_dict[mapped_name]
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
                 weight_loader(param, loaded_weight)
