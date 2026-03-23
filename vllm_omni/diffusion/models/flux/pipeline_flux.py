@@ -18,14 +18,18 @@ from diffusers.schedulers.scheduling_flow_match_euler_discrete import (
 )
 from diffusers.utils.torch_utils import randn_tensor
 from torch import nn
-from transformers import CLIPTextModel, CLIPTokenizer, T5EncoderModel, T5TokenizerFast
+from transformers import AutoConfig, CLIPTextModel, CLIPTokenizer, T5TokenizerFast
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
+from vllm_omni.diffusion.distributed.cfg_parallel import CFGParallelMixin
 from vllm_omni.diffusion.distributed.parallel_state import get_classifier_free_guidance_world_size
 from vllm_omni.diffusion.distributed.utils import get_local_device
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.models.flux import FluxTransformer2DModel
+from vllm_omni.diffusion.models.t5_encoder import T5EncoderModel
+from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
+from vllm_omni.diffusion.quantization import get_vllm_quant_config_for_layers
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.model_executor.model_loader.weight_utils import download_weights_from_hf_specific
 
@@ -129,9 +133,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-class FluxPipeline(
-    nn.Module,
-):
+class FluxPipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfilerMixin):
     def __init__(
         self,
         *,
@@ -147,7 +149,14 @@ class FluxPipeline(
                 revision=None,
                 prefix="transformer.",
                 fall_back_to_pt=True,
-            )
+            ),
+            DiffusersPipelineLoader.ComponentSource(
+                model_or_path=od_config.model,
+                subfolder="text_encoder_2",
+                revision=None,
+                prefix="text_encoder_2.",
+                fall_back_to_pt=True,
+            ),
         ]
 
         self.device = get_local_device()
@@ -160,14 +169,14 @@ class FluxPipeline(
         )
         self.text_encoder = CLIPTextModel.from_pretrained(
             model, subfolder="text_encoder", local_files_only=local_files_only
-        )
-        self.text_encoder_2 = T5EncoderModel.from_pretrained(
-            model, subfolder="text_encoder_2", local_files_only=local_files_only
-        )
+        ).to(self.device)
+        t5_config = AutoConfig.from_pretrained(model, subfolder="text_encoder_2", local_files_only=local_files_only)
+        self.text_encoder_2 = T5EncoderModel(t5_config, prefix="text_encoder_2").to(self.device)
         self.vae = AutoencoderKL.from_pretrained(model, subfolder="vae", local_files_only=local_files_only).to(
             self.device
         )
-        self.transformer = FluxTransformer2DModel(od_config=od_config)
+        quant_config = get_vllm_quant_config_for_layers(od_config.quantization_config)
+        self.transformer = FluxTransformer2DModel(od_config=od_config, quant_config=quant_config)
 
         self.tokenizer = CLIPTokenizer.from_pretrained(model, subfolder="tokenizer", local_files_only=local_files_only)
         self.tokenizer_2 = T5TokenizerFast.from_pretrained(
@@ -185,6 +194,10 @@ class FluxPipeline(
             self.tokenizer.model_max_length if hasattr(self, "tokenizer") and self.tokenizer is not None else 77
         )
         self.default_sample_size = 128
+
+        self.setup_diffusion_pipeline_profiler(
+            enable_diffusion_pipeline_profiler=self.od_config.enable_diffusion_pipeline_profiler
+        )
 
     def check_inputs(
         self,
@@ -285,7 +298,7 @@ class FluxPipeline(
                 f" {max_sequence_length} tokens: {removed_text}"
             )
 
-        prompt_embeds = self.text_encoder_2(text_input_ids.to(self.device), output_hidden_states=False)[0]
+        prompt_embeds = self.text_encoder_2(text_input_ids.to(self.device))[0]
 
         dtype = self.text_encoder_2.dtype
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=self.device)
@@ -500,21 +513,23 @@ class FluxPipeline(
 
     def diffuse(
         self,
-        prompt_embeds,
-        pooled_prompt_embeds,
-        negative_prompt_embeds,
-        negative_pooled_prompt_embeds,
-        latents,
-        latent_image_ids,
-        text_ids,
-        negative_text_ids,
-        timesteps,
-        do_true_cfg,
-        guidance,
-        true_cfg_scale,
-    ):
+        prompt_embeds: torch.Tensor,
+        pooled_prompt_embeds: torch.Tensor,
+        negative_prompt_embeds: torch.Tensor,
+        negative_pooled_prompt_embeds: torch.Tensor,
+        latents: torch.Tensor,
+        latent_image_ids: torch.Tensor,
+        text_ids: torch.Tensor,
+        negative_text_ids: torch.Tensor,
+        timesteps: torch.Tensor,
+        do_true_cfg: bool,
+        guidance: torch.Tensor,
+        true_cfg_scale: float,
+        cfg_normalize: bool = False,
+    ) -> torch.Tensor:
         """Diffusion loop with optional image conditioning."""
         self.scheduler.set_begin_index(0)
+        self.transformer.do_true_cfg = do_true_cfg
         for i, t in enumerate(timesteps):
             if self.interrupt:
                 continue
@@ -523,36 +538,46 @@ class FluxPipeline(
             # broadcast to batch dimension and place on same device/dtype as latents
             timestep = t.expand(latents.shape[0]).to(device=latents.device, dtype=latents.dtype)
 
-            self.transformer.do_true_cfg = do_true_cfg  # used in teacache hook
-            # Forward pass for positive prompt (or unconditional if no CFG)
-            noise_pred = self.transformer(
-                hidden_states=latents,
-                timestep=timestep / 1000,
-                guidance=guidance,
-                pooled_projections=pooled_prompt_embeds,
-                encoder_hidden_states=prompt_embeds,
-                txt_ids=text_ids,
-                img_ids=latent_image_ids,
-                joint_attention_kwargs=self.joint_attention_kwargs,
-                return_dict=False,
-            )[0]
+            positive_kwargs = {
+                "hidden_states": latents,
+                "timestep": timestep / 1000,
+                "guidance": guidance,
+                "pooled_projections": pooled_prompt_embeds,
+                "encoder_hidden_states": prompt_embeds,
+                "txt_ids": text_ids,
+                "img_ids": latent_image_ids,
+                "joint_attention_kwargs": self.joint_attention_kwargs,
+                "return_dict": False,
+            }
 
             # Forward pass for negative prompt (CFG)
             if do_true_cfg:
-                neg_noise_pred = self.transformer(
-                    hidden_states=latents,
-                    timestep=timestep / 1000,
-                    guidance=guidance,
-                    pooled_projections=negative_pooled_prompt_embeds,
-                    encoder_hidden_states=negative_prompt_embeds,
-                    txt_ids=negative_text_ids,
-                    img_ids=latent_image_ids,
-                    joint_attention_kwargs=self.joint_attention_kwargs,
-                    return_dict=False,
-                )[0]
-                noise_pred = neg_noise_pred + true_cfg_scale * (noise_pred - neg_noise_pred)
+                negative_kwargs = {
+                    "hidden_states": latents,
+                    "timestep": timestep / 1000,
+                    "guidance": guidance,
+                    "pooled_projections": negative_pooled_prompt_embeds,
+                    "encoder_hidden_states": negative_prompt_embeds,
+                    "txt_ids": negative_text_ids,
+                    "img_ids": latent_image_ids,
+                    "joint_attention_kwargs": self.joint_attention_kwargs,
+                    "return_dict": False,
+                }
+            else:
+                negative_kwargs = None
+
+            # Predict noise with automatic CFG parallel handling
+            noise_pred = self.predict_noise_maybe_with_cfg(
+                do_true_cfg,
+                true_cfg_scale,
+                positive_kwargs,
+                negative_kwargs,
+                cfg_normalize,
+            )
+
             # compute the previous noisy sample x_t -> x_t-1
-            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+            latents = self.scheduler_step_maybe_with_cfg(noise_pred, t, latents, do_true_cfg)
+
         return latents
 
     def check_cfg_parallel_validity(self, true_cfg_scale: float, has_neg_prompt: bool):
@@ -613,6 +638,7 @@ class FluxPipeline(
             req.sampling_params.guidance_scale if req.sampling_params.guidance_scale is not None else guidance_scale
         )
         generator = req.sampling_params.generator or generator
+        true_cfg_scale = req.sampling_params.true_cfg_scale or true_cfg_scale
         num_images_per_prompt = (
             req.sampling_params.num_outputs_per_prompt
             if req.sampling_params.num_outputs_per_prompt > 0
@@ -723,6 +749,7 @@ class FluxPipeline(
             do_true_cfg,
             guidance,
             true_cfg_scale,
+            cfg_normalize=False,
         )
 
         self._current_timestep = None
@@ -734,7 +761,9 @@ class FluxPipeline(
             latents = (latents / self.vae.config.scaling_factor) + self.vae.config.shift_factor
             image = self.vae.decode(latents, return_dict=False)[0]
 
-        return DiffusionOutput(output=image)
+        return DiffusionOutput(
+            output=image, stage_durations=self.stage_durations if hasattr(self, "stage_durations") else None
+        )
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         loader = AutoWeightsLoader(self)

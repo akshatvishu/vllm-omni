@@ -1,11 +1,10 @@
+import argparse
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
-from transformers.models.qwen3_omni_moe.configuration_qwen3_omni_moe import Qwen3OmniMoeTextConfig
 from vllm.engine.arg_utils import EngineArgs
 from vllm.logger import init_logger
-from vllm.transformers_utils.config import get_hf_text_config
-from vllm.v1.engine.async_llm import AsyncEngineArgs
 
 from vllm_omni.config import OmniModelConfig
 from vllm_omni.plugins import load_omni_general_plugins
@@ -17,18 +16,27 @@ def _register_omni_hf_configs() -> None:
     try:
         from transformers import AutoConfig
 
+        from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
         from vllm_omni.model_executor.models.qwen3_tts.configuration_qwen3_tts import (
             Qwen3TTSConfig,
+        )
+        from vllm_omni.model_executor.models.voxtral_tts.configuration_voxtral_tts import (
+            VoxtralTTSConfig,
         )
     except Exception as exc:  # pragma: no cover - best-effort optional registration
         logger.warning("Skipping omni HF config registration due to import error: %s", exc)
         return
 
-    try:
-        AutoConfig.register("qwen3_tts", Qwen3TTSConfig)
-    except ValueError:
-        # Already registered elsewhere; ignore.
-        return
+    for model_type, config_cls in [
+        ("qwen3_tts", Qwen3TTSConfig),
+        ("cosyvoice3", CosyVoice3Config),
+        ("mistral", VoxtralTTSConfig),
+    ]:
+        try:
+            AutoConfig.register(model_type, config_cls)
+        except ValueError:
+            # Already registered elsewhere; ignore.
+            pass
 
 
 def register_omni_models_to_vllm():
@@ -58,44 +66,41 @@ class OmniEngineArgs(EngineArgs):
         engine_output_type: Optional output type specification for the engine.
             Used to route outputs to appropriate processors (e.g., "image",
             "audio", "latents"). If None, output type is inferred.
+        hf_config_name: Optional key for HF config subkey to be extracted
+            for this stage, e.g., talker_config; If None, the default
+            HF config will be used.
         custom_process_next_stage_input_func: Optional path to a custom function for processing
             inputs from previous stages
             If None, default processing is used.
         stage_connector_spec: Extra configuration for stage connector
         async_chunk: If set to True, perform async chunk
+        worker_type: Model Type, e.g., "ar" or "generation"
+        task_type: Default task type for TTS models (CustomVoice, VoiceDesign, or Base).
+            If not specified, will be inferred from model path.
     """
 
     stage_id: int = 0
     model_stage: str = "thinker"
-    model_arch: str = "Qwen2_5OmniForConditionalGeneration"
+    model_arch: str | None = None
     engine_output_type: str | None = None
     hf_config_name: str | None = None
     custom_process_next_stage_input_func: str | None = None
     stage_connector_spec: dict[str, Any] = field(default_factory=dict)
     async_chunk: bool = False
     omni_kv_config: dict | None = None
-
-    def draw_hf_text_config(self, config_dict: dict) -> Qwen3OmniMoeTextConfig:
-        # transformers' get_text_config method is used to get the text config from thinker_config.
-        # to handle the case that each model stage has their own text config,
-        # we need to draw the text config from the corresponding model stage.
-        hf_config = config_dict["hf_config"]
-        hf_config_name = config_dict["hf_config_name"]
-        try:
-            # Try to get the stage-specific config (e.g., thinker_config, talker_config)
-            stage_config = getattr(hf_config, hf_config_name)
-            return stage_config.get_text_config()
-        except AttributeError:
-            # Fallback: if the attribute doesn't exist, use the default get_hf_text_config
-            logger.warning(
-                f"Config attribute '{hf_config_name}' not found in hf_config, "
-                "falling back to default get_hf_text_config"
-            )
-        return get_hf_text_config(hf_config)
+    quantization_config: Any | None = None
+    worker_type: str | None = None
+    task_type: str | None = None
 
     def __post_init__(self) -> None:
         load_omni_general_plugins()
         super().__post_init__()
+
+    @classmethod
+    def from_cli_args(cls, args: argparse.Namespace) -> "OmniEngineArgs":
+        attrs = [attr.name for attr in dataclasses.fields(cls)]
+        engine_args = cls(**{attr: getattr(args, attr) for attr in attrs if hasattr(args, attr)})
+        return engine_args
 
     def _ensure_omni_models_registered(self):
         if hasattr(self, "_omni_models_registered"):
@@ -112,130 +117,29 @@ class OmniEngineArgs(EngineArgs):
         # register omni models to avoid model not found error
         self._ensure_omni_models_registered()
 
-        # First, get the base ModelConfig from the parent class
-        base_config = super().create_model_config()
-
-        # Create OmniModelConfig by copying all base config attributes
-        # and adding the new omni-specific fields
-        config_dict = base_config.__dict__.copy()
-        # FIXME(Isotr0py): This is a temporary workaround for multimodal_config
-        config_dict = {
-            **(getattr(mm := config_dict.pop("multimodal_config", None), "__dict__", mm or {})),
-            **config_dict,
-        }
-
-        # Add the new omni-specific fields
-        config_dict["stage_id"] = self.stage_id
-        config_dict["async_chunk"] = self.async_chunk
-        config_dict["model_stage"] = self.model_stage
-        config_dict["model_arch"] = self.model_arch
-        config_dict["engine_output_type"] = self.engine_output_type
         # Build stage_connector_config from stage_connector_spec
         stage_connector_config = {
             "name": self.stage_connector_spec.get("name", "SharedMemoryConnector"),
             "extra": self.stage_connector_spec.get("extra", {}).copy(),
         }
         stage_connector_config["extra"]["stage_id"] = self.stage_id
-        config_dict["stage_connector_config"] = stage_connector_config
 
-        config_dict["hf_config_name"] = self.hf_config_name
-        config_dict["custom_process_next_stage_input_func"] = self.custom_process_next_stage_input_func
-        config_dict["omni_kv_config"] = self.omni_kv_config
-        if self.hf_config_name is not None:
-            config_dict["hf_text_config"] = self.draw_hf_text_config(config_dict)
-        # Create and return the OmniModelConfig instance
-        omni_config = OmniModelConfig(**config_dict)
-        omni_config.hf_config.architectures = omni_config.architectures
+        # Build the vLLM config first, then use it to create the Omni config.
+        model_config = super().create_model_config()
 
-        return omni_config
-
-
-@dataclass
-class AsyncOmniEngineArgs(AsyncEngineArgs):
-    """Async engine arguments for omni models, extending base AsyncEngineArgs.
-    Adds omni-specific configuration fields for multi-stage pipeline
-    processing and output type specification in async contexts.
-    Args:
-        stage_id: Identifier for the stage in a multi-stage pipeline (default: 0)
-        model_stage: Stage type identifier, e.g., "thinker" or "talker"
-            (default: "thinker")
-        model_arch: Model architecture name
-            (default: "Qwen2_5OmniForConditionalGeneration")
-        engine_output_type: Optional output type specification for the engine.
-            Used to route outputs to appropriate processors (e.g., "image",
-            "audio", "latents"). If None, output type is inferred.
-        stage_connector_spec: Extra configuration for stage connector
-    """
-
-    stage_id: int = 0
-    model_stage: str = "thinker"
-    model_arch: str = "Qwen2_5OmniForConditionalGeneration"
-    engine_output_type: str | None = None
-    hf_config_name: str | None = None
-    custom_process_next_stage_input_func: str | None = None
-    stage_connector_spec: dict[str, Any] = field(default_factory=dict)
-    async_chunk: bool = False
-    omni_kv_config: dict | None = None
-
-    def draw_hf_text_config(self, config_dict: dict) -> Qwen3OmniMoeTextConfig:
-        # transformers' get_text_config method is used to get the text config from thinker_config.
-        # to handle the case that each model stage has their own text config,
-        # we need to draw the text config from the corresponding model stage.
-        hf_config = config_dict["hf_config"]
-        hf_config_name = config_dict["hf_config_name"]
-        try:
-            # Try to get the stage-specific config (e.g., thinker_config, talker_config)
-            stage_config = getattr(hf_config, hf_config_name)
-            return stage_config.get_text_config()
-        except AttributeError:
-            # Fallback: if the attribute doesn't exist, use the default get_hf_text_config
-            logger.warning(
-                f"Config attribute '{hf_config_name}' not found in hf_config, "
-                "falling back to default get_hf_text_config"
-            )
-        return get_hf_text_config(hf_config)
-
-    def __post_init__(self) -> None:
-        load_omni_general_plugins()
-        super().__post_init__()
-
-    def _ensure_omni_models_registered(self):
-        if hasattr(self, "_omni_models_registered"):
-            return True
-        register_omni_models_to_vllm()
-        self._omni_models_registered = True
-        return True
-
-    def create_model_config(self) -> OmniModelConfig:
-        # register omni models to avoid model not found error
-        self._ensure_omni_models_registered()
-        # First, get the base ModelConfig from the parent class
-        base_config = super().create_model_config()
-
-        # Create OmniModelConfig by copying all base config attributes
-        # and adding the new omni-specific fields
-        config_dict = base_config.__dict__.copy()
-
-        # Add the new omni-specific fields
-        config_dict["stage_id"] = self.stage_id
-        config_dict["async_chunk"] = self.async_chunk
-        config_dict["model_stage"] = self.model_stage
-        config_dict["model_arch"] = self.model_arch
-        config_dict["engine_output_type"] = self.engine_output_type
-        stage_connector_config = {
-            "name": self.stage_connector_spec.get("name", "SharedMemoryConnector"),
-            "extra": self.stage_connector_spec.get("extra", {}).copy(),
-        }
-        stage_connector_config["extra"]["stage_id"] = self.stage_id
-        config_dict["stage_connector_config"] = stage_connector_config
-
-        config_dict["hf_config_name"] = self.hf_config_name
-        config_dict["custom_process_next_stage_input_func"] = self.custom_process_next_stage_input_func
-        config_dict["omni_kv_config"] = self.omni_kv_config
-        if self.hf_config_name is not None:
-            config_dict["hf_text_config"] = self.draw_hf_text_config(config_dict)
-        # Create and return the OmniModelConfig instance
-        omni_config = OmniModelConfig(**config_dict)
-        omni_config.hf_config.architectures = omni_config.architectures
-
+        omni_config = OmniModelConfig.from_vllm_model_config(
+            model_config=model_config,
+            # All kwargs below are Omni specific
+            stage_id=self.stage_id,
+            async_chunk=self.async_chunk,
+            model_stage=self.model_stage,
+            model_arch=self.model_arch,
+            worker_type=self.worker_type,
+            engine_output_type=self.engine_output_type,
+            hf_config_name=self.hf_config_name,
+            custom_process_next_stage_input_func=self.custom_process_next_stage_input_func,
+            stage_connector_config=stage_connector_config,
+            omni_kv_config=self.omni_kv_config,
+            task_type=self.task_type,
+        )
         return omni_config
