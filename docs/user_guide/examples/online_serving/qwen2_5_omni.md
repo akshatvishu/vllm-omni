@@ -30,7 +30,7 @@ cd examples/online_serving/qwen2_5_omni
 #### Send request via python
 
 ```bash
-python openai_chat_completion_client_for_multimodal_generation.py --query-type mixed_modalities
+python openai_chat_completion_client_for_multimodal_generation.py --query-type mixed_modalities --port 8091 --host "localhost"
 ```
 
 The Python client supports the following command-line arguments:
@@ -222,10 +222,6 @@ sudo apt install ffmpeg
 ??? abstract "gradio_demo.py"
     ``````py
     --8<-- "examples/online_serving/qwen2_5_omni/gradio_demo.py"
-    ``````
-??? abstract "openai_chat_completion_client_for_multimodal_generation.py"
-    ``````py
-    --8<-- "examples/online_serving/qwen2_5_omni/openai_chat_completion_client_for_multimodal_generation.py"
     ``````
 ??? abstract "run_curl_multimodal_generation.sh"
     ``````sh

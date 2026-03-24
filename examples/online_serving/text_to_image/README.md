@@ -20,6 +20,29 @@ Or use the startup script:
 bash run_server.sh
 ```
 
+### Start with Parallelism Acceleration
+
+Enable Tensor Parallelism and VAE Patch Parallelism for faster inference:
+
+```bash
+# With Tensor Parallelism (requires >= 2 GPUs)
+vllm serve Qwen/Qwen-Image --omni --port 8091 --tensor-parallel-size 2
+
+# With Tensor Parallelism and VAE Patch Parallelism (requires >= 2 GPUs)
+vllm serve Qwen/Qwen-Image --omni --port 8091 --tensor-parallel-size 2 --vae-patch-parallel-size 2 --vae-use-tiling
+
+# With Sequence Parallelism (Ulysses-SP, requires >= 2 GPUs)
+vllm serve Qwen/Qwen-Image --omni --port 8091 --usp 2
+
+# With Ring-Attention (requires >= 2 GPUs)
+vllm serve Qwen/Qwen-Image --omni --port 8091 --ring 2
+
+# Combined: Ulysses + Ring (requires >= 4 GPUs)
+vllm serve Qwen/Qwen-Image --omni --port 8091 --usp 2 --ring 2
+```
+
+For more details on parallelism acceleration, see the [Parallelism Acceleration Guide](../../diffusion/parallelism_acceleration.md).
+
 ## API Calls
 
 ### Method 1: Using curl
@@ -56,6 +79,59 @@ python openai_chat_client.py --prompt "A beautiful landscape painting" --output 
 ```bash
 python gradio_demo.py
 # Visit http://localhost:7860
+```
+
+## LoRA
+
+This example supports Peft-compatible LoRA (Low-Rank Adaptation) adapters for diffusion models. The LoRA adapter path must be readable on the **server** machine (usually a local path or a mounted directory).
+
+### Using Python Client with LoRA
+
+```bash
+python openai_chat_client.py \
+  --prompt "A piece of cheesecake" \
+  --lora-path /path/to/lora_adapter \
+  --lora-name my_lora \
+  --lora-scale 1.0 \
+  --output output.png
+```
+
+### Using curl with LoRA (Images API)
+
+The `/v1/images/generations` endpoint supports a `lora` field in the request body:
+
+```bash
+curl -X POST http://localhost:8091/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A piece of cheesecake",
+    "size": "1024x1024",
+    "seed": 42,
+    "lora": {
+      "name": "my_lora",
+      "local_path": "/path/to/lora_adapter",
+      "scale": 1.0
+    }
+  }' | jq -r '.data[0].b64_json' | base64 -d > output.png
+```
+
+### LoRA Parameters
+
+| Parameter    | Type  | Description                                                               |
+| ------------ | ----- | ------------------------------------------------------------------------- |
+| `name`       | str   | LoRA adapter name (optional, defaults to path stem)                       |
+| `local_path` | str   | Server-local path to LoRA adapter folder (PEFT format, required)          |
+| `scale`      | float | LoRA scale factor (default: 1.0)                                          |
+| `int_id`     | int   | LoRA integer ID for caching (optional, derived from path if not provided) |
+
+### LoRA Adapter Format
+
+LoRA adapters must be in PEFT (Parameter-Efficient Fine-Tuning) format. A typical LoRA adapter directory structure:
+
+```
+lora_adapter/
+├── adapter_config.json
+└── adapter_model.safetensors
 ```
 
 ## Request Format
@@ -106,16 +182,16 @@ Use `extra_body` to pass generation parameters:
 
 ## Generation Parameters (extra_body)
 
-| Parameter                | Type  | Default | Description                    |
-| ------------------------ | ----- | ------- | ------------------------------ |
-| `height`                 | int   | None    | Image height in pixels         |
-| `width`                  | int   | None    | Image width in pixels          |
-| `size`                   | str   | None    | Image size (e.g., "1024x1024") |
-| `num_inference_steps`    | int   | 50      | Number of denoising steps      |
-| `true_cfg_scale`         | float | 4.0     | Qwen-Image CFG scale           |
-| `seed`                   | int   | None    | Random seed (reproducible)     |
-| `negative_prompt`        | str   | None    | Negative prompt                |
-| `num_outputs_per_prompt` | int   | 1       | Number of images to generate   |
+| Parameter                | Type  | Default | Description                        |
+| ------------------------ | ----- | ------- | ---------------------------------- |
+| `height`                 | int   | None    | Image height in pixels             |
+| `width`                  | int   | None    | Image width in pixels              |
+| `size`                   | str   | None    | Image size (e.g., "1024x1024")     |
+| `num_inference_steps`    | int   | 50      | Number of denoising steps          |
+| `true_cfg_scale`         | float | 4.0     | Qwen-Image CFG scale               |
+| `seed`                   | int   | None    | Random seed (reproducible)         |
+| `negative_prompt`        | str   | None    | Negative prompt                    |
+| `num_outputs_per_prompt` | int   | 1       | Number of images to generate       |
 | `--cfg-parallel-size`.   | int   | 1       | Number of GPUs for CFG parallelism |
 
 ## Response Format
