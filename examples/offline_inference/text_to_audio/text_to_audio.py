@@ -92,15 +92,13 @@ def parse_args() -> argparse.Namespace:
         help="Sample rate for output audio (Stable Audio uses 44100 Hz).",
     )
     parser.add_argument(
-        "--enable-diffusion-pipeline-profiler",
-        action="store_true",
-        help="Enable diffusion pipeline profiler to display stage durations.",
-    )
-    parser.add_argument(
         "--tensor-parallel-size",
         type=int,
         default=1,
         help="Number of GPUs used for tensor parallelism (TP).",
+        "--enable-diffusion-pipeline-profiler",
+        action="store_true",
+        help="Enable diffusion pipeline profiler to display stage durations."
     )
     return parser.parse_args()
 
@@ -145,12 +143,16 @@ def main():
 
     parallel_config = DiffusionParallelConfig(
         tensor_parallel_size=args.tensor_parallel_size,
+
+    # Initialize Omni with Stable Audio model
+    omni = Omni(
+        model=args.model,
+        enable_diffusion_pipeline_profiler=args.enable_diffusion_pipeline_profiler,
     )
 
     omni = Omni(
         model=args.model,
         parallel_config=parallel_config,
-        enable_diffusion_pipeline_profiler=args.enable_diffusion_pipeline_profiler,
     )
 
     audio_end_in_s = args.audio_start + args.audio_length
