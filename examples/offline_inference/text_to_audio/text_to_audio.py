@@ -96,6 +96,9 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Number of GPUs used for tensor parallelism (TP).",
+        "--enable-diffusion-pipeline-profiler",
+        action="store_true",
+        help="Enable diffusion pipeline profiler to display stage durations."
     )
     return parser.parse_args()
 
@@ -140,6 +143,11 @@ def main():
 
     parallel_config = DiffusionParallelConfig(
         tensor_parallel_size=args.tensor_parallel_size,
+
+    # Initialize Omni with Stable Audio model
+    omni = Omni(
+        model=args.model,
+        enable_diffusion_pipeline_profiler=args.enable_diffusion_pipeline_profiler,
     )
 
     omni = Omni(
@@ -184,7 +192,7 @@ def main():
     output = outputs[0]
     if not hasattr(output, "request_output") or not output.request_output:
         raise ValueError("No request_output found in OmniRequestOutput")
-    request_output = output.request_output[0]
+    request_output = output.request_output
     if not hasattr(request_output, "multimodal_output"):
         raise ValueError("No multimodal_output found in request_output")
 
