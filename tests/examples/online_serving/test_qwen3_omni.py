@@ -1,72 +1,45 @@
 """
-Example Online tests for Qwen3-Omni model.
+Online serving tests: Qwen3-Omni.
+See examples/online_serving/qwen3_omni/README.md
 """
 
 import os
 
+from vllm_omni.platforms import current_omni_platform
+
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
-import re
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from tests.conftest import OmniServer, convert_audio_file_to_text, cosine_similarity_text
+from tests.conftest import OmniServerParams, convert_audio_file_to_text, cosine_similarity_text
+from tests.examples.conftest import extract_content_after_keyword, run_cmd
+from tests.utils import hardware_test
+
+pytestmark = [pytest.mark.advanced_model, pytest.mark.example]
 
 models = ["Qwen/Qwen3-Omni-30B-A3B-Instruct"]
 
 
 stage_configs = [str(Path(__file__).parent.parent.parent / "e2e" / "stage_configs" / "qwen3_omni_ci.yaml")]
 
+if current_omni_platform.is_xpu():
+    stage_configs = [str(Path(__file__).parent.parent.parent / "e2e" / "stage_configs" / "xpu" / "qwen3_omni_ci.yaml")]
+
+
 example_dir = str(Path(__file__).parent.parent.parent.parent / "examples" / "online_serving" / "qwen3_omni")
 # Create parameter combinations for model and stage config
-test_params = [(model, stage_config) for model in models for stage_config in stage_configs]
+test_params = [
+    OmniServerParams(model=model, port=8091, stage_config_path=stage_config)
+    for model in models
+    for stage_config in stage_configs
+]
 
 
-@pytest.fixture(scope="module")
-def omni_server(request):
-    """Start vLLM-Omni server as a subprocess with actual model weights.
-    Uses module scope so the server starts only once per test module..
-    Multi-stage initialization can take 10-20+ minutes.
-    """
-    model, stage_config_path = request.param
-
-    print(f"Starting OmniServer with model: {model}")
-    print("This may take 10-20+ minutes for initialization...")
-
-    with OmniServer(
-        model, ["--stage-configs-path", stage_config_path, "--stage-init-timeout", "120"], port=8091
-    ) as server:
-        print("OmniServer started successfully")
-        yield server
-        print("OmniServer stopped")
-
-
-def run_cmd(command):
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-    )
-
-    if result.returncode != 0:
-        print(f"STDERR: {result.stderr}")
-        raise subprocess.CalledProcessError(result.returncode, command)
-
-    all_output = result.stdout
-    print(f"All output:\n{all_output}")
-    return all_output
-
-
-def extract_content_after_keyword(keywords, text):
-    matches = re.findall(rf"{keywords}\s*(.+)", text, re.DOTALL)
-
-    if not matches:
-        raise AssertionError(f"Keywords {keywords} not found in provided text output")
-    return matches[0]
-
-
+@pytest.mark.advanced_model
+@pytest.mark.omni
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_send_multimodal_request_001(omni_server) -> None:
     command = [
@@ -92,6 +65,9 @@ def test_send_multimodal_request_001(omni_server) -> None:
     # TODO: Verify the E2E latency after confirmation baseline.
 
 
+@pytest.mark.advanced_model
+@pytest.mark.omni
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_send_multimodal_request_002(omni_server) -> None:
     command = [
@@ -120,6 +96,9 @@ def test_send_multimodal_request_002(omni_server) -> None:
     # TODO: Verify the E2E latency after confirmation baseline.
 
 
+@pytest.mark.advanced_model
+@pytest.mark.omni
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_send_multimodal_request_003(omni_server) -> None:
     command = ["bash", os.path.join(example_dir, "run_curl_multimodal_generation.sh"), "use_image"]
@@ -134,6 +113,9 @@ def test_send_multimodal_request_003(omni_server) -> None:
     # TODO: Verify the E2E latency after confirmation baseline.
 
 
+@pytest.mark.advanced_model
+@pytest.mark.omni
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_modality_control_001(omni_server) -> None:
     command = [
@@ -155,6 +137,9 @@ def test_modality_control_001(omni_server) -> None:
     # TODO: Verify the E2E latency after confirmation baseline.
 
 
+@pytest.mark.advanced_model
+@pytest.mark.omni
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_modality_control_002(omni_server) -> None:
     command = [
@@ -175,6 +160,9 @@ def test_modality_control_002(omni_server) -> None:
     # TODO: Verify the E2E latency after confirmation baseline.
 
 
+@pytest.mark.advanced_model
+@pytest.mark.omni
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_modality_control_003(omni_server) -> None:
     command = [
@@ -202,6 +190,9 @@ def test_modality_control_003(omni_server) -> None:
     # TODO: Verify the E2E latency after confirmation baseline.
 
 
+@pytest.mark.advanced_model
+@pytest.mark.omni
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=2)
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_stream_001(omni_server) -> None:
     command = [
