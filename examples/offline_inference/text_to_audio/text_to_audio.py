@@ -96,9 +96,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Number of GPUs used for tensor parallelism (TP).",
+    )
+    parser.add_argument(
         "--enable-diffusion-pipeline-profiler",
         action="store_true",
-        help="Enable diffusion pipeline profiler to display stage durations."
+        help="Enable diffusion pipeline profiler to display stage durations.",
     )
     return parser.parse_args()
 
@@ -113,7 +115,9 @@ def save_audio(audio_data: np.ndarray, output_path: str, sample_rate: int = 4410
         try:
             import scipy.io.wavfile as wav
 
+            # Ensure audio is in the correct format for scipy
             if audio_data.dtype == np.float32 or audio_data.dtype == np.float64:
+                # Normalize to int16 range
                 audio_data = np.clip(audio_data, -1.0, 1.0)
                 audio_data = (audio_data * 32767).astype(np.int16)
             wav.write(output_path, sample_rate, audio_data)
@@ -143,21 +147,22 @@ def main():
 
     parallel_config = DiffusionParallelConfig(
         tensor_parallel_size=args.tensor_parallel_size,
+    )
 
     # Initialize Omni with Stable Audio model
     omni = Omni(
         model=args.model,
+        parallel_config=parallel_config,
         enable_diffusion_pipeline_profiler=args.enable_diffusion_pipeline_profiler,
     )
 
-    omni = Omni(
-        model=args.model,
-        parallel_config=parallel_config,
-    )
-
+    # Calculate audio end time
     audio_end_in_s = args.audio_start + args.audio_length
+
+    # Time profiling for generation
     generation_start = time.perf_counter()
 
+    # Generate audio
     outputs = omni.generate(
         {
             "prompt": args.prompt,
@@ -177,6 +182,7 @@ def main():
 
     generation_end = time.perf_counter()
     generation_time = generation_end - generation_start
+
     print(f"Total generation time: {generation_time:.2f} seconds")
 
     # Process and save audio
