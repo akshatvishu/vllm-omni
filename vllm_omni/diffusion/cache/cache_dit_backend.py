@@ -514,7 +514,7 @@ def enable_cache_for_stable_audio_open(pipeline: Any, cache_config: Any) -> Call
         if cache_config.scm_steps_mask_policy is None or not scm_supported_steps:
             cache_dit.refresh_context(pipeline.transformer, num_inference_steps=num_inference_steps, verbose=verbose)
         else:
-            updated_scm_config = db_cache_config.reset(
+            updated_scm_config = DBCacheConfig().reset(
                 num_inference_steps=num_inference_steps,
                 steps_computation_mask=cache_dit.steps_mask(
                     mask_policy=cache_config.scm_steps_mask_policy,
