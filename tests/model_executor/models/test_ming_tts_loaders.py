@@ -258,7 +258,7 @@ def test_ming_stage0_sampler_uses_model_sample(monkeypatch):
     assert sampler_output.sampled_token_ids.tolist() == [[151705]]
 
 
-def test_ming_resolve_prompt_latents_requires_prompt_text_for_waveform(monkeypatch):
+def test_ming_resolve_prompt_latents_rejects_raw_waveform_after_ingress(monkeypatch):
     import vllm_omni.model_executor.models.ming_tts.config_ming_tts as cfg_mod
     import vllm_omni.model_executor.models.ming_tts.ming_tts as ming_mod
 
@@ -266,41 +266,28 @@ def test_ming_resolve_prompt_latents_requires_prompt_text_for_waveform(monkeypat
         def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
             return torch.zeros((input_ids.shape[0], 2), dtype=torch.float32)
 
-    class _CountingAudioEncoder:
-        def __init__(self):
-            self.calls = 0
-
-        def encode_latent(self, waveform: torch.Tensor, waveform_length: torch.Tensor):
-            del waveform_length
-            self.calls += 1
-            batch = int(waveform.shape[0])
-            return torch.zeros((batch, 8, 64), dtype=torch.float32), None
-
     cfg = _make_config()
     monkeypatch.setattr(cfg_mod.MingTTSConfig, "from_hf_config", classmethod(lambda cls, hf: cfg))
     monkeypatch.setattr(ming_mod, "init_vllm_registered_model", lambda **kwargs: _DummyStage0())
 
     model = MingTTSForConditionalGeneration(vllm_config=_make_vllm_config("llm"))
-    encoder = _CountingAudioEncoder()
-    model._prompt_audio_encoder = encoder
-
-    without_prompt_text = model._resolve_prompt_latents(
+    direct = model._resolve_prompt_latents(
         {
-            "prompt_waveform": torch.ones((1, 1000), dtype=torch.float32),
-            "prompt_waveform_length": torch.tensor([1000], dtype=torch.int32),
-        }
-    )
-    with_prompt_text = model._resolve_prompt_latents(
-        {
-            "prompt_waveform": torch.ones((1, 1000), dtype=torch.float32),
-            "prompt_waveform_length": torch.tensor([1000], dtype=torch.int32),
-            "prompt_text": "Reference words.",
+            "ming_prompt_latents": torch.ones((8, 64), dtype=torch.float32),
         }
     )
 
-    assert without_prompt_text is None
-    assert with_prompt_text is not None
-    assert encoder.calls == 1
+    assert direct is not None
+    assert direct["frames"].shape == (8, 64)
+
+    with pytest.raises(RuntimeError, match="Raw Ming prompt waveform reached Stage-0"):
+        model._resolve_prompt_latents(
+            {
+                "prompt_waveform": torch.ones((1, 1000), dtype=torch.float32),
+                "prompt_waveform_length": torch.tensor([1000], dtype=torch.int32),
+                "prompt_text": "Reference words.",
+            }
+        )
 
 
 def test_ming_prefill_overwrites_speaker_slot_embedding(monkeypatch):

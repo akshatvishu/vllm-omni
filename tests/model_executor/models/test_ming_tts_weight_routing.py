@@ -63,7 +63,6 @@ def test_ming_wrapper_load_weights_routes_only_llm_prefixes(monkeypatch):
     monkeypatch.setattr(wrapper_mod, "init_vllm_registered_model", _loader)
 
     stage1 = MingTTSForConditionalGeneration(vllm_config=_make_vllm_config("llm"))
-    monkeypatch.setattr(stage1, "_load_prompt_audio_encoder_weights", lambda weights: None)
     weights = [
         ("model.layers.0.self_attn.q_proj.weight", torch.ones((1,), dtype=torch.float32)),
         ("model.lm_head.weight", torch.full((1,), 2.0, dtype=torch.float32)),

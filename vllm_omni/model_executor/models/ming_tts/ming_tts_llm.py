@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import inspect
-import os
 import warnings
 from typing import Any
 from collections.abc import Iterable
@@ -129,38 +126,6 @@ class MingLLMModel(nn.Module):
             model_intermediate_buffer = kwargs.get("runtime_additional_information")
         logits_index = kwargs.get("logits_index")
         request_infos = _normalize_request_infos(model_intermediate_buffer)
-        should_log_backbone_call = bool(request_infos) and any(info.get(KEY_LATENT_HISTORY) is not None for info in request_infos)
-        if should_log_backbone_call:
-            qwen2_model = getattr(self.model, "model", None)
-            qwen2_config = getattr(qwen2_model, "config", getattr(self.model, "config", None))
-            first_layer = None if qwen2_model is None else next(iter(getattr(qwen2_model, "layers", []) or []), None)
-            first_attn = getattr(first_layer, "self_attn", None)
-            logger.info(
-                "MING_STAGE0_BACKBONE_CALL %s",
-                {
-                    "request_id": request_infos[0].get(KEY_REQUEST_ID),
-                    "model_class": type(self.model).__name__,
-                    "model_source_file": inspect.getsourcefile(type(self.model)),
-                    "inputs_embeds_shape": tuple(inputs_embeds.shape),
-                    "inputs_embeds_sha256_fp32": _tensor_sha(inputs_embeds, dtype=torch.float32),
-                    "positions_shape": tuple(positions.shape),
-                    "positions_sha256_int64": _tensor_sha(positions, dtype=torch.int64),
-                    "input_ids_shape": None if input_ids is None else tuple(input_ids.shape),
-                    "intermediate_tensors_is_none": intermediate_tensors is None,
-                    "logits_index": _rpc_safe_value(logits_index),
-                    "seq_token_counts": None if seq_token_counts is None else [int(x) for x in seq_token_counts],
-                    "forward_context_ubatch_slices": _serialize_ubatch_slices(),
-                    "use_sliding_window": getattr(qwen2_config, "use_sliding_window", None),
-                    "sliding_window": getattr(qwen2_config, "sliding_window", None),
-                    "max_window_layers": getattr(qwen2_config, "max_window_layers", None),
-                    "rope_theta": getattr(qwen2_config, "rope_theta", None),
-                    "num_hidden_layers": getattr(qwen2_config, "num_hidden_layers", None),
-                    "hidden_size": getattr(qwen2_config, "hidden_size", None),
-                    "num_attention_heads": getattr(qwen2_config, "num_attention_heads", None),
-                    "attn_module_class": None if first_attn is None else type(first_attn).__name__,
-                    "rotary_module_class": None if first_attn is None else type(getattr(first_attn, "rotary_emb", None)).__name__,
-                },
-            )
         backbone_out = self.model(
             input_ids=input_ids,
             positions=positions,
@@ -249,22 +214,6 @@ class MingLLMModel(nn.Module):
             req_max_decode_steps = _resolve_runtime_int(req_info, KEY_MAX_DECODE_STEPS, self.ming_config.max_decode_steps)
             req_min_decode_steps = _resolve_optional_runtime_int(req_info, KEY_MIN_DECODE_STEPS, 0)
             req_id = req_info.get(KEY_REQUEST_ID)
-            if decode_step == 0:
-                logger.info(
-                    "MING_STAGE0_BOOTSTRAP %s",
-                    {
-                        "request_id": req_id,
-                        "source": "prefill" if token_count != 1 else "decode",
-                        "token_count": token_count,
-                        "cfg": req_cfg,
-                        "sigma": req_sigma,
-                        "temperature": req_temperature,
-                        "max_decode_steps": req_max_decode_steps,
-                        "min_decode_steps": req_min_decode_steps,
-                        "has_prompt_latents": req_info.get(KEY_PROMPT_LATENTS) is not None,
-                        "has_speaker_embedding": req_info.get(KEY_SPEAKER_EMBEDDING) is not None,
-                    },
-                )
             sampled_token_latent, next_embeds, new_history, stop_probs = self._decode_one_step(
                 hidden_states=decode_hidden,
                 latent_history=req_history,
@@ -272,27 +221,6 @@ class MingLLMModel(nn.Module):
                 sigma=req_sigma,
                 temperature=req_temperature,
             )
-            if decode_step == 0:
-                full_hidden = hidden_states[cursor:end]
-                position_slice = positions.reshape(-1)[cursor:end].detach().to(dtype=torch.int64).cpu().tolist()
-                decode_position = int(positions.reshape(-1)[output_index].item())
-                logger.info(
-                    "MING_STAGE0_STEP0_PARITY %s",
-                    {
-                        "request_id": req_id,
-                        "source": "prefill" if token_count != 1 else "decode",
-                        "token_count": token_count,
-                        "positions": position_slice,
-                        "decode_position": decode_position,
-                        "backbone_hidden_full": _tensor_summary(full_hidden),
-                        "backbone_hidden": _tensor_summary(decode_hidden),
-                        "flow_cond": _tensor_summary(decode_hidden.unsqueeze(1)),
-                        "latent_history": _tensor_summary(req_history),
-                        "flow_output": _tensor_summary(sampled_token_latent),
-                        "aggregator_output": _tensor_summary(next_embeds),
-                        "stop_prob": float(stop_probs.reshape(-1)[0].item()),
-                    },
-                )
 
             if latent_patch_tokens is None:
                 latent_patch_tokens = sampled_token_latent.new_zeros(
@@ -756,32 +684,6 @@ def _get_request_token_counts(
         return [hidden_states.shape[0]]
 
     return []
-
-
-def _serialize_ubatch_slices() -> list[int | dict[str, int | str]] | None:
-    if not is_forward_context_available():
-        return None
-    slices = getattr(get_forward_context(), "ubatch_slices", None)
-    if slices is None:
-        return None
-    serialized: list[int | dict[str, int | str]] = []
-    for item in slices:
-        if isinstance(item, int):
-            serialized.append(int(item))
-        elif hasattr(item, "start") and hasattr(item, "stop"):
-            serialized.append({"start": int(item.start), "stop": int(item.stop)})
-        else:
-            serialized.append({"repr": repr(item)})
-    return serialized
-
-
-def _rpc_safe_value(value: Any) -> Any:
-    if isinstance(value, torch.Tensor):
-        tensor = value.detach().to("cpu")
-        if tensor.ndim == 0:
-            return tensor.item()
-        return tensor.tolist()
-    return value
 
 
 def _coerce_latent_history(

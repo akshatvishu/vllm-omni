@@ -135,7 +135,7 @@ class MingAudioVAEModel(nn.Module):
             stripped = bool(info.get("_ming_payload_stripped", False))
             should_log_chunk = _should_log_stage1_chunk(chunk_id, finished)
             if should_log_chunk:
-                logger.info(
+                logger.debug(
                     "MING_STAGE1_ENTRY %s",
                     {
                         "request_id": request_id,
@@ -162,7 +162,7 @@ class MingAudioVAEModel(nn.Module):
                 if finished:
                     self._clear_request_state(request_id)
                     if should_log_chunk:
-                        logger.info(
+                        logger.debug(
                             "MING_STAGE1_STATE %s",
                             {
                                 "request_id": request_id,
@@ -194,7 +194,7 @@ class MingAudioVAEModel(nn.Module):
                 if finished:
                     self._clear_request_state(request_id)
                     if should_log_chunk:
-                        logger.info(
+                        logger.debug(
                             "MING_STAGE1_STATE %s",
                             {
                                 "request_id": request_id,
@@ -219,7 +219,7 @@ class MingAudioVAEModel(nn.Module):
                 )
             )
             if should_log_chunk:
-                logger.info(
+                logger.debug(
                     "MING_STAGE1_DECODE %s",
                     {
                         "request_id": request_id,
@@ -263,7 +263,7 @@ class MingAudioVAEModel(nn.Module):
                 self._clear_request_state(request_id)
                 self._transport_stats.pop(request_id, None)
                 if should_log_chunk:
-                    logger.info(
+                    logger.debug(
                         "MING_STAGE1_STATE %s",
                         {
                             "request_id": request_id,
@@ -276,7 +276,7 @@ class MingAudioVAEModel(nn.Module):
                 self._past_key_values[request_id] = past_key_values
                 self._stream_state[request_id] = stream_state
                 if should_log_chunk:
-                    logger.info(
+                    logger.debug(
                         "MING_STAGE1_STATE %s",
                         {
                             "request_id": request_id,

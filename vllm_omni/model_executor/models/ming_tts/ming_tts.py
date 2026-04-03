@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import os
 from functools import cached_property
 from typing import Any
@@ -16,7 +15,6 @@ from vllm.v1.sample.sampler import Sampler
 
 from vllm_omni.model_executor.custom_process_mixin import CustomProcessMixin
 
-from .audio_tokenizer.modeling_audio_vae import AudioVAE
 from .config_ming_tts import (
     AUDIO_START_TOKEN_ID,
     KEY_CFG,
@@ -37,7 +35,6 @@ from .config_ming_tts import (
     TEXT_EOS_TOKEN_ID,
     VISION_START_TOKEN_ID,
 )
-from .ingress import encode_prompt_waveform_to_frame_latents
 from .prompt_builder import coerce_speaker_embeddings
 
 logger = init_logger(__name__)
@@ -65,9 +62,6 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
         self.has_preprocess = False
         self.has_postprocess = False
         self.requires_raw_input_tokens = False
-        self._prompt_audio_encoder: AudioVAE | None = None
-        self._prompt_audio_encoder_loaded = False
-        self._logged_prompt_waveform_fallback = False
 
         if "model_stage" in os.environ:
             self.model_stage = os.environ["model_stage"]
@@ -126,7 +120,6 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
                     "Ming Stage-1 received no loadable checkpoint weights. "
                     "Expected prefixes: model.*, linear_proj_audio.*, flowloss.*, stop_head.*, spk_head.*"
                 )
-            self._load_prompt_audio_encoder_weights((k, v) for k, v in weights if k.startswith("audio."))
             loaded = self.model.load_weights(llm_weights)
             return {f"model.{name}" for name in loaded}
 
@@ -247,8 +240,6 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
             use_zero_spk_emb=bool(info_dict.get("use_zero_spk_emb", False)),
         )
         speaker_slots: list[int] = []
-        speaker_input_summaries = []
-        speaker_projection_summaries = []
         if speaker_embeddings:
             speaker_slots = _find_speaker_placeholder_positions(input_ids, self.vllm_config.model_config.hf_config)
             if len(speaker_slots) < len(speaker_embeddings):
@@ -257,11 +248,9 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
                     f"need {len(speaker_embeddings)}"
                 )
             for speaker_slot, spk in zip(speaker_slots, speaker_embeddings):
-                speaker_input_summaries.append(_tensor_summary(spk))
                 spk_proj = self.model.project_speaker_embedding(
                     spk.to(device=input_embeds.device, dtype=input_embeds.dtype).unsqueeze(0)
                 ).squeeze(0)
-                speaker_projection_summaries.append(_tensor_summary(spk_proj))
                 input_embeds[speaker_slot] = spk_proj
 
         if prompt_latents is not None and prompt_latents["patches"] is not None:
@@ -278,50 +267,6 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
         request_id = info_dict.get(KEY_REQUEST_ID, info_dict.get("req_id"))
         if request_id is not None:
             update[KEY_REQUEST_ID] = request_id
-        prompt_token_ids = input_ids.detach().cpu().tolist()
-        prompt_positions = list(range(len(prompt_token_ids)))
-        decode_position = prompt_positions[-1] if prompt_positions else None
-        embed_weight = self.model.get_input_embeddings().weight
-        selected_token_ids = _ordered_unique_token_ids(
-            [
-                prompt_token_ids[0],
-                prompt_token_ids[-1],
-                int(self.ming_config.audio_start_token_id),
-                int(self.ming_config.audio_dummy_token_id),
-                int(VISION_START_TOKEN_ID),
-                int(TEXT_EOS_TOKEN_ID),
-            ]
-        )
-        speaker_slot_summaries = []
-        for speaker_slot in speaker_slots:
-            speaker_slot_summaries.append(
-                {
-                    "index": int(speaker_slot),
-                    "embed": _tensor_summary(input_embeds[speaker_slot]),
-                }
-            )
-        logger.info(
-            "MING_STAGE0_PREFILL_INPUT_PARITY %s",
-            {
-                "request_id": request_id,
-                "prompt_token_ids": prompt_token_ids,
-                "prompt_token_count": len(prompt_token_ids),
-                "positions": prompt_positions,
-                "decode_position": decode_position,
-                "speaker_inputs": speaker_input_summaries,
-                "speaker_projections": speaker_projection_summaries,
-                "speaker_slots": speaker_slot_summaries,
-                "spk_head_weight": _tensor_summary(self.model.spk_head.weight),
-                "spk_head_bias": _tensor_summary(self.model.spk_head.bias),
-                "embed_weight_prompt_rows": _embedding_weight_probe(
-                    embed_weight,
-                    _ordered_unique_token_ids(prompt_token_ids),
-                ),
-                "embed_weight_selected_rows": _embedding_weight_probe(embed_weight, selected_token_ids),
-                "prompt_input_embeds": _tensor_summary(input_embeds),
-                "decode_input_embeds": _tensor_summary(input_embeds[-1]),
-            },
-        )
         logger.info(
             "MING_STAGE0_REQUEST %s",
             {
@@ -330,7 +275,6 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
                 "has_prompt_latents": prompt_latents is not None,
                 "prompt_patch_shape": None if prompt_latents is None else _shape_or_none(prompt_latents["patches"]),
                 "prompt_frame_shape": None if prompt_latents is None else _shape_or_none(prompt_latents["frames"]),
-                "has_prompt_waveform": info_dict.get("prompt_waveform") is not None,
                 "has_prompt_text": info_dict.get("prompt_text") is not None,
                 "speaker_count": 0 if speaker_embeddings is None else len(speaker_embeddings),
                 "has_instruction": info_dict.get("instruction") is not None,
@@ -353,91 +297,12 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
         if direct_latents is not None:
             return direct_latents
 
-        waveform = info_dict.get("prompt_waveform")
-        if waveform is None:
-            waveform = info_dict.get("prompt_waveforms")
-        if waveform is None:
-            return None
-        if info_dict.get("prompt_text") is None:
-            return None
-        if not self._logged_prompt_waveform_fallback:
-            logger.warning(
-                "Ming Stage-0 fell back to runtime waveform->latents encoding. "
-                "Ingress prompt finalization should have attached ming_prompt_latents already."
+        if info_dict.get("prompt_waveform") is not None or info_dict.get("prompt_waveforms") is not None:
+            raise RuntimeError(
+                "Raw Ming prompt waveform reached Stage-0 after ingress finalization. "
+                "Ingress must attach ming_prompt_latents and strip prompt_waveform inputs."
             )
-            self._logged_prompt_waveform_fallback = True
-        return self._encode_prompt_waveform_to_latents(
-            waveform,
-            info_dict.get("prompt_waveform_length"),
-        )
-
-    @torch.inference_mode()
-    def encode_prompt_waveform_for_ingress(
-        self,
-        prompt_waveform: Any,
-        prompt_waveform_length: Any = None,
-    ) -> torch.Tensor:
-        prompt_latents = self._encode_prompt_waveform_to_latents(prompt_waveform, prompt_waveform_length)
-        if prompt_latents is None:
-            raise RuntimeError("Ming prompt waveform encoder is unavailable")
-        return prompt_latents["frames"].detach().to("cpu", dtype=torch.float32).contiguous()
-
-    def _encode_prompt_waveform_to_latents(
-        self,
-        waveform: Any,
-        waveform_length: Any = None,
-    ) -> dict[str, torch.Tensor] | None:
-        encoder = self._ensure_prompt_audio_encoder()
-        if encoder is None:
-            return None
-
-        latent = encode_prompt_waveform_to_frame_latents(
-            encoder,
-            waveform,
-            waveform_length,
-            patch_size=self.ming_config.patch_size,
-            latent_dim=self.ming_config.latent_dim,
-            sample_rate=self.ming_config.sample_rate,
-            frame_hop=self.ming_config.audio_frame_hop,
-        )
-        return _coerce_prompt_latents(
-            latent,
-            patch_size=self.ming_config.patch_size,
-            latent_dim=self.ming_config.latent_dim,
-        )
-
-    def _ensure_prompt_audio_encoder(self) -> AudioVAE | None:
-        if self._prompt_audio_encoder is not None:
-            return self._prompt_audio_encoder
-        if self.ming_config.audio_tokenizer_config is None:
-            return None
-        self._prompt_audio_encoder = AudioVAE(self.ming_config.audio_tokenizer_config)
-        return self._prompt_audio_encoder
-
-    def _load_prompt_audio_encoder_weights(self, weights) -> None:
-        encoder = self._ensure_prompt_audio_encoder()
-        if encoder is None or self._prompt_audio_encoder_loaded:
-            return
-
-        state_dict = encoder.state_dict()
-        loaded = 0
-        with torch.no_grad():
-            for ckpt_name, loaded_weight in weights:
-                name = ckpt_name[len("audio.") :] if ckpt_name.startswith("audio.") else ckpt_name
-                if name not in state_dict:
-                    continue
-                target = state_dict[name]
-                if isinstance(target, torch.Tensor):
-                    weight_loader = getattr(target, "weight_loader", default_weight_loader)
-                    if weight_loader == default_weight_loader:
-                        target.copy_(loaded_weight.to(device=target.device, dtype=target.dtype))
-                    else:
-                        weight_loader(target, loaded_weight)
-                    loaded += 1
-        if loaded == 0:
-            logger.warning("Ming prompt audio encoder received no audio checkpoint weights; prompt_waveform cloning will be invalid.")
-            return
-        self._prompt_audio_encoder_loaded = True
+        return None
 
     def _decode_preprocess(
         self,
@@ -509,47 +374,6 @@ def _should_log_stage0_state(decode_step: int, stop_prob: float | None, threshol
     if stop_prob is not None and stop_prob > threshold:
         return True
     return chunk_size > 0 and (decode_step + 1) % chunk_size == 0
-
-
-def _tensor_summary(tensor: torch.Tensor) -> dict[str, Any] | None:
-    if not isinstance(tensor, torch.Tensor):
-        return None
-    flat = tensor.detach().to(dtype=torch.float32, device="cpu").reshape(-1).contiguous()
-    count = min(8, int(flat.numel()))
-    return {
-        "shape": tuple(tensor.shape),
-        "mean": float(flat.mean().item()) if flat.numel() else 0.0,
-        "std": float(flat.std(unbiased=False).item()) if flat.numel() else 0.0,
-        "min": float(flat.min().item()) if flat.numel() else 0.0,
-        "max": float(flat.max().item()) if flat.numel() else 0.0,
-        "first8": flat[:count].tolist(),
-        "sha256_fp32": hashlib.sha256(flat.numpy().tobytes()).hexdigest(),
-    }
-
-
-def _ordered_unique_token_ids(token_ids: list[Any]) -> list[int]:
-    ordered: list[int] = []
-    seen: set[int] = set()
-    for token_id in token_ids:
-        if token_id is None:
-            continue
-        value = int(token_id)
-        if value in seen:
-            continue
-        seen.add(value)
-        ordered.append(value)
-    return ordered
-
-
-def _embedding_weight_probe(weight: torch.Tensor, token_ids: list[int]) -> dict[str, Any]:
-    if not token_ids:
-        return {"token_ids": [], "rows": None}
-    row_index = torch.tensor(token_ids, dtype=torch.long, device=weight.device)
-    rows = weight.index_select(0, row_index)
-    return {
-        "token_ids": token_ids,
-        "rows": _tensor_summary(rows),
-    }
 
 
 def _coerce_prompt_latents(

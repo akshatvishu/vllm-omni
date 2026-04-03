@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 import torch
@@ -8,19 +7,11 @@ from vllm.inputs import TextPrompt
 from vllm.logger import init_logger
 
 from vllm_omni.inputs.data import OmniTokensPrompt
-from vllm_omni.model_executor.models.ming_tts.prompt_builder import (
-    build_dense_prompt_token_ids,
-    coerce_speaker_embeddings,
-    count_prompt_latent_patches,
-    create_instruction,
-)
 from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
     AUDIO_DUMMY_TOKEN_ID,
     AUDIO_START_TOKEN_ID,
     KEY_CHUNK_ID,
-    KEY_PROMPT_LATENTS,
     KEY_REQUEST_ID,
-    KEY_SPEAKER_EMBEDDING,
     LATENT_DIM,
     LATENT_CHUNK_SIZE,
     LATENT_LEFT_CONTEXT,
@@ -35,30 +26,6 @@ MING_ESTIMATED_BYTES_KEY = "ming_estimated_bytes"
 MING_FINAL_FLUSH_KEY = "ming_final_flush"
 MING_STOP_REASON_KEY = "ming_stop_reason"
 MING_FINAL_DECODE_STEP_KEY = "ming_final_decode_step"
-
-
-def _rpc_safe_value(value: Any) -> Any:
-    if isinstance(value, torch.Tensor):
-        tensor = value.detach().to("cpu")
-        if tensor.ndim == 0:
-            return tensor.item()
-        return tensor.tolist()
-    return value
-
-
-def _unwrap_collective_rpc_result(results: Any) -> Any:
-    if not isinstance(results, list) or len(results) != 1:
-        raise RuntimeError(f"Expected one stage collective_rpc result, got {type(results).__name__}: {results!r}")
-    stage_result = results[0]
-    if isinstance(stage_result, dict):
-        error = stage_result.get("error")
-        if error is not None:
-            raise RuntimeError(f"Ming prompt finalization RPC failed: {error}")
-    if isinstance(stage_result, list):
-        if not stage_result:
-            raise RuntimeError("Ming prompt finalization RPC returned no worker results")
-        return stage_result[0]
-    return stage_result
 
 
 def _rebuild_prompt_token_ids_with_exact_patch_count(prompt_token_ids: Any, prompt_patch_count: int) -> list[int]:
@@ -78,85 +45,6 @@ def _rebuild_prompt_token_ids_with_exact_patch_count(prompt_token_ids: Any, prom
         raise ValueError("Ming prompt finalization expected only trailing <audioPatch> tokens after <audio>")
 
     return prompt_token_ids[: audio_start_index + 1] + ([AUDIO_DUMMY_TOKEN_ID] * int(prompt_patch_count))
-
-
-def finalize_initial_prompt(
-    engine: Any,
-    prompt: Any,
-    request_id: str,
-    params: Any,
-) -> Any:
-    del request_id, params
-    if not isinstance(prompt, dict):
-        return prompt
-
-    raw_additional_information = prompt.get("additional_information")
-    if raw_additional_information is None:
-        additional_information = {}
-    elif isinstance(raw_additional_information, dict):
-        additional_information = raw_additional_information
-    else:
-        return prompt
-
-    prompt_waveform = additional_information.get("prompt_waveform", prompt.get("prompt_waveform"))
-    prompt_text = additional_information.get("prompt_text", prompt.get("prompt_text"))
-    if prompt_waveform is None or prompt_text is None:
-        return prompt
-
-    prompt_waveform_length = additional_information.get("prompt_waveform_length", prompt.get("prompt_waveform_length"))
-    rpc_results = engine.collective_rpc(
-        method="encode_ming_prompt_waveform",
-        args=(
-            _rpc_safe_value(prompt_waveform),
-            _rpc_safe_value(prompt_waveform_length),
-        ),
-        stage_ids=[0],
-    )
-    prompt_latents = _unwrap_collective_rpc_result(rpc_results)
-    prompt_patch_count = count_prompt_latent_patches(
-        prompt_latents,
-        patch_size=PATCH_SIZE,
-        latent_dim=LATENT_DIM,
-    )
-
-    finalized_prompt = copy.copy(prompt)
-    finalized_additional_information = dict(additional_information)
-    finalized_prompt["additional_information"] = finalized_additional_information
-    finalized_additional_information[KEY_PROMPT_LATENTS] = prompt_latents
-
-    prompt_prefix = finalized_prompt.get("prompt")
-    text = finalized_prompt.get("text")
-    if isinstance(prompt_prefix, str) and isinstance(text, str):
-        tokenizer = engine.input_processor.tokenizer
-        speaker_embedding = finalized_prompt.get("speaker_embedding")
-        if speaker_embedding is None:
-            speaker_embedding = finalized_additional_information.get(KEY_SPEAKER_EMBEDDING)
-        speaker_embeddings = coerce_speaker_embeddings(
-            speaker_embedding,
-            use_zero_spk_emb=bool(finalized_additional_information.get("use_zero_spk_emb", False)),
-        )
-
-        instruction = finalized_prompt.get("instruction")
-        if instruction is None:
-            instruction = finalized_additional_information.get("instruction")
-        instruction_text = instruction if isinstance(instruction, str) else create_instruction(instruction)
-
-        finalized_prompt["prompt_token_ids"] = build_dense_prompt_token_ids(
-            tokenizer,
-            prompt=prompt_prefix,
-            text=text,
-            instruction=instruction_text,
-            prompt_text=prompt_text,
-            speaker_count=0 if speaker_embeddings is None else len(speaker_embeddings),
-            prompt_patch_count=prompt_patch_count,
-        )
-        return finalized_prompt
-
-    finalized_prompt["prompt_token_ids"] = _rebuild_prompt_token_ids_with_exact_patch_count(
-        finalized_prompt.get("prompt_token_ids"),
-        prompt_patch_count,
-    )
-    return finalized_prompt
 
 
 def _extract_last_patch(pooling_output: dict[str, Any] | None) -> torch.Tensor | None:
