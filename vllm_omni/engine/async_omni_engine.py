@@ -160,6 +160,27 @@ def _upgrade_to_omni_request(
     )
 
 
+def _consume_processed_prompt(
+    input_processor: InputProcessor | None,
+    fallback_prompt: Any,
+) -> Any:
+    """Return the prompt dict actually seen by the stage-0 preprocessor."""
+    if input_processor is None:
+        return fallback_prompt
+    preprocessor = getattr(input_processor, "input_preprocessor", None)
+    if preprocessor is None:
+        return fallback_prompt
+    consume = getattr(preprocessor, "consume_last_processed_prompt", None)
+    if consume is None:
+        return fallback_prompt
+    processed_prompt = consume()
+    if processed_prompt is None:
+        return fallback_prompt
+    if fallback_prompt is not None and not isinstance(processed_prompt, type(fallback_prompt)):
+        return fallback_prompt
+    return processed_prompt
+
+
 def _weak_shutdown_async_omni_engine(
     orchestrator_thread: threading.Thread | None,
     request_queue: janus.Queue[dict[str, Any]] | None,
@@ -413,10 +434,19 @@ class AsyncOmniEngine:
                 # Use omni preprocessor so text-only prompts with
                 # mm_processor_kwargs (e.g. GLM-Image t2i target_h/target_w)
                 # still go through multimodal processor path.
-                input_processor.input_preprocessor = OmniInputPreprocessor(
+                omni_preprocessor = OmniInputPreprocessor(
                     vllm_config=started.vllm_config,
                     renderer=input_processor.renderer,
                 )
+                ingress_processor_factory = getattr(started.metadata, "initial_prompt_processor_factory", None)
+                if ingress_processor_factory is not None:
+                    omni_preprocessor.set_initial_prompt_processor(
+                        ingress_processor_factory(
+                            vllm_config=started.vllm_config,
+                            tokenizer=tokenizer,
+                        )
+                    )
+                input_processor.input_preprocessor = omni_preprocessor
         except Exception:
             try:
                 stage_client.shutdown()
@@ -672,9 +702,10 @@ class AsyncOmniEngine:
                 arrival_time=arrival_time,
                 resumable=resumable,
             )
+            processed_prompt = _consume_processed_prompt(self.input_processor, prompt)
             # TODO (Peiqi): add this for Qwen3-TTS only. Other models don't have
             # additional_information field in the prompt.
-            request = _upgrade_to_omni_request(request, prompt)
+            request = _upgrade_to_omni_request(request, processed_prompt)
 
             # Restore external_req_id to the original user-facing request_id.
             # InputProcessor.process_inputs() renames request_id to an internal
@@ -736,12 +767,13 @@ class AsyncOmniEngine:
                 params=companion_params,
                 supported_tasks=self.supported_tasks,
             )
-            request = _upgrade_to_omni_request(request, companion_prompt)
+            processed_prompt = _consume_processed_prompt(self.input_processor, companion_prompt)
+            request = _upgrade_to_omni_request(request, processed_prompt)
             request.external_req_id = cid
 
             self.output_processors[0].add_request(
                 request=request,
-                prompt=companion_prompt,
+                prompt=processed_prompt,
                 parent_req=None,
                 request_index=0,
                 queue=None,

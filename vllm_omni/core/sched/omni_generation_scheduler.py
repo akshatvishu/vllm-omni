@@ -1,12 +1,12 @@
 import time
 from collections import defaultdict
+from enum import Enum
 
 from vllm.compilation.cuda_graph import CUDAGraphStat
 from vllm.distributed.kv_events import KVEventBatch
 from vllm.distributed.kv_transfer.kv_connector.v1.metrics import KVConnectorStats
 from vllm.logger import init_logger
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks
-from vllm.v1.core.sched.interface import PauseState
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.core.sched.request_queue import create_request_queue
 from vllm.v1.core.sched.scheduler import Scheduler as VLLMScheduler
@@ -23,6 +23,13 @@ from vllm_omni.distributed.omni_connectors.transfer_adapter.chunk_transfer_adapt
 from vllm_omni.outputs import OmniModelRunnerOutput
 
 logger = init_logger(__name__)
+
+try:
+    from vllm.v1.core.sched.interface import PauseState  # type: ignore[attr-defined]
+except ImportError:
+    class PauseState(Enum):
+        UNPAUSED = "unpaused"
+        PAUSED_ALL = "paused_all"
 
 
 class OmniGenerationScheduler(VLLMScheduler):
@@ -42,7 +49,8 @@ class OmniGenerationScheduler(VLLMScheduler):
         """
 
         token_budget = self.max_num_scheduled_tokens
-        if self._pause_state == PauseState.PAUSED_ALL:
+        pause_state = getattr(self, "_pause_state", PauseState.UNPAUSED)
+        if pause_state == PauseState.PAUSED_ALL:
             token_budget = 0
         scheduled_timestamp = time.monotonic()
 
@@ -56,7 +64,7 @@ class OmniGenerationScheduler(VLLMScheduler):
         scheduled_spec_decode_tokens: dict[str, list[int]] = {}
         scheduled_encoder_inputs: dict[str, list[int]] = {}
         cached_prompt_token_ids: dict[str, list[int]] = {}
-        cached_additional_information: dict[str, dict | None] = {}
+        cached_model_intermediate_buffer: dict[str, dict | None] = {}
 
         # Temporary queue: preserve waiting order, do not disturb non-diffusion requests
         skipped_waiting_requests = create_request_queue(self.policy)
@@ -115,7 +123,9 @@ class OmniGenerationScheduler(VLLMScheduler):
             cached_prompt_token_ids[request.request_id] = request.prompt_token_ids
             if request.num_cached_tokens < 0:
                 request.num_cached_tokens = num_computed_tokens
-            cached_additional_information[request.request_id] = getattr(request, "additional_information", None)
+            cached_model_intermediate_buffer[request.request_id] = (
+                getattr(request, "model_intermediate_buffer", None) or getattr(request, "additional_information", None)
+            )
             token_budget -= num_new_tokens
             scheduled_running_reqs.append(request)
             req_index += 1
@@ -130,7 +140,7 @@ class OmniGenerationScheduler(VLLMScheduler):
             self.waiting
             and token_budget > 0
             and len(self.running) < self.max_num_running_reqs
-            and self._pause_state == PauseState.UNPAUSED
+            and pause_state == PauseState.UNPAUSED
         ):
             request = self.waiting.peek_request()
             # OMNI: Skip requests that are not in self.requests
@@ -243,7 +253,8 @@ class OmniGenerationScheduler(VLLMScheduler):
             num_computed_tokens=cached_reqs_data.num_computed_tokens,
             num_output_tokens=cached_reqs_data.num_output_tokens,
             prompt_token_ids=cached_prompt_token_ids,
-            additional_information=cached_additional_information,
+            additional_information={},
+            model_intermediate_buffer=cached_model_intermediate_buffer,
         )
 
         total_num_scheduled_tokens = sum(num_scheduled_tokens.values())
@@ -303,7 +314,11 @@ class OmniGenerationScheduler(VLLMScheduler):
                     lora_request=nr.lora_request,
                     # Enrich with omni payloads from the live request object
                     prompt_embeds=(getattr(request, "prompt_embeds", None) if request else None),
-                    additional_information=(getattr(request, "additional_information", None) if request else None),
+                    additional_information=None,
+                    model_intermediate_buffer=(
+                        (getattr(request, "model_intermediate_buffer", None) if request else None)
+                        or (getattr(request, "additional_information", None) if request else None)
+                    ),
                 )
                 new_list.append(omni_nr)
 

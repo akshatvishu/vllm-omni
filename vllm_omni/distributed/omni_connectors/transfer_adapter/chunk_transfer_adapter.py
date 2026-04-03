@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import importlib
+import time
 from collections import defaultdict, deque
 from typing import Any
 
@@ -14,6 +15,11 @@ from ..utils.logging import get_connector_logger
 from .base import OmniTransferAdapterBase
 
 logger = get_connector_logger(__name__)
+
+RX_TRANSFER_BYTES_KEY = "_omni_rx_transfer_bytes"
+RX_DECODE_TIME_MS_KEY = "_omni_rx_decode_time_ms"
+RX_IN_FLIGHT_TIME_MS_KEY = "_omni_rx_in_flight_time_ms"
+SENT_TS_KEY = "_omni_sent_ts"
 
 
 class OmniChunkTransferAdapter(OmniTransferAdapterBase):
@@ -131,6 +137,7 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         connector_get_key = f"{external_req_id}_{target_stage_id}_{chunk_id}"
 
         # Use timeout=0 for non-blocking poll
+        t0 = time.time()
         try:
             result = self.connector.get(
                 str(target_stage_id),
@@ -140,31 +147,41 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         except Exception as e:
             logger.error(f"SharedMemoryConnector get failed for req {connector_get_key}: {e}")
             return False
+        t1 = time.time()
 
         if result is None:
             return False
         payload_data, size = result
 
         if payload_data:
+            payload_data = dict(payload_data)
+            payload_data[RX_TRANSFER_BYTES_KEY] = int(size)
+            payload_data[RX_DECODE_TIME_MS_KEY] = float((t1 - t0) * 1000.0)
+            sent_ts = payload_data.pop(SENT_TS_KEY, None)
+            if sent_ts is not None:
+                try:
+                    payload_data[RX_IN_FLIGHT_TIME_MS_KEY] = float(max((t1 - float(sent_ts)) * 1000.0, 0.0))
+                except Exception:
+                    payload_data[RX_IN_FLIGHT_TIME_MS_KEY] = 0.0
+            else:
+                payload_data[RX_IN_FLIGHT_TIME_MS_KEY] = 0.0
             # Update connector state
             self.get_req_chunk[req_id] += 1
 
             if self.model_mode == "ar":
                 self._update_request_payload(external_req_id, payload_data)
                 request.additional_information = payload_data
+                request.model_intermediate_buffer = payload_data
                 if payload_data.get("finished"):
                     self.finished_requests.add(req_id)
             else:
+                request.additional_information = payload_data
+                request.model_intermediate_buffer = payload_data
                 if payload_data.get("finished"):
                     self.finished_requests.add(req_id)
 
                 new_ids = payload_data.get("code_predictor_codes", [])
                 request.prompt_token_ids = new_ids
-                # Pass additional fields (like left_context_size) to the request
-                # Only pass chunk context metadata in additional_information
-                request.additional_information = {}
-                if "left_context_size" in payload_data:
-                    request.additional_information["left_context_size"] = payload_data["left_context_size"]
                 request.num_computed_tokens = 0
 
                 # Empty chunk with more data expected: keep polling.
@@ -229,13 +246,17 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
 
         if not payload_data:
             return
+        payload_data = dict(payload_data)
+        payload_data[SENT_TS_KEY] = time.time()
 
+        t0 = time.time()
         success, size, metadata = self.connector.put(
             from_stage=str(stage_id),
             to_stage=str(next_stage_id),
             put_key=connector_put_key,
             data=payload_data,
         )
+        t1 = time.time()
 
         if success:
             self.put_req_chunk[external_req_id] += 1
@@ -349,20 +370,24 @@ class OmniChunkTransferAdapter(OmniTransferAdapterBase):
         clean up ready chunks from scheduler output.
         """
         if requests is not None:
-            self.attach_cached_additional_information(scheduler_output, requests)
+            self.attach_cached_model_intermediate_buffer(scheduler_output, requests)
         self._clear_chunk_ready(scheduler_output)
 
     @staticmethod
-    def attach_cached_additional_information(scheduler_output: Any, requests: dict[str, Request]) -> None:
+    def attach_cached_model_intermediate_buffer(scheduler_output: Any, requests: dict[str, Request]) -> None:
         cached_reqs = getattr(scheduler_output, "scheduled_cached_reqs", None)
         if not cached_reqs:
             return
-        if not hasattr(cached_reqs, "additional_information"):
-            cached_reqs.additional_information = {}
+        if not hasattr(cached_reqs, "model_intermediate_buffer"):
+            cached_reqs.model_intermediate_buffer = {}
         for req_id in cached_reqs.req_ids:
             request = requests.get(req_id) if req_id else None
-            additional_info = getattr(request, "additional_information", None) if request else None
-            cached_reqs.additional_information[req_id] = additional_info
+            info = None
+            if request is not None:
+                info = getattr(request, "model_intermediate_buffer", None) or getattr(
+                    request, "additional_information", None
+                )
+            cached_reqs.model_intermediate_buffer[req_id] = info
 
     def _process_chunk_queue(
         self,

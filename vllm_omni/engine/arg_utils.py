@@ -18,6 +18,9 @@ def _register_omni_hf_configs() -> None:
         from transformers import AutoConfig
 
         from vllm_omni.model_executor.models.cosyvoice3.config import CosyVoice3Config
+        from vllm_omni.model_executor.models.ming_tts.configuration_ming_dense import (
+            MingDenseConfig,
+        )
         from vllm_omni.model_executor.models.qwen3_tts.configuration_qwen3_tts import (
             Qwen3TTSConfig,
         )
@@ -38,6 +41,17 @@ def _register_omni_hf_configs() -> None:
         except ValueError:
             # Already registered elsewhere; ignore.
             pass
+    try:
+        AutoConfig.register("dense", MingDenseConfig)
+    except ValueError:
+        pass
+
+    try:
+        AutoConfig.register("qwen3_tts", Qwen3TTSConfig)
+        AutoConfig.register("cosyvoice3", CosyVoice3Config)
+    except ValueError:
+        # Already registered elsewhere; ignore.
+        pass
 
 
 def register_omni_models_to_vllm():

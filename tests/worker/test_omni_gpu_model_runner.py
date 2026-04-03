@@ -223,6 +223,30 @@ def test_update_intermediate_buffer_skips_unknown_req_id():
     assert "unknown_req" not in runner.model_intermediate_buffer
 
 
+def test_update_additional_information_prefers_model_intermediate_buffer():
+    runner = _make_runner(req_ids=("r1",), hidden_size=4)
+
+    scheduler_output = SimpleNamespace(
+        scheduled_new_reqs=[
+            SimpleNamespace(
+                req_id="r1",
+                model_intermediate_buffer={"new_field": 1},
+                additional_information={"stale_field": 2},
+            )
+        ],
+        scheduled_cached_reqs=SimpleNamespace(
+            model_intermediate_buffer={"r1": {"cached_field": 3}},
+        ),
+    )
+
+    OmniGPUModelRunner._update_additional_information(runner, scheduler_output)
+
+    info = runner.model_intermediate_buffer["r1"]
+    assert info["new_field"] == 1
+    assert info["cached_field"] == 3
+    assert "stale_field" not in info
+
+
 def test_maybe_attach_mimo_audio_req_infos_enriches_dict():
     runner = _make_runner_for_mimo()
     req_id = "r_mimo"

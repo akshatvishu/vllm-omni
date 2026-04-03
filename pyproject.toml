@@ -134,6 +134,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "examples/**" = ["E501"]  # Allow long lines in examples
 "tests/**" = ["E501"]  # Allow long lines in tests
+"vllm_omni/model_executor/models/ming_tts/fm/CFM.py" = ["N999"]  # Keep upstream Ming module filename.
 
 [tool.mypy]
 python_version = "3.12, 3.13"

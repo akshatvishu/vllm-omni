@@ -256,13 +256,30 @@ class OmniBase:
             metrics.stage_first_ts[stage_id] = submit_ts if submit_ts is not None else now
         metrics.stage_last_ts[stage_id] = max(metrics.stage_last_ts[stage_id] or 0.0, now)
 
-        _m = result.get("metrics")
-        if finished and _m is not None:
-            metrics.on_stage_metrics(stage_id, req_id, _m)
-
         stage_meta = self.engine.get_stage_metadata(stage_id)
         if not stage_meta["final_output"]:
             return None
+
+        images = getattr(engine_outputs, "images", []) if stage_meta["final_output_type"] == "image" else []
+        output_to_yield = OmniRequestOutput(
+            request_id=req_id or "",
+            stage_id=stage_id,
+            final_output_type=stage_meta["final_output_type"],
+            request_output=engine_outputs,
+            images=images,
+            stage_durations=stage_durations,
+            peak_memory_mb=peak_memory_mb,
+        )
+        metrics.process_stage_metrics(
+            result=result,
+            stage_type=stage_meta["stage_type"],
+            stage_id=stage_id,
+            req_id=req_id,
+            engine_outputs=engine_outputs,
+            finished=finished,
+            final_output_type=stage_meta["final_output_type"],
+            output_to_yield=output_to_yield,
+        )
 
         try:
             rid_key = str(req_id)
@@ -274,17 +291,7 @@ class OmniBase:
                 )
         except Exception:
             logger.exception("[%s] Finalize request handling error", self.__class__.__name__)
-
-        images = getattr(engine_outputs, "images", []) if stage_meta["final_output_type"] == "image" else []
-        return OmniRequestOutput(
-            request_id=req_id or "",
-            stage_id=stage_id,
-            final_output_type=stage_meta["final_output_type"],
-            request_output=engine_outputs,
-            images=images,
-            stage_durations=stage_durations,
-            peak_memory_mb=peak_memory_mb,
-        )
+        return output_to_yield
 
     def shutdown(self) -> None:
         logger.info("[%s] Shutting down", self.__class__.__name__)

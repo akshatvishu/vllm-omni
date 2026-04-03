@@ -72,6 +72,7 @@ class StageEngineCoreClient(AsyncMPClient):
             self.final_output_type = metadata.final_output_type
             self.default_sampling_params = metadata.default_sampling_params
             self.custom_process_input_func = metadata.custom_process_input_func
+            self.initial_prompt_finalizer_func = metadata.initial_prompt_finalizer_func
             self.model_stage = metadata.model_stage
 
         self.engine_outputs: Any = None

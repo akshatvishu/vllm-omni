@@ -180,7 +180,11 @@ class OmniARScheduler(VLLMScheduler):
                     lora_request=nr.lora_request,
                     # Enrich with omni payloads from the live request object
                     prompt_embeds=(getattr(request, "prompt_embeds", None) if request else None),
-                    additional_information=(getattr(request, "additional_information", None) if request else None),
+                    additional_information=None,
+                    model_intermediate_buffer=(
+                        (getattr(request, "model_intermediate_buffer", None) if request else None)
+                        or (getattr(request, "additional_information", None) if request else None)
+                    ),
                 )
                 new_list.append(omni_nr)
 

@@ -34,6 +34,39 @@ from vllm_omni.metrics.utils import count_tokens_from_outputs
 
 logger = init_logger(__name__)
 
+RX_TRANSFER_BYTES_KEY = "_omni_rx_transfer_bytes"
+RX_DECODE_TIME_MS_KEY = "_omni_rx_decode_time_ms"
+RX_IN_FLIGHT_TIME_MS_KEY = "_omni_rx_in_flight_time_ms"
+
+
+def _extract_request_output_multimodal_output(request_outputs: list[RequestOutput]) -> dict[str, Any]:
+    for request_output in reversed(request_outputs):
+        for completion_output in reversed(getattr(request_output, "outputs", []) or []):
+            multimodal_output = getattr(completion_output, "multimodal_output", None)
+            if isinstance(multimodal_output, dict) and multimodal_output:
+                return multimodal_output
+        multimodal_output = getattr(request_output, "multimodal_output", None)
+        if isinstance(multimodal_output, dict) and multimodal_output:
+            return multimodal_output
+    return {}
+
+
+def _extract_last_scalar(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if isinstance(value, torch.Tensor):
+        if value.numel() == 0:
+            return default
+        return float(value.reshape(-1)[-1].item())
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return default
+        return _extract_last_scalar(value[-1], default=default)
+    try:
+        return float(value)
+    except Exception:
+        return default
+
 
 def build_engine_core_request_from_tokens(
     request_id: str,
@@ -453,6 +486,10 @@ class Orchestrator:
                 ptids = getattr(ro, "prompt_token_ids", None)
                 if ptids is not None:
                     num_tokens_in += len(ptids)
+        multimodal_output = _extract_request_output_multimodal_output(request_outputs)
+        rx_transfer_bytes = int(_extract_last_scalar(multimodal_output.get(RX_TRANSFER_BYTES_KEY), default=0.0))
+        rx_decode_time_ms = _extract_last_scalar(multimodal_output.get(RX_DECODE_TIME_MS_KEY), default=0.0)
+        rx_in_flight_time_ms = _extract_last_scalar(multimodal_output.get(RX_IN_FLIGHT_TIME_MS_KEY), default=0.0)
 
         # Monotonic batch counter per stage.
         self._batch_seq[stage_id] += 1
@@ -468,9 +505,9 @@ class Orchestrator:
             stage_gen_time_ms=stage_gen_time_ms,
             batch_id=batch_id,
             batch_size=1,
-            rx_decode_time_ms=0.0,
-            rx_transfer_bytes=0,
-            rx_in_flight_time_ms=0.0,
+            rx_decode_time_ms=rx_decode_time_ms,
+            rx_transfer_bytes=rx_transfer_bytes,
+            rx_in_flight_time_ms=rx_in_flight_time_ms,
             stage_stats=StageStats(
                 total_token=self._agg_total_tokens[stage_id],
                 total_gen_time_ms=self._agg_total_gen_time_ms[stage_id],

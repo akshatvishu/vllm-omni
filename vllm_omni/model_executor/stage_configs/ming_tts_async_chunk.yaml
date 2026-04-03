@@ -1,0 +1,65 @@
+async_chunk: true
+stage_args:
+  - stage_id: 0
+    stage_type: llm
+    runtime:
+      process: true
+      devices: "0"
+      max_batch_size: 1
+    engine_args:
+      dtype: float16
+      model_stage: llm
+      model_arch: MingTTSForConditionalGeneration
+      hf_config_name: llm_config
+      worker_type: ar
+      scheduler_cls: vllm_omni.core.sched.omni_ar_scheduler.OmniARScheduler
+      gpu_memory_utilization: 0.45
+      enforce_eager: true
+      trust_remote_code: false
+      enable_prefix_caching: false
+      engine_output_type: latent
+      max_model_len: 8192
+      max_num_batched_tokens: 8192
+      custom_process_next_stage_input_func: vllm_omni.model_executor.stage_input_processors.ming_tts.llm2audio_vae_async_chunk
+    initial_prompt_processor: vllm_omni.model_executor.models.ming_tts.ingress.build_ming_ingress_processor
+    is_comprehension: true
+    final_output: true
+    final_output_type: text
+    default_sampling_params:
+      temperature: 0.0
+      top_p: 1.0
+      top_k: -1
+      max_tokens: 512
+      detokenize: true
+
+  - stage_id: 1
+    stage_type: llm
+    runtime:
+      process: true
+      devices: "0"
+      max_batch_size: 1
+    engine_args:
+      dtype: float32
+      model_stage: audio_vae
+      model_arch: MingTTSForConditionalGeneration
+      hf_config_name: llm_config
+      worker_type: generation
+      scheduler_cls: vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler
+      gpu_memory_utilization: 0.25
+      enforce_eager: true
+      trust_remote_code: false
+      async_scheduling: false
+      enable_prefix_caching: false
+      engine_output_type: audio
+      max_model_len: 8192
+      max_num_batched_tokens: 8192
+    engine_input_source: [0]
+    is_comprehension: false
+    final_output: true
+    final_output_type: audio
+    default_sampling_params:
+      temperature: 0.0
+      top_p: 1.0
+      top_k: -1
+      max_tokens: 1
+      detokenize: false

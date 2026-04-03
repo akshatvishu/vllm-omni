@@ -61,6 +61,14 @@ class OmniGPUModelRunner(GPUModelRunner):
         self._omni_num_scheduled_tokens_np: np.ndarray | None = None
         self._omni_last_model_output: object | None = None
 
+    @staticmethod
+    def _get_model_intermediate_payload(source: Any) -> tuple[Any, bool]:
+        payload = getattr(source, "model_intermediate_buffer", None)
+        if payload is not None:
+            return payload, False
+        payload = getattr(source, "additional_information", None)
+        return payload, payload is not None
+
     def initialize_metadata_builders(self, kv_cache_config, kernel_block_sizes):
         """Override to fix scheduler_metadata buffer size for FA3 + CUDA graph.
 
@@ -359,21 +367,21 @@ class OmniGPUModelRunner(GPUModelRunner):
                         pass
             except Exception as e:
                 logger.error(f"Error decoding prompt embeds: {e}")
-            # Decode additional_information payloads (dictionary)
+            # Decode per-request intermediate payloads into CPU buffer state.
             try:
-                if getattr(new_req_data, "additional_information", None) is not None:
+                payload_info, used_deprecated_field = self._get_model_intermediate_payload(new_req_data)
+                if used_deprecated_field:
                     logger.warning_once(
                         "additional_information on request data is deprecated, use model_intermediate_buffer"
                     )
-                    payload_info = new_req_data.additional_information
-                    info_dict = deserialize_additional_information(payload_info)
-                    if info_dict:
-                        self.model_intermediate_buffer[req_id] = info_dict
-                        setattr(
-                            self.requests[req_id],
-                            "additional_information_cpu",
-                            info_dict,
-                        )
+                info_dict = deserialize_additional_information(payload_info)
+                if info_dict:
+                    self.model_intermediate_buffer[req_id] = info_dict
+                    setattr(
+                        self.requests[req_id],
+                        "additional_information_cpu",
+                        info_dict,
+                    )
             except Exception as e:
                 logger.error(f"Error decoding additional information: {e}")
 
@@ -925,8 +933,8 @@ class OmniGPUModelRunner(GPUModelRunner):
             pe_cpu = self._resolve_prompt_embeds_cpu(getattr(nr, "prompt_embeds", None))
             if pe_cpu is not None:
                 setattr(self.requests[req_id], "prompt_embeds_cpu", pe_cpu)
-            info_payload = getattr(nr, "additional_information", None)
-            if info_payload is not None:
+            info_payload, used_deprecated_field = self._get_model_intermediate_payload(nr)
+            if used_deprecated_field:
                 logger.warning_once(
                     "additional_information on request data is deprecated, use model_intermediate_buffer"
                 )
@@ -951,6 +959,15 @@ class OmniGPUModelRunner(GPUModelRunner):
             info = self.model_intermediate_buffer.get(req_id, {})
             if info:
                 info["generated_len"] = generated_len
+                if generated_len == 0 or generated_len % 10 == 0:
+                    logger.info(
+                        "MING_RUNTIME_INFO %s",
+                        {
+                            "request_id": req_id,
+                            "generated_len": generated_len,
+                            "ming_decode_step": info.get("ming_decode_step"),
+                        },
+                    )
                 per_req_runtime_info.append(info)
                 if "thinker_reply_part_per_request" in info:
                     q = info["thinker_reply_part_per_request"]
@@ -1042,12 +1059,23 @@ class OmniGPUModelRunner(GPUModelRunner):
 
     def _update_additional_information(self, scheduler_output: "SchedulerOutput") -> None:
         for new_req in scheduler_output.scheduled_new_reqs:
+            payload_info = getattr(new_req, "model_intermediate_buffer", None)
+            if isinstance(payload_info, dict):
+                self._update_intermediate_buffer(new_req.req_id, payload_info)
+                continue
+
             payload_info = getattr(new_req, "additional_information", None)
             if isinstance(payload_info, dict):
                 logger.warning_once(
                     "additional_information on request data is deprecated, use model_intermediate_buffer"
                 )
                 self._update_intermediate_buffer(new_req.req_id, payload_info)
+
+        cached_infos = getattr(scheduler_output.scheduled_cached_reqs, "model_intermediate_buffer", None)
+        if isinstance(cached_infos, dict):
+            for req_id, req_infos in cached_infos.items():
+                self._update_intermediate_buffer(req_id, req_infos)
+            return
 
         if hasattr(scheduler_output.scheduled_cached_reqs, "additional_information"):
             logger.warning_once(
@@ -1210,6 +1238,8 @@ class OmniGPUModelRunner(GPUModelRunner):
             decode_req_ids = []
             for req_index, req_id in enumerate(self.input_batch.req_ids):
                 req_infos = self.model_intermediate_buffer.get(req_id, {})
+                req_infos = dict(req_infos) if isinstance(req_infos, dict) else {}
+                req_infos.setdefault("req_id", req_id)
 
                 # mimo-audio check
                 req_state = self.requests.get(req_id)
@@ -1242,7 +1272,7 @@ class OmniGPUModelRunner(GPUModelRunner):
                     decode_req_ids.append(req_id)
 
                 # TODO(Peiqi): the merge stage could move out from the critical path
-                self._merge_additional_information_update(req_id, update_dict)
+                self._update_intermediate_buffer(req_id, update_dict)
 
                 # update the inputs_embeds and input_ids
                 seg_len = min(span_len, req_embeds.shape[0])
@@ -1300,7 +1330,7 @@ class OmniGPUModelRunner(GPUModelRunner):
             start_offset = int(self.query_start_loc.cpu[req_index])
             inputs_embeds[start_offset : start_offset + 1] = req_embeds[idx : idx + 1]
             update_dict = {out_key: code_predictor_codes[idx : idx + 1]}
-            self._merge_additional_information_update(req_id, update_dict)
+            self._update_intermediate_buffer(req_id, update_dict)
 
     def _model_forward(
         self,

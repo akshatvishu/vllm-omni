@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
+import torch
 
 from vllm_omni.metrics import OrchestratorAggregator
 from vllm_omni.metrics.stats import RequestE2EStats, StageRequestStats, StageStats
@@ -67,6 +70,7 @@ def test_orchestrator_aggregator_builds_summary() -> None:
     transfer_entry = _get_request_entry(summary["trans_table"], "r1")
     assert transfer_entry["transfers"][0]["edge"] == "0->1"
     assert transfer_entry["transfers"][0]["size_kbytes"] == 1.0
+    assert transfer_entry["transfers"][0]["tx_time_ms"] == 5.0
 
     e2e_entry = _get_request_entry(summary["e2e_table"], "r1")
     assert e2e_entry["e2e_total_tokens"] == 10
@@ -155,3 +159,37 @@ def test_build_and_log_summary_multiple_requests() -> None:
     r2_stage_entry = next(e for e in summary["stage_table"] if e["request_id"] == "r2")
     assert len(r1_stage_entry["stages"]) == 2
     assert len(r2_stage_entry["stages"]) == 1
+
+
+def test_process_stage_metrics_records_audio_frames() -> None:
+    agg = OrchestratorAggregator(num_stages=2, log_stats=True, wall_start_ts=0.0, final_stage_id_for_e2e=1)
+
+    stage_metrics = StageRequestStats(
+        batch_id=1,
+        batch_size=1,
+        num_tokens_in=0,
+        num_tokens_out=0,
+        stage_gen_time_ms=12.0,
+        rx_transfer_bytes=512,
+        rx_decode_time_ms=1.5,
+        rx_in_flight_time_ms=0.5,
+        stage_stats=StageStats(),
+    )
+    output_to_yield = SimpleNamespace(
+        final_output_type="audio",
+        multimodal_output={"audio": [torch.zeros(4), torch.zeros(6)]},
+        metrics={},
+    )
+
+    agg.process_stage_metrics(
+        result={"metrics": stage_metrics},
+        stage_type="generation",
+        stage_id=1,
+        req_id="r1",
+        engine_outputs=SimpleNamespace(outputs=[]),
+        finished=True,
+        final_output_type="audio",
+        output_to_yield=output_to_yield,
+    )
+
+    assert agg.stage_events["r1"][0].audio_generated_frames == 10

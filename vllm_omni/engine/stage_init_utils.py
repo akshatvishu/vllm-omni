@@ -115,6 +115,8 @@ class StageMetadata:
     final_output_type: str | None
     default_sampling_params: OmniSamplingParams
     custom_process_input_func: Callable | None
+    initial_prompt_finalizer_func: Callable | None
+    initial_prompt_processor_factory: Callable | None
     model_stage: str | None
     runtime_cfg: Any
     prompt_expand_func: Callable | None = None
@@ -152,6 +154,16 @@ def extract_stage_metadata(stage_config: Any) -> StageMetadata:
         mod_path, fn_name = stage_config.custom_process_input_func.rsplit(".", 1)
         custom_process_input_func = getattr(importlib.import_module(mod_path), fn_name)
 
+    initial_prompt_finalizer_func: Callable | None = None
+    if hasattr(stage_config, "initial_prompt_finalizer_func"):
+        mod_path, fn_name = stage_config.initial_prompt_finalizer_func.rsplit(".", 1)
+        initial_prompt_finalizer_func = getattr(importlib.import_module(mod_path), fn_name)
+
+    initial_prompt_processor_factory: Callable | None = None
+    if hasattr(stage_config, "initial_prompt_processor"):
+        mod_path, fn_name = stage_config.initial_prompt_processor.rsplit(".", 1)
+        initial_prompt_processor_factory = getattr(importlib.import_module(mod_path), fn_name)
+
     prompt_expand_func: Callable | None = None
     _pef_path = getattr(stage_config, "prompt_expand_func", None)
     if _pef_path:
@@ -176,6 +188,8 @@ def extract_stage_metadata(stage_config: Any) -> StageMetadata:
             final_output_type=final_output_type,
             default_sampling_params=default_sampling_params,
             custom_process_input_func=custom_process_input_func,
+            initial_prompt_finalizer_func=initial_prompt_finalizer_func,
+            initial_prompt_processor_factory=initial_prompt_processor_factory,
             model_stage=None,
             runtime_cfg=runtime_cfg,
             cfg_kv_collect_func=cfg_kv_collect_func,
@@ -197,6 +211,8 @@ def extract_stage_metadata(stage_config: Any) -> StageMetadata:
         final_output_type=final_output_type,
         default_sampling_params=default_sampling_params,
         custom_process_input_func=custom_process_input_func,
+        initial_prompt_finalizer_func=initial_prompt_finalizer_func,
+        initial_prompt_processor_factory=initial_prompt_processor_factory,
         model_stage=model_stage,
         runtime_cfg=runtime_cfg,
         prompt_expand_func=prompt_expand_func,
