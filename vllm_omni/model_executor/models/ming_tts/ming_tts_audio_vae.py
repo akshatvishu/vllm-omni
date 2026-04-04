@@ -218,12 +218,6 @@ class MingAudioVAEModel(nn.Module):
                     finished=finished,
                 )
             )
-            left_context_size = int(info.get("ming_left_context_size", 0))
-            if left_context_size > 0:
-                strip_samples = left_context_size * (
-                    self.ming_config.patch_size * self.ming_config.audio_frame_hop
-                )
-                waveform_flat = waveform_flat[..., strip_samples:]
             if should_log_chunk:
                 logger.debug(
                     "MING_STAGE1_DECODE %s",
@@ -233,7 +227,6 @@ class MingAudioVAEModel(nn.Module):
                         "finished": finished,
                         "latent_shape": tuple(latent_tensor.shape),
                         "patch_count": patch_count,
-                        "left_context_size": left_context_size,
                         "had_past_key_values": had_past_key_values,
                         "had_stream_state": had_stream_state,
                         "waveform_shape": tuple(waveform_flat.shape),
@@ -386,6 +379,8 @@ def _coerce_optional_float(value: Any, default: float = 0.0) -> float:
 def _coerce_optional_int(value: Any, default: int | None = None) -> int | None:
     if value is None:
         return default
+    if isinstance(value, list):
+        value = value[0] if value else default
     if isinstance(value, torch.Tensor):
         if value.numel() == 0:
             return default

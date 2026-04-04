@@ -185,7 +185,10 @@ def test_llm2audio_vae_async_chunk_rejects_left_context_config():
     transfer_manager = _manager(chunk_size=2, left_context=1)
     request = _req("rid-bad-cfg", finished=False)
 
-    with pytest.raises(ValueError, match="latent_left_context"):
+    with pytest.raises(
+        ValueError,
+        match="does not support latent_left_context replay.*Got latent_left_context=1",
+    ):
         llm2audio_vae_async_chunk(
             transfer_manager=transfer_manager,
             pooling_output={
