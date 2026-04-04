@@ -106,16 +106,13 @@ def _get_async_chunk_config(transfer_manager: Any) -> tuple[int, int]:
     left_context = int(cfg.get("latent_left_context", LATENT_LEFT_CONTEXT))
     if chunk_size <= 0:
         raise ValueError(f"Invalid Ming latent_chunk_size={chunk_size}")
-    if left_context != 0:
-        raise ValueError(
-            f"Ming async chunk transport does not support latent_left_context replay. Expected 0, got {left_context}."
-        )
     return chunk_size, left_context
 
 
 def _build_chunk_observability(
     latent_patches: torch.Tensor | None,
     *,
+    left_context_size: int = 0,
     final_flush: bool,
 ) -> dict[str, Any]:
     if latent_patches is None:
@@ -123,7 +120,7 @@ def _build_chunk_observability(
         latent_shape = None
         estimated_bytes = 0
     else:
-        emit_patch_count = int(latent_patches.shape[0])
+        emit_patch_count = int(latent_patches.shape[0]) - int(left_context_size)
         latent_shape = tuple(latent_patches.shape)
         estimated_bytes = int(latent_patches.numel() * latent_patches.element_size())
     return {
@@ -150,7 +147,7 @@ def llm2audio_vae_async_chunk(
     if patch is not None:
         transfer_manager.code_prompt_token_ids[request_id].append(patch)
 
-    chunk_size, _ = _get_async_chunk_config(transfer_manager)
+    chunk_size, left_context = _get_async_chunk_config(transfer_manager)
 
     patches = transfer_manager.code_prompt_token_ids[request_id]
     length = len(patches)
@@ -160,6 +157,7 @@ def llm2audio_vae_async_chunk(
             payload = {
                 "code_predictor_codes": [],
                 "finished": torch.tensor(True, dtype=torch.bool),
+                "ming_left_context_size": 0,
                 KEY_CHUNK_ID: chunk_id,
                 KEY_REQUEST_ID: request_id,
                 **observability,
@@ -187,14 +185,25 @@ def llm2audio_vae_async_chunk(
         return None
 
     emit_count = chunk_length if chunk_length != 0 else chunk_size
-    emit_patches = list(patches[:emit_count])
-    del patches[:emit_count]
-    latent_patches = torch.stack(emit_patches, dim=0)
-    observability = _build_chunk_observability(latent_patches, final_flush=finished)
+    emit_patches = list(patches[-emit_count:])
+
+    # Build sliding context window following Qwen3-TTS pattern.
+    # Read from history without consuming so replay can include prior patches.
+    end_index = min(length, left_context + emit_count)
+    window = list(patches[-end_index:]) if end_index > 0 else emit_patches
+    actual_left_context = max(0, end_index - emit_count)
+
+    latent_patches = torch.stack(window, dim=0)
+    observability = _build_chunk_observability(
+        latent_patches,
+        left_context_size=actual_left_context,
+        final_flush=finished,
+    )
 
     payload = {
         "code_predictor_codes": [0],
         "ming_latent_patches": latent_patches,
+        "ming_left_context_size": actual_left_context,
         "finished": torch.tensor(finished, dtype=torch.bool),
         KEY_CHUNK_ID: chunk_id,
         KEY_REQUEST_ID: request_id,
@@ -212,6 +221,7 @@ def llm2audio_vae_async_chunk(
             "chunk_id": chunk_id,
             "finished": finished,
             "buffered_patches": length,
+            "left_context_size": actual_left_context,
             "remaining_patches": len(patches),
             **observability,
         },
