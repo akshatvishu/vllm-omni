@@ -7,7 +7,7 @@ and are supported by Qwen-Image-Layered model.
 Kept cases (maximum feature coverage, no cpu-offload):
   sp_001              : cache_dit + Ulysses-SP 2          (2×H100)
   cfg_parallel_002    : cache_dit + CFG-Parallel 2        (2×H100)
-  layers_guard_001    : layerwise offload + layers=2      (1×H100, issue #1969 guard)
+  layers_guard_001    : layerwise offload + layers=3      (1×H100, issue #1969 guard)
 
 Total distinct features covered: cache_dit, Ulysses-SP, CFG-Parallel, layerwise-offload.
 """
@@ -26,6 +26,7 @@ from tests.utils import hardware_marks
 
 MODEL = "Qwen/Qwen-Image-Layered"
 EDIT_PROMPT = "Decompose this image into layers."
+EMPTY_EDIT_PROMPT = ""
 NEGATIVE_PROMPT = "blurry, low quality, distorted"
 PARALLEL_FEATURE_MARKS = hardware_marks(res={"cuda": "H100"}, num_cards=2)
 SINGLE_CARD_FEATURE_MARKS = hardware_marks(res={"cuda": "H100"})
@@ -59,6 +60,18 @@ FEATURE_CASES = [
             ],
         ),
         id="cfg_parallel_001",
+        marks=PARALLEL_FEATURE_MARKS,
+    ),
+    pytest.param(
+        OmniServerParams(
+            model=MODEL,
+            server_args=[
+                "--use-hsdp",
+                "--hsdp-shard-size",
+                "2",
+            ],
+        ),
+        id="parallel_hsdp",
         marks=PARALLEL_FEATURE_MARKS,
     ),
 ]
@@ -101,8 +114,8 @@ LAYERS_GUARD_CASES = [
             model=MODEL,
             server_args=["--enable-layerwise-offload"],
         ),
-        2,
-        id="layers_guard_001_layers2",
+        3,
+        id="layers_guard_001_layers3",
         marks=SINGLE_CARD_FEATURE_MARKS,
     ),
 ]
@@ -198,3 +211,43 @@ def test_layered_output_image_count(
         b64 = url.split(",", 1)[1]
         img = decode_b64_image(b64)
         assert img is not None, f"Failed to decode image at index {i}"
+
+
+# ── Issue #1966 server do not support empty prompt ─────────────────────────
+# https://github.com/vllm-project/vllm-omni/issues/1966
+# case with empty prompt
+# ---------------------------------------------------------------------------
+
+PROMPT_CASES = [
+    pytest.param(
+        OmniServerParams(
+            model=MODEL,
+            server_args=["--vae-use-slicing", "--vae-use-tiling"],
+        ),
+        id="prompt_001",
+        marks=SINGLE_CARD_FEATURE_MARKS,
+    ),
+]
+
+
+@pytest.mark.advanced_model
+@pytest.mark.diffusion
+@pytest.mark.parametrize("omni_server", PROMPT_CASES, indirect=True)
+def test_empty_prompt(omni_server: OmniServer, openai_client: OpenAIClientHandler):
+    """Test feature combinations with Qwen-Image-Layered."""
+    image_data_url = f"data:image/jpeg;base64,{generate_synthetic_image(512, 512)['base64']}"
+
+    messages = dummy_messages_from_mix_data(image_data_url=image_data_url, content_text=EMPTY_EDIT_PROMPT)
+
+    request_config = {
+        "model": omni_server.model,
+        "messages": messages,
+        "extra_body": {
+            "num_inference_steps": 2,
+            "negative_prompt": NEGATIVE_PROMPT,
+            "true_cfg_scale": 4.0,
+            "seed": 42,
+        },
+    }
+
+    openai_client.send_diffusion_request(request_config)

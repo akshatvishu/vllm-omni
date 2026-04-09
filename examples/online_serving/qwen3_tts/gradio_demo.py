@@ -24,7 +24,10 @@ import io
 import json
 import logging
 
-import gradio as gr
+try:
+    import gradio as gr
+except ImportError:
+    raise ImportError("gradio is required to run this demo. Install it with: pip install 'vllm-omni[demo]'") from None
 import httpx
 import numpy as np
 import soundfile as sf
@@ -122,7 +125,7 @@ PLAYER_HTML = """
 def _build_player_js(sample_rate: int) -> str:
     """Build the JavaScript that powers the AudioWorklet player."""
     return f"""
-() => {{
+    <script>
     const SR = {sample_rate};
     const WC = {json.dumps(WORKLET_JS)};
     let ctx = null, node = null, abort = null, gen = false, st = {{}};
@@ -213,7 +216,7 @@ def _build_player_js(sample_rate: int) -> str:
         node.port.postMessage({{ type: 'clear' }});
 
         gen = true;
-        st = {{ t0: performance.now(), chunks: 0, samples: 0, ttfp: null }};
+        st = {{ t0: null, chunks: 0, samples: 0, ttfp: null }};
         setStatus('Connecting...', '#4A90D9');
         const bEl = document.getElementById('tts-stop-btn');
         if (bEl) bEl.style.display = 'inline-block';
@@ -231,6 +234,7 @@ def _build_player_js(sample_rate: int) -> str:
 
         try {{
             console.log('fetch payload:', JSON.stringify({{input: payload.input?.slice(0,30), task: payload.task_type, has_ref: !!payload.ref_audio, stream: payload.stream}}));
+            st.t0 = performance.now();
             const r = await fetch('/proxy/v1/audio/speech', {{
                 method: 'POST',
                 headers: {{ 'Content-Type': 'application/json' }},
@@ -280,7 +284,7 @@ def _build_player_js(sample_rate: int) -> str:
             }}
         }}
     }};
-}}
+    </script>
 """
 
 
@@ -362,21 +366,8 @@ def create_app(api_base: str):
         req_id = body.get("_req_id")
         if req_id and req_id in _pending_payloads:
             body = _pending_payloads.pop(req_id)
-        # Pre-download ref_audio URL so TTFP only measures synthesis time
-        ref = body.get("ref_audio", "")
-        if isinstance(ref, str) and ref.startswith("http"):
-            try:
-                async with httpx.AsyncClient(timeout=30) as dl:
-                    r = await dl.get(ref)
-                    r.raise_for_status()
-                    import base64
-
-                    b64 = base64.b64encode(r.content).decode()
-                    ct = r.headers.get("content-type", "audio/wav")
-                    body["ref_audio"] = f"data:{ct};base64,{b64}"
-                    logger.info("Pre-downloaded ref_audio: %d bytes", len(r.content))
-            except Exception:
-                logger.exception("Failed to pre-download ref_audio, passing URL as-is")
+        # Pass ref_audio URL directly to vLLM server (it handles URL resolution).
+        # Pre-downloading and re-encoding adds ~2-3s to TTFP for large files.
         logger.info(
             "Proxy request: %s",
             {k: (f"<{len(str(v))} chars>" if k == "ref_audio" else v) for k, v in body.items()},
@@ -444,10 +435,7 @@ def create_app(api_base: str):
     )
 
     with gr.Blocks(
-        css=css,
         title="Qwen3-TTS Demo",
-        js=_build_player_js(PCM_SAMPLE_RATE),
-        theme=theme,
     ) as demo:
         gr.HTML(f"""
         <div style="display:flex; align-items:center; gap:16px; margin-bottom:8px;">
@@ -782,7 +770,14 @@ def create_app(api_base: str):
 
         demo.queue()
 
-    return gr.mount_gradio_app(fastapi_app, demo, path="/")
+    return gr.mount_gradio_app(
+        fastapi_app,
+        demo,
+        path="/",
+        css=css,
+        theme=theme,
+        head=_build_player_js(PCM_SAMPLE_RATE),
+    )
 
 
 def parse_args():
