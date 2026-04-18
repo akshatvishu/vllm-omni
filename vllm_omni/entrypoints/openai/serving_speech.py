@@ -56,6 +56,7 @@ from vllm_omni.outputs import OmniRequestOutput
 logger = init_logger(__name__)
 
 # TTS Configuration
+_MING_TTS_MODEL_ARCHS = {"MingTTSForConditionalGeneration"}
 _VOXTRAL_TTS_MODEL_STAGES = {"audio_generation"}
 _QWEN3_TTS_MODEL_STAGES = {"qwen3_tts"}
 _FISH_TTS_MODEL_STAGES = {"fish_speech_slow_ar"}
@@ -92,6 +93,7 @@ _REF_AUDIO_MAX_DURATION = 30.0  # seconds
 _TTS_MAX_INSTRUCTIONS_LENGTH = 500
 _TTS_MAX_NEW_TOKENS_MIN = 1
 _TTS_MAX_NEW_TOKENS_MAX = 4096
+_MING_DEFAULT_PROMPT = "Please generate speech based on the following description.\n"
 
 
 def _create_wav_header(sample_rate: int, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
@@ -291,7 +293,13 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
     def _find_tts_stage(self):
         """Find and return the TTS stage config, or None if not found."""
         for stage in self.engine_client.stage_configs:
-            if stage.engine_args.model_stage in _TTS_MODEL_STAGES:
+            engine_args = getattr(stage, "engine_args", None)
+            model_stage = getattr(engine_args, "model_stage", None)
+            model_arch = getattr(engine_args, "model_arch", None)
+            worker_type = getattr(engine_args, "worker_type", None)
+            if model_stage in _TTS_MODEL_STAGES:
+                return stage
+            if model_arch in _MING_TTS_MODEL_ARCHS and worker_type == "ar":
                 return stage
         return None
 
@@ -323,6 +331,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             return "voxcpm" if has_vae_stage or model_stage == "vae" else "voxcpm2"
         if model_stage in _MING_TTS_MODEL_STAGES:
             return "ming_flash_omni_tts"
+        if model_arch in _MING_TTS_MODEL_ARCHS:
+            return "ming_tts"
         return None
 
     def _compute_max_instructions_length(self) -> int:
@@ -353,6 +363,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             return set()
         try:
             if self._tts_model_type == "voxcpm":
+                return set()
+            if self._tts_model_type == "ming_tts":
                 return set()
             if self._tts_model_type == "voxtral_tts":
                 config = self.engine_client.model_config.hf_config.audio_config
@@ -751,11 +763,15 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             raise ValueError("'speaker_embedding' values must be finite (no NaN or Inf)")
 
         emb_dim = len(embedding)
-        if emb_dim not in {1024, 2048}:
-            logger.warning(
-                "speaker_embedding has %d dimensions; expected 1024 (0.6B) or 2048 (1.7B)",
-                emb_dim,
-            )
+        expected_dims = {192} if self._tts_model_type == "ming_tts" else {1024, 2048}
+        if emb_dim not in expected_dims:
+            if self._tts_model_type == "ming_tts":
+                logger.warning("speaker_embedding has %d dimensions; Ming dense expects 192", emb_dim)
+            else:
+                logger.warning(
+                    "speaker_embedding has %d dimensions; expected 1024 (0.6B) or 2048 (1.7B)",
+                    emb_dim,
+                )
 
         voice_name_lower = name.lower()
         if voice_name_lower in self.uploaded_speakers:
@@ -838,7 +854,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
     def _is_tts_model(self) -> bool:
         """Check if the current model is a supported TTS model."""
-        return any(stage.engine_args.model_stage in _TTS_MODEL_STAGES for stage in self.engine_client.stage_configs)
+        return self._find_tts_stage() is not None
 
     def _validate_tts_request(self, request: OpenAICreateSpeechRequest) -> str | None:
         """Validate TTS request parameters. Returns error message or None."""
@@ -853,6 +869,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         if self._tts_model_type == "voxcpm2":
             return None  # VoxCPM2 accepts any text input
         if self._tts_model_type == "ming_flash_omni_tts":
+            return self._validate_ming_flash_omni_tts_request(request)
+        if self._tts_model_type == "ming_tts":
             return self._validate_ming_tts_request(request)
         return self._validate_qwen_tts_request(request)
 
@@ -875,7 +893,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         ids = self._voxcpm2_tokenizer.encode(text, add_special_tokens=True)
         return split_multichar_chinese(ids, self._voxcpm2_split_map)
 
-    def _validate_ming_tts_request(self, request: OpenAICreateSpeechRequest) -> str | None:
+    def _validate_ming_flash_omni_tts_request(self, request: OpenAICreateSpeechRequest) -> str | None:
         """Validate Ming-flash-omni standalone-talker request parameters."""
         if not request.input or not request.input.strip():
             return "Input text cannot be empty"
@@ -912,6 +930,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
     def _validate_ref_audio_format(self, ref_audio: str) -> str | None:
         """Validate ref_audio is a supported URI format. Returns error or None."""
+        if not isinstance(ref_audio, str):
+            return "ref_audio must be a URL (http/https), base64 data URL (data:...), or file URI (file://...)"
         if not (
             ref_audio.startswith(("http://", "https://"))
             or ref_audio.startswith("data:")
@@ -1175,6 +1195,99 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
         return None
 
+    def _validate_ming_tts_request(self, request: OpenAICreateSpeechRequest) -> str | None:
+        """Validate Ming TTS request parameters. Returns error message or None."""
+        if not request.input or not request.input.strip():
+            return "Input text cannot be empty"
+
+        if isinstance(request.ref_audio, list):
+            return self._validate_ming_tts_podcast_request(request)
+        return self._validate_ming_tts_single_speaker_request(request)
+
+    def _validate_ming_tts_single_speaker_request(self, request: OpenAICreateSpeechRequest) -> str | None:
+        if request.ref_audio is not None:
+            fmt_err = self._validate_ref_audio_format(request.ref_audio)
+            if fmt_err:
+                return fmt_err
+
+        if request.speaker_embedding is not None:
+            if not request.speaker_embedding:
+                return "'speaker_embedding' must be a non-empty list of floats"
+            emb_len = len(request.speaker_embedding)
+            if emb_len != 192:
+                logger.warning(
+                    "speaker_embedding has %d dimensions; Ming dense expects 192. "
+                    "Wrong dimensions will likely fail or degrade output.",
+                    emb_len,
+                )
+
+        voice_lower = request.voice.lower() if isinstance(request.voice, str) else None
+        uploaded_voice = bool(voice_lower and voice_lower in self.uploaded_speakers)
+        clone_source_present = request.ref_audio is not None or request.speaker_embedding is not None or uploaded_voice
+
+        if request.task_type == "Base" and not clone_source_present:
+            return "Base task requires 'ref_audio', 'speaker_embedding', or an uploaded voice sample"
+
+        if request.ref_audio is not None and request.ref_text is not None and not request.ref_text.strip():
+            return "'ref_text' must be non-empty when provided with 'ref_audio'"
+
+        # Ming offline ref-audio cases use prompt_waveform without prompt_text;
+        # keep the transcript requirement for other TTS models.
+        if request.ref_audio is not None and request.speaker_embedding is None and not self._is_ming_tts_model():
+            uploaded_ref_text = self.uploaded_speakers[voice_lower].get("ref_text") if uploaded_voice else None
+            if not (request.ref_text and request.ref_text.strip()) and not uploaded_ref_text:
+                return "Reference-audio cloning requires non-empty 'ref_text'"
+
+        if request.ref_text is not None and request.ref_audio is None and not uploaded_voice:
+            return "'ref_text' requires 'ref_audio' or an uploaded voice sample"
+
+        if request.instructions and len(request.instructions) > self._max_instructions_length:
+            return f"Instructions too long (max {self._max_instructions_length} characters)"
+
+        if request.max_new_tokens is not None:
+            if request.max_new_tokens < _TTS_MAX_NEW_TOKENS_MIN:
+                return f"max_new_tokens must be at least {_TTS_MAX_NEW_TOKENS_MIN}"
+            if request.max_new_tokens > _TTS_MAX_NEW_TOKENS_MAX:
+                return f"max_new_tokens cannot exceed {_TTS_MAX_NEW_TOKENS_MAX}"
+
+        return None
+
+    def _validate_ming_tts_podcast_request(self, request: OpenAICreateSpeechRequest) -> str | None:
+        if len(request.ref_audio) < 2:
+            return "Podcast-style Ming requests require at least two 'ref_audio' clips"
+
+        for ref_audio in request.ref_audio:
+            fmt_err = self._validate_ref_audio_format(ref_audio)
+            if fmt_err:
+                return fmt_err
+
+        if not request.ref_text or not request.ref_text.strip():
+            return "Podcast-style Ming requests require non-empty 'ref_text'"
+
+        if request.speaker_embedding is not None:
+            embeddings = request.speaker_embedding
+            embedding_count = len(embeddings) if embeddings and isinstance(embeddings[0], list) else 1
+            if embedding_count != len(request.ref_audio):
+                return (
+                    "Podcast-style Ming requests require one speaker embedding per ref_audio clip; "
+                    f"got {embedding_count} embeddings for {len(request.ref_audio)} clips"
+                )
+            if embeddings and isinstance(embeddings[0], list):
+                for item in embeddings:
+                    if len(item) != 192:
+                        return "Podcast-style Ming speaker embeddings must each have 192 dimensions"
+
+        if request.instructions and len(request.instructions) > self._max_instructions_length:
+            return f"Instructions too long (max {self._max_instructions_length} characters)"
+
+        if request.max_new_tokens is not None:
+            if request.max_new_tokens < _TTS_MAX_NEW_TOKENS_MIN:
+                return f"max_new_tokens must be at least {_TTS_MAX_NEW_TOKENS_MIN}"
+            if request.max_new_tokens > _TTS_MAX_NEW_TOKENS_MAX:
+                return f"max_new_tokens cannot exceed {_TTS_MAX_NEW_TOKENS_MAX}"
+
+        return None
+
     async def _resolve_ref_audio(self, ref_audio_str: str) -> tuple[list[float], int]:
         """Resolve ref_audio to (wav_samples, sample_rate).
 
@@ -1209,13 +1322,123 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             )
         return wav_np.tolist(), sr
 
-    async def _generate_audio_chunks(
+    async def _resolve_ref_audio_many(self, ref_audio_list: list[str]) -> list[tuple[list[float], int]]:
+        resolved = []
+        for ref_audio in ref_audio_list:
+            resolved.append(await self._resolve_ref_audio(ref_audio))
+        return resolved
+
+    # ---- Ming TTS helpers ----
+
+    def _is_ming_tts_model(self) -> bool:
+        return self._tts_model_type == "ming_tts"
+
+    def _coerce_ming_prompt_waveform(self, wav_samples, sample_rate):
+        from torchaudio.functional import resample as resample_audio
+
+        from vllm_omni.model_executor.models.ming_tts.config_ming_tts import SAMPLE_RATE
+
+        waveform = torch.as_tensor(wav_samples, dtype=torch.float32).reshape(1, -1)
+        if int(sample_rate) != SAMPLE_RATE:
+            waveform = resample_audio(waveform, int(sample_rate), SAMPLE_RATE)
+        return waveform
+
+    def _build_ming_prompt_waveform(
         self,
-        generator,
-        request_id: str,
-        response_format: str = "pcm",
-        raw_request: Request | None = None,
+        ref_audio_data: tuple[list[float], int] | list[tuple[list[float], int]] | None,
     ):
+        if isinstance(ref_audio_data, list):
+            return torch.cat(
+                [self._coerce_ming_prompt_waveform(item[0], item[1]) for item in ref_audio_data],
+                dim=-1,
+            )
+        if ref_audio_data is not None:
+            return self._coerce_ming_prompt_waveform(ref_audio_data[0], ref_audio_data[1])
+        return None
+
+    def _extract_ming_speaker_embeddings_from_ref_audio(
+        self,
+        ref_audio_data_list: list[tuple[list[float], int]],
+    ) -> list[list[float]]:
+        from vllm_omni.model_executor.models.ming_tts.speaker_extractor import MingSpeakerEmbeddingExtractor
+
+        extractor = MingSpeakerEmbeddingExtractor(self.engine_client.model_config.model, target_sr=16000)
+        embeddings = []
+        for wav_samples, sr in ref_audio_data_list:
+            waveform = torch.as_tensor(wav_samples, dtype=torch.float32).reshape(1, -1)
+            embedding = extractor.extract_from_waveform(waveform, int(sr))
+            flat = embedding.detach().reshape(-1).to(torch.float32).cpu()
+            if int(flat.numel()) != 192:
+                raise ValueError(f"Ming speaker extractor returned {int(flat.numel())} dims; expected 192")
+            embeddings.append(flat.tolist())
+        return embeddings
+
+    def _parse_ming_instruction(self, request: OpenAICreateSpeechRequest) -> Any:
+        """Build a Ming instruction payload from OpenAI speech fields."""
+        instruction_text = request.instructions.strip() if isinstance(request.instructions, str) else None
+        instruction_dict: dict[str, Any] = {}
+
+        if request.language not in (None, "", "Auto"):
+            instruction_dict["方言"] = request.language
+
+        voice_lower = request.voice.lower() if isinstance(request.voice, str) else None
+        if request.voice and not (voice_lower and voice_lower in self.uploaded_speakers):
+            instruction_dict["IP"] = request.voice
+
+        if instruction_text:
+            try:
+                parsed = json.loads(instruction_text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict):
+                instruction_dict.update(parsed)
+            elif instruction_dict:
+                instruction_dict["风格"] = instruction_text
+            else:
+                return instruction_text
+
+        return instruction_dict or None
+
+    def _build_ming_dense_prompt(
+        self,
+        request: OpenAICreateSpeechRequest,
+        *,
+        ref_audio_data: tuple[list[float], int] | list[tuple[list[float], int]] | None = None,
+    ) -> dict[str, Any]:
+        """Build a Ming dense prompt directly from the OpenAI speech request."""
+        from transformers import AutoTokenizer
+
+        from vllm_omni.model_executor.models.ming_tts.config_ming_tts import KEY_MAX_DECODE_STEPS
+        from vllm_omni.model_executor.models.ming_tts.prompt_builder import build_ming_dense_prompt
+
+        if self._tts_tokenizer is None:
+            model_name = self.engine_client.model_config.model
+            self._tts_tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=False)
+
+        ref_text = request.ref_text
+        prompt_waveform = self._build_ming_prompt_waveform(ref_audio_data) if ref_text is not None else None
+        speaker_embedding = request.speaker_embedding
+        use_zero_spk_emb = prompt_waveform is None and speaker_embedding is None
+
+        runtime_controls = {}
+        if request.max_new_tokens is not None:
+            runtime_controls[KEY_MAX_DECODE_STEPS] = request.max_new_tokens
+
+        return build_ming_dense_prompt(
+            self._tts_tokenizer,
+            # bgm / music-prompt mode not supported online;
+            # requires prompt_mode API extension (deferred).
+            prompt=_MING_DEFAULT_PROMPT,
+            text=request.input,
+            runtime_controls=runtime_controls or None,
+            instruction=self._parse_ming_instruction(request),
+            prompt_text=ref_text,
+            prompt_waveform=prompt_waveform,
+            speaker_embedding=speaker_embedding,
+            use_zero_spk_emb=use_zero_spk_emb,
+        )
+
+    async def _generate_audio_chunks(self, generator, request_id: str, response_format: str = "pcm"):
         """Generate audio chunks for streaming response.
 
         Handles two audio output modes from the engine:
@@ -1574,7 +1797,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
     # ---- Ming-flash-omni standalone-talker (TTS) helpers ----
 
-    def _build_ming_prompt(self, request: OpenAICreateSpeechRequest) -> dict[str, Any]:
+    def _build_ming_flash_omni_prompt(self, request: OpenAICreateSpeechRequest) -> dict[str, Any]:
         # request.instructions accepts two forms:
         # 1. Plain text: mapped to the caption's 风格 (style) field
         # 2. JSON object: parsed and splatted into the caption. Unlocks
@@ -1681,8 +1904,29 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 prompt = await self._build_cosyvoice3_prompt(request)
                 tts_params = {}
             elif self._tts_model_type == "ming_flash_omni_tts":
-                prompt = self._build_ming_prompt(request)
+                prompt = self._build_ming_flash_omni_prompt(request)
                 tts_params = {}
+            elif self._tts_model_type == "ming_tts":
+                ref_audio_source = request.ref_audio
+                voice_lower = request.voice.lower() if isinstance(request.voice, str) else None
+                if ref_audio_source is None and voice_lower in self.uploaded_speakers:
+                    ref_audio_source = self._get_uploaded_audio_data(request.voice)
+                    if request.ref_text is None:
+                        request.ref_text = self.uploaded_speakers[voice_lower].get("ref_text")
+                ref_audio_data = None
+                if isinstance(ref_audio_source, list):
+                    ref_audio_data = await self._resolve_ref_audio_many(ref_audio_source)
+                    if request.speaker_embedding is None:
+                        request.speaker_embedding = self._extract_ming_speaker_embeddings_from_ref_audio(ref_audio_data)
+                elif ref_audio_source is not None and isinstance(ref_audio_source, str):
+                    wav_list, sr = await self._resolve_ref_audio(ref_audio_source)
+                    ref_audio_data = (wav_list, sr)
+                    if request.speaker_embedding is None:
+                        request.speaker_embedding = self._extract_ming_speaker_embeddings_from_ref_audio(
+                            [ref_audio_data]
+                        )[0]
+                prompt = self._build_ming_dense_prompt(request, ref_audio_data=ref_audio_data)
+                tts_params = prompt.get("additional_information", {})
             else:
                 tts_params = self._build_tts_params(request)
                 # Resolve ref_audio (explicit or auto-set for uploaded voices)
@@ -1732,6 +1976,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             model_type = "voxcpm2"
         elif self._tts_model_type == "ming_flash_omni_tts":
             model_type = "ming_flash_omni_tts"
+        elif self._tts_model_type == "ming_tts":
+            model_type = "ming_tts"
         elif self._is_tts:
             model_type = tts_params.get("task_type", ["unknown"])[0]
         else:
@@ -1790,6 +2036,17 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
             sampling_params_list = copy.deepcopy(sampling_params_list)
             sampling_params_list[0].max_tokens = request.max_new_tokens
+        elif self._tts_model_type == "ming_tts" and sampling_params_list:
+            import copy
+
+            from vllm_omni.model_executor.models.ming_tts.config_ming_tts import TEXT_EOS_TOKEN_ID
+
+            sampling_params_list = copy.deepcopy(sampling_params_list)
+            sampling_params_list[0].stop_token_ids = [int(TEXT_EOS_TOKEN_ID)]
+            if request.max_new_tokens is not None:
+                # Ming emits TEXT_EOS after the latent decode budget is exhausted, so
+                # Stage-0 needs one extra token beyond ming_max_decode_steps.
+                sampling_params_list[0].max_tokens = int(request.max_new_tokens) + 1
 
         generator = self.engine_client.generate(
             prompt=prompt,

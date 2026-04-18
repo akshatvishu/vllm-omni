@@ -1,0 +1,224 @@
+# Ming-omni-tts Offline Inference
+
+`end2end.py` runs Ming dense 0.5B end to end with vLLM-Omni. It uses the in-repo Ming prompt builder directly, so the example request shape matches the real integration instead of a simplified wrapper.
+
+## Model Overview
+
+Ming dense 0.5B is exposed here as a two-stage offline pipeline:
+
+- **Stage 0**: Qwen2-based AR generation with Ming prompt formatting and inline flow controls
+- **Stage 1**: audio VAE decode to mono 44.1 kHz waveform
+
+The example supports both:
+
+- **Sequential eager** via `ming_tts.yaml`
+- **Async chunk eager** via `ming_tts_async_chunk.yaml`
+
+## Setup
+
+Install vLLM-Omni with the platform requirements for your accelerator:
+
+```bash
+uv pip install -e .
+```
+
+The Ming offline example does not require a separate upstream Ming package.
+Reference-audio cases use the repo dependencies for audio loading,
+resampling, and CampPlus speaker extraction, including `soundfile`,
+`torchaudio`, and `onnxruntime`.
+
+## Supported Cases
+
+These cases cover the upstream dense TTS cookbook surface that maps cleanly onto the current vLLM-Omni example:
+
+- `style`: zero-speaker style-conditioned speech
+- `ip`: zero-speaker IP voice generation
+- `bgm`: music-only generation
+- `emotion`: reference-audio speech with emotion control
+- `basic`: reference-audio speech with speed / pitch / volume control
+- `dialect`: reference-audio speech with dialect control
+- `zero_shot`: reference-audio cloning with explicit transcript
+- `podcast`: multi-reference dialogue generation with automatic speaker embedding extraction
+- `speech_bgm`: speech with background music conditioning
+- `speech_sound`: speech with environmental sound conditioning
+
+Not included:
+
+- `TTA` from the upstream cookbook. That notebook switches to `inclusionAI/Ming-omni-tta-0.5B`, which is a different model family and is out of scope for this dense TTS example.
+
+## Quick Start
+
+Run the zero-speaker style example:
+
+```bash
+python examples/offline_inference/ming_tts/end2end.py \
+    --case style \
+    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --enforce-eager
+```
+
+Run zero-shot cloning with a transcript:
+
+```bash
+python examples/offline_inference/ming_tts/end2end.py \
+    --case zero_shot \
+    --ref-audio /path/to/10002287-00000094.wav \
+    --ref-text "在此奉劝大家别乱打美白针。" \
+    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --enforce-eager
+```
+
+Run emotion-controlled speech:
+
+```bash
+python examples/offline_inference/ming_tts/end2end.py \
+    --case emotion \
+    --ref-audio /path/to/emotion_prompt.wav \
+    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --enforce-eager
+```
+
+Run podcast generation with two reference clips:
+
+```bash
+python examples/offline_inference/ming_tts/end2end.py \
+    --case podcast \
+    --ref-audio-paths /path/to/CTS-CN-F2F-2019-11-11-423-012-A.wav /path/to/CTS-CN-F2F-2019-11-11-423-012-B.wav \
+    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --enforce-eager
+```
+
+The script automatically extracts one 192-d speaker embedding per reference WAV using the Ming model's `campplus.onnx`.
+
+If you already have precomputed multi-speaker embeddings, you can override extraction with:
+
+```bash
+--speaker-embedding /path/to/podcast_speaker_embeddings.json
+```
+
+where the JSON is a list of speaker embeddings, one 192-d vector per speaker.
+
+Use async_chunk streaming:
+
+```bash
+python examples/offline_inference/ming_tts/end2end.py \
+    --case basic \
+    --ref-audio /path/to/10002287-00000095.wav \
+    --streaming \
+    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts_async_chunk.yaml \
+    --enforce-eager
+```
+
+`--streaming` uses `AsyncOmni` and the async_chunk stage config. It currently
+supports one prompt per process invocation; use blocking mode for
+`--num-prompts > 1`.
+
+Collect runtime stats and a manifest:
+
+```bash
+python examples/offline_inference/ming_tts/end2end.py \
+    --case style \
+    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --enforce-eager \
+    --enable-stats \
+    --stats-log-file output_audio/ming_style_pipeline.log \
+    --metadata-json output_audio/ming_style_manifest.json
+```
+
+## Reference Fixtures
+
+The upstream Ming cookbook uses these public audio fixtures from `inclusionAI/Ming-omni-tts/data/wavs`:
+
+- `10002287-00000094.wav` for zero-shot cloning
+- `10002287-00000095.wav` for `basic`
+- `emotion_prompt.wav` for `emotion`
+- `yue_prompt.wav` for `dialect`
+- `00000309-00000300.wav` for `speech_bgm` and `speech_sound`
+- `CTS-CN-F2F-2019-11-11-423-012-A.wav` and `CTS-CN-F2F-2019-11-11-423-012-B.wav` for `podcast`
+
+## Validation Matrix
+
+The repo-facing example is intended to cover the same dense TTS workflows used
+by the local Ming validation script:
+
+| Case | Blocking `ming_tts.yaml` | Async chunk `ming_tts_async_chunk.yaml` | Extra inputs |
+|---|---:|---:|---|
+| `style` | Yes | Optional smoke test | none |
+| `ip` | Yes | Optional smoke test | none |
+| `bgm` | Yes | Optional smoke test | none |
+| `emotion` | Yes | Yes | `--ref-audio emotion_prompt.wav` |
+| `basic` | Yes | Yes | `--ref-audio 10002287-00000095.wav` |
+| `dialect` | Yes | Yes | `--ref-audio yue_prompt.wav` |
+| `zero_shot` | Yes | Yes | `--ref-audio 10002287-00000094.wav --ref-text ...` |
+| `podcast` | Yes | Yes | two `--ref-audio-paths` |
+| `speech_bgm` | Yes | Yes | `--ref-audio 00000309-00000300.wav` |
+| `speech_sound` | Yes | Yes | `--ref-audio 00000309-00000300.wav` |
+
+## Validated Outputs
+
+Validation on an L4 GPU completed the full blocking matrix and the default
+async_chunk matrix. Default async_chunk matched blocking output frame counts
+and Stage-1 patch counts for every case:
+
+| Case | Blocking frames / patches / sec | Async chunk frames / patches / sec |
+|---|---:|---:|
+| `style` | 409248 / 29 / 9.28 | 409248 / 29 / 9.28 |
+| `ip` | 183456 / 13 / 4.16 | 183456 / 13 / 4.16 |
+| `bgm` | 1326528 / 94 / 30.08 | 1326528 / 94 / 30.08 |
+| `emotion` | 324576 / 23 / 7.36 | 324576 / 23 / 7.36 |
+| `basic` | 211680 / 15 / 4.80 | 211680 / 15 / 4.80 |
+| `dialect` | 239904 / 17 / 5.44 | 239904 / 17 / 5.44 |
+| `zero_shot` | 409248 / 29 / 9.28 | 409248 / 29 / 9.28 |
+| `podcast` | 437472 / 31 / 9.92 | 437472 / 31 / 9.92 |
+| `speech_bgm` | 296352 / 21 / 6.72 | 296352 / 21 / 6.72 |
+| `speech_sound` | 352800 / 25 / 8.00 | 352800 / 25 / 8.00 |
+
+## Key Arguments
+
+| Argument | Description |
+|---|---|
+| `--model` | Hugging Face repo or local Ming checkpoint path |
+| `--stage-configs-path` | Stage config YAML. Use `ming_tts.yaml` for blocking generation or `ming_tts_async_chunk.yaml` for streaming |
+| `--case` | Built-in demo case |
+| `--ref-audio` | Single reference wav path for cloning-style cases |
+| `--ref-audio-paths` | Multiple reference wav paths, used by `podcast` |
+| `--ref-text` | Reference transcript. Required for `zero_shot` |
+| `--instructions` | Free-form Ming instruction string |
+| `--instruction-json` | Structured Ming instruction JSON |
+| `--speaker-embedding` | JSON file containing a 192-d speaker embedding |
+| `--extract-speaker-embeddings` | Force CampPlus speaker extraction from the provided reference audio paths |
+| `--max-decode-steps` | Override `ming_max_decode_steps` |
+| `--num-prompts` | Repeat the same case N times. Outputs are indexed when `N > 1` |
+| `--streaming` | Use `AsyncOmni` and async_chunk transport |
+| `--enforce-eager` | Recommended for Ming dense; non-eager is out of scope |
+| `--enable-stats` / `--log-stats` | Enable vLLM-Omni per-request stats logging |
+| `--stats-log-file` | Optional path for the stats log |
+| `--metadata-json` | Optional path for the run manifest JSON |
+| `--stage-init-timeout` | Per-stage initialization timeout in seconds |
+| `--init-timeout` | Total initialization timeout in seconds |
+| `--batch-timeout` | Batch timeout in seconds |
+| `--worker-backend` | `multi_process` or `ray` |
+| `--ray-address` | Ray cluster address when using `--worker-backend ray` |
+
+## Output
+
+- The script writes one mono 44.1 kHz WAV file per run
+- Default output directory: `output_audio/`
+- Default filename: `ming_<case>.wav`
+- When `--num-prompts > 1`, outputs are indexed as `ming_<case>_00000.wav`, `..._00001.wav`, etc.
+- When stats are enabled, the script can also write:
+  - a stats log file such as `ming_style_pipeline.log`
+  - a manifest JSON with per-output metadata, stage durations, peak memory info,
+    and streaming client latency metrics when `--streaming` is used
+
+## Notes
+
+- `style` and `ip` are zero-speaker paths and do not require a reference clip
+- `emotion`, `basic`, `dialect`, `speech_bgm`, and `speech_sound` require one reference clip
+- `zero_shot` requires both `--ref-audio` and `--ref-text`
+- `podcast` requires at least two reference clips via `--ref-audio-paths`
+- `podcast` automatically extracts one speaker embedding per reference clip
+- `--speaker-embedding` may contain either one 192-d vector or a list of 192-d vectors
+- `--enforce-eager` was used for the validated runs
+- Validation on the L4 GPU used SDPA for the Ming audio VAE instead of
+  FlashAttention2, which is the preferred default when available.

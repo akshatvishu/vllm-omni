@@ -122,6 +122,31 @@ def test_load_poll(build_adapter):
     assert "req-1" not in adapter._pending_load_reqs
 
 
+def test_generation_load_preserves_payload_metadata(build_adapter):
+    adapter, connector = build_adapter(stage_id=1, model_mode="generation")
+    request = _req("req-1", RequestStatus.WAITING, external_req_id="external-1")
+    payload = {
+        "code_predictor_codes": [0],
+        "left_context_size": 3,
+        "ming_latent_patches": torch.ones((10, 4, 64), dtype=torch.float32),
+        "ming_request_id": "external-1",
+        "ming_chunk_id": 7,
+        "finished": torch.tensor(False),
+    }
+    connector.get.return_value = (payload, 16)
+
+    adapter._poll_single_request(request)
+
+    assert request.prompt_token_ids == [0]
+    assert request.additional_information["left_context_size"] == 3
+    assert request.additional_information["ming_request_id"] == "external-1"
+    assert request.additional_information["ming_chunk_id"] == 7
+    assert request.additional_information["ming_latent_patches"].shape == (10, 4, 64)
+    assert "code_predictor_codes" not in request.additional_information
+    assert "finished" not in request.additional_information
+    assert request.num_computed_tokens == 0
+
+
 def test_save_async(build_adapter):
     adapter, _ = build_adapter(stage_id=1)
     request = _req("req-1", RequestStatus.WAITING, external_req_id="external-1")
