@@ -29,11 +29,12 @@ resampling, and CampPlus speaker extraction, including `soundfile`,
 
 ## Supported Cases
 
-These cases cover the upstream dense TTS cookbook surface that maps cleanly onto the current vLLM-Omni example:
+These cases cover the upstream dense 0.5B cookbook surface that maps cleanly onto the current vLLM-Omni example:
 
 - `style`: zero-speaker style-conditioned speech
 - `ip`: zero-speaker IP voice generation
 - `bgm`: music-only generation
+- `tta`: text-to-audio event generation with FlowLoss controls
 - `emotion`: reference-audio speech with emotion control
 - `basic`: reference-audio speech with speed / pitch / volume control
 - `dialect`: reference-audio speech with dialect control
@@ -41,10 +42,6 @@ These cases cover the upstream dense TTS cookbook surface that maps cleanly onto
 - `podcast`: multi-reference dialogue generation with automatic speaker embedding extraction
 - `speech_bgm`: speech with background music conditioning
 - `speech_sound`: speech with environmental sound conditioning
-
-Not included:
-
-- `TTA` from the upstream cookbook. That notebook switches to `inclusionAI/Ming-omni-tta-0.5B`, which is a different model family and is out of scope for this dense TTS example.
 
 ## Quick Start
 
@@ -98,6 +95,15 @@ If you already have precomputed multi-speaker embeddings, you can override extra
 
 where the JSON is a list of speaker embeddings, one 192-d vector per speaker.
 
+Run text-to-audio event generation:
+
+```bash
+python examples/offline_inference/ming_tts/end2end.py \
+    --case tta \
+    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --enforce-eager
+```
+
 Use async_chunk streaming:
 
 ```bash
@@ -146,6 +152,7 @@ by the local Ming validation script:
 | `style` | Yes | Optional smoke test | none |
 | `ip` | Yes | Optional smoke test | none |
 | `bgm` | Yes | Optional smoke test | none |
+| `tta` | Yes | Optional smoke test | none |
 | `emotion` | Yes | Yes | `--ref-audio emotion_prompt.wav` |
 | `basic` | Yes | Yes | `--ref-audio 10002287-00000095.wav` |
 | `dialect` | Yes | Yes | `--ref-audio yue_prompt.wav` |
@@ -165,6 +172,7 @@ and Stage-1 patch counts for every case:
 | `style` | 409248 / 29 / 9.28 | 409248 / 29 / 9.28 |
 | `ip` | 183456 / 13 / 4.16 | 183456 / 13 / 4.16 |
 | `bgm` | 1326528 / 94 / 30.08 | 1326528 / 94 / 30.08 |
+| `tta` | 465696 / 33 / 10.56 | 465696 / 33 / 10.56 |
 | `emotion` | 324576 / 23 / 7.36 | 324576 / 23 / 7.36 |
 | `basic` | 211680 / 15 / 4.80 | 211680 / 15 / 4.80 |
 | `dialect` | 239904 / 17 / 5.44 | 239904 / 17 / 5.44 |

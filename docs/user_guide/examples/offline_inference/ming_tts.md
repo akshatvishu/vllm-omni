@@ -2,7 +2,7 @@
 
 Source <https://github.com/vllm-project/vllm-omni/tree/main/examples/offline_inference/ming_tts>.
 
-This directory contains an offline Ming example that uses the in-repo Ming prompt builder directly. It now covers the broader upstream dense TTS cookbook surface: style, IP, music-only generation, emotion, dialect, zero-shot clone, podcast, speech+bgm, and speech+sound.
+This directory contains an offline Ming example that uses the in-repo Ming prompt builder directly. It covers the broader upstream dense 0.5B surface: style, IP, music-only generation, TTA, emotion, dialect, zero-shot clone, podcast, speech+bgm, and speech+sound.
 
 ## Quick Start
 
@@ -46,6 +46,15 @@ python examples/offline_inference/ming_tts/end2end.py \
     --enforce-eager
 ```
 
+Run text-to-audio event generation:
+
+```bash
+python examples/offline_inference/ming_tts/end2end.py \
+    --case tta \
+    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --enforce-eager
+```
+
 Run with stats and a manifest:
 
 ```bash
@@ -63,6 +72,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 - `style`: zero-speaker style-conditioned speech
 - `ip`: zero-speaker IP voice generation
 - `bgm`: music generation
+- `tta`: text-to-audio event generation with FlowLoss controls
 - `emotion`: reference-audio speech with emotion control
 - `basic`: reference-audio cloning with speed / pitch / volume control
 - `dialect`: reference-audio cloning with dialect control
@@ -70,8 +80,6 @@ python examples/offline_inference/ming_tts/end2end.py \
 - `podcast`: multi-reference dialogue generation with automatic speaker embedding extraction
 - `speech_bgm`: speech with background music conditioning
 - `speech_sound`: speech with environment sound conditioning
-
-`TTA` from the upstream Ming notebook is not included here because it uses `inclusionAI/Ming-omni-tta-0.5B`, not the dense TTS model covered by this example.
 
 ## Streaming
 
@@ -99,6 +107,7 @@ validation helper:
 | `style` | Yes | Optional smoke test | none |
 | `ip` | Yes | Optional smoke test | none |
 | `bgm` | Yes | Optional smoke test | none |
+| `tta` | Yes | Optional smoke test | none |
 | `emotion` | Yes | Yes | reference WAV |
 | `basic` | Yes | Yes | reference WAV |
 | `dialect` | Yes | Yes | reference WAV |

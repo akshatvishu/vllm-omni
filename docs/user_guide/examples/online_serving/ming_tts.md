@@ -126,6 +126,29 @@ The bundled `run_curl.sh basic` mode is plain/default TTS and does not require
 `REF_AUDIO`. The upstream cookbook-style `basic` case uses `ref_audio` plus
 structured speed / pitch / volume instructions.
 
+## Request Types
+
+Ming online serving supports these request families through `/v1/audio/speech`:
+
+| Case | Online support | Required fields |
+|------|----------------|-----------------|
+| default TTS | Supported | `input`, `max_new_tokens=200` |
+| `style` | Supported | `input`, `instructions`, `max_new_tokens=200` |
+| `ip` | Supported | `input`, `voice`, `max_new_tokens=200` |
+| `basic` helper | Supported | `input`, `max_new_tokens=200` |
+| upstream `basic` case | Supported | `input`, `ref_audio`, structured speed / pitch / volume `instructions`, `max_new_tokens=200` |
+| `emotion` | Supported | `input`, `ref_audio`, structured emotion `instructions`, `max_new_tokens=200` |
+| `dialect` | Supported | `input`, `language` or structured `instructions`, `ref_audio`, `max_new_tokens=200` |
+| `zero_shot` | Supported | `input`, `ref_audio`, `ref_text`, `max_new_tokens=200` |
+| `podcast` | Supported | `input`, repeated/list `ref_audio`, `ref_text`, `max_new_tokens=200` |
+| `speech_bgm` | Supported | `input`, `ref_audio`, structured `instructions` with `{"BGM": ...}`, `max_new_tokens=200` |
+| `speech_sound` | Supported | `input`, `ref_audio`, structured `instructions` with `{"BGM": {"ENV": ...}}`, `max_new_tokens=200` |
+| `bgm` | Not supported online | Requires a future `prompt_mode=music` API extension |
+| `tta` | Not supported online | Requires a future `prompt_mode=tta` API extension |
+
+The online endpoint is speech-shaped today. Music-only `bgm` and text-to-audio
+`tta` remain offline workflows.
+
 ## Field Mapping
 
 For Ming, the generic OpenAI request fields map to Ming controls like this:
