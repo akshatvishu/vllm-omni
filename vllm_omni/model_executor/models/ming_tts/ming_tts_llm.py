@@ -41,6 +41,11 @@ MING_STOP_REASON_CONTINUE = "continue"
 MING_STOP_REASON_STOP_HEAD = "stop_head"
 MING_STOP_REASON_MAX_DECODE_STEPS = "max_decode_steps"
 MING_STOP_REASON_KEY = "ming_stop_reason"
+MING_STOP_REASON_CODES = {
+    MING_STOP_REASON_CONTINUE: 0,
+    MING_STOP_REASON_STOP_HEAD: 1,
+    MING_STOP_REASON_MAX_DECODE_STEPS: 2,
+}
 
 
 class MingLLMModel(nn.Module):
@@ -173,8 +178,8 @@ class MingLLMModel(nn.Module):
         decode_step_tokens = None
         has_patch = None
         max_decode_step_tokens = None
+        stop_reason_code_tokens = None
         pending_updates: dict[str, dict[str, Any]] = {}
-        stop_reason_tokens: list[str] | None = None
         sampled_decode_steps = []
         sampled_stop_probs = []
         sampled_max_decode_steps = []
@@ -241,7 +246,7 @@ class MingLLMModel(nn.Module):
                 max_decode_step_tokens = torch.zeros((total_tokens,), dtype=torch.int32, device=hidden_states.device)
                 min_decode_step_tokens = torch.zeros((total_tokens,), dtype=torch.int32, device=hidden_states.device)
                 has_patch = torch.zeros((total_tokens,), dtype=torch.bool, device=hidden_states.device)
-                stop_reason_tokens = [MING_STOP_REASON_CONTINUE] * total_tokens
+                stop_reason_code_tokens = torch.zeros((total_tokens,), dtype=torch.int32, device=hidden_states.device)
 
             latent_patch_tokens[output_index : output_index + 1] = sampled_token_latent
             next_embed_tokens[output_index : output_index + 1] = next_embeds
@@ -265,8 +270,7 @@ class MingLLMModel(nn.Module):
                 audio_dummy_token_id=int(self.ming_config.audio_dummy_token_id),
                 text_eos_token_id=int(self.ming_config.text_eos_token_id),
             )
-            if stop_reason_tokens is not None:
-                stop_reason_tokens[output_index] = stop_reason
+            stop_reason_code_tokens[output_index : output_index + 1] = MING_STOP_REASON_CODES[stop_reason]
             if isinstance(req_id, str):
                 pending_updates[req_id] = {
                     KEY_LATENT_HISTORY: new_history,
@@ -318,7 +322,7 @@ class MingLLMModel(nn.Module):
                 "ming_max_decode_steps": max_decode_step_tokens,
                 "ming_min_decode_steps": min_decode_step_tokens,
                 "ming_has_patch": has_patch,
-                MING_STOP_REASON_KEY: tuple(stop_reason_tokens or []),
+                MING_STOP_REASON_KEY: stop_reason_code_tokens,
             },
             intermediate_tensors=intermediate_tensors,
         )
