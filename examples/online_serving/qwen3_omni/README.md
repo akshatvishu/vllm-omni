@@ -15,8 +15,10 @@ vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091
 If you want to open async chunking for qwen3-omni, launch the server with command below
 
 ```bash
-vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091 --stage-configs-path /vllm_omni/model_executor/stage_configs/qwen3_omni_moe_async_chunk.yaml
+vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091 --stage-configs-path vllm_omni/model_executor/stage_configs/qwen3_omni_moe_async_chunk.yaml
 ```
+
+**Note:** The OpenAI-style **`/v1/realtime`** WebSocket (streaming PCM audio in, audio + transcription out) is **not supported** when `async_chunk` is enabled. Use the default omni layout or a stage config with `async_chunk: false` for realtime sessions.
 
 If you have custom stage configs file, launch the server with command below
 ```bash
@@ -33,7 +35,51 @@ cd examples/online_serving/qwen3_omni
 ####  Send request via python
 
 ```bash
-python openai_chat_completion_client_for_multimodal_generation.py --query-type use_image --port 8091 --host "localhost"
+python examples/online_serving/openai_chat_completion_client_for_multimodal_generation.py --model Qwen/Qwen3-Omni-30B-A3B-Instruct --query-type use_image --port 8091 --host "localhost"
+```
+
+#### Realtime WebSocket client (`openai_realtime_client.py`)
+
+[`openai_realtime_client.py`](./openai_realtime_client.py) connects to **`ws://<host>:<port>/v1/realtime`**, streams a local WAV as **PCM16 mono @ 16 kHz** in fixed-size chunks (OpenAI-style `input_audio_buffer.append` / `commit`), and receives **`response.audio.delta`** (incremental PCM for the reply) plus **`transcription.*`** events. By default it concatenates audio deltas and writes **`--output-wav`** (model output is typically **24 kHz**). Optional **`--delta-dump-dir`** saves each delta as `delta_000001.wav`, … for debugging.
+
+Streaming input works well for translation-style use cases; if the Thinker runs while input is still incomplete, consider limiting **`max_tokens`** in your session / server defaults to avoid over-generation.
+
+**Dependencies:**
+
+```bash
+pip install websockets
+```
+
+**From this directory** (`examples/online_serving/qwen3_omni`):
+
+```bash
+python openai_realtime_client.py \
+  --url ws://localhost:8091/v1/realtime \
+  --model Qwen/Qwen3-Omni-30B-A3B-Instruct \
+  --input-wav /path/to/input_16k_mono.wav \
+  --output-wav realtime_output.wav \
+  --delta-dump-dir ./rt_delta_wavs
+```
+
+**Arguments:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url` | `ws://localhost:8091/v1/realtime` | Full WebSocket URL including path |
+| `--model` | `Qwen/Qwen3-Omni-30B-A3B-Instruct` | Must match the served model (sent in `session.update`) |
+| `--input-wav` | *(required)* | Input WAV: mono, 16-bit PCM, **16 kHz** |
+| `--output-wav` | `realtime_output.wav` | Output path for concatenated reply audio |
+| `--output-text` | *(optional)* | If set, write final transcription text to this path |
+| `--chunk-ms` | `200` | Size of each uploaded audio chunk (milliseconds of audio) |
+| `--send-delay-ms` | `0` | Delay between chunk sends (simulate realtime upload) |
+| `--delta-dump-dir` | *(optional)* | Directory to write per-`response.audio.delta` WAV files |
+| `--num-requests` | `1` | Number of sequential sessions (see `--concurrency`) |
+| `--concurrency` | `1` | Max concurrent WebSocket sessions when `--num-requests` > 1 |
+
+Ensure the server is running **without** `async_chunk` if you use `/v1/realtime`, for example:
+
+```bash
+vllm serve Qwen/Qwen3-Omni-30B-A3B-Instruct --omni --port 8091
 ```
 
 The Python client supports the following command-line arguments:
@@ -50,9 +96,10 @@ The Python client supports the following command-line arguments:
 For example, to use a local video file with custom prompt:
 
 ```bash
-python openai_chat_completion_client_for_multimodal_generation.py \
+python examples/online_serving/openai_chat_completion_client_for_multimodal_generation.py \
     --query-type use_video \
     --video-path /path/to/your/video.mp4 \
+    --model Qwen/Qwen3-Omni-30B-A3B-Instruct \
     --prompt "What are the main activities shown in this video?"
 ```
 
@@ -65,12 +112,6 @@ bash run_curl_multimodal_generation.sh use_image
 
 ### FAQ
 
-If you encounter error about backend of librosa, try to install ffmpeg with command below.
-```
-sudo apt update
-sudo apt install ffmpeg
-```
-
 ## Modality control
 You can control output modalities to specify which types of output the model should generate. This is useful when you only need text output and want to skip audio generation stages for better performance.
 
@@ -79,7 +120,7 @@ You can control output modalities to specify which types of output the model sho
 | Modalities | Output |
 |------------|--------|
 | `["text"]` | Text only |
-| `["audio"]` | Text + Audio |
+| `["audio"]` | Audio only |
 | `["text", "audio"]` | Text + Audio |
 | Not specified | Text + Audio (default) |
 
@@ -100,20 +141,21 @@ curl http://localhost:8091/v1/chat/completions \
 #### Text + Audio
 
 ```bash
-curl http://localhost:8091/v1/chat/completions \
+curl -s http://localhost:8091/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen3-Omni-30B-A3B-Instruct",
     "messages": [{"role": "user", "content": "Describe vLLM in brief."}],
     "modalities": ["audio"]
-  }'
+  }' | jq -r '.choices[0].message.audio.data' | base64 -d > output.wav
 ```
 
 ### Using Python client
 
 ```bash
-python openai_chat_completion_client_for_multimodal_generation.py \
+python examples/online_serving/openai_chat_completion_client_for_multimodal_generation.py \
     --query-type use_image \
+    --model Qwen/Qwen3-Omni-30B-A3B-Instruct \
     --modalities text
 ```
 
@@ -137,6 +179,7 @@ print(response.choices[0].message.content)
 #### Text + Audio
 
 ```python
+import base64
 from openai import OpenAI
 
 client = OpenAI(base_url="http://localhost:8091/v1", api_key="EMPTY")
@@ -144,11 +187,15 @@ client = OpenAI(base_url="http://localhost:8091/v1", api_key="EMPTY")
 response = client.chat.completions.create(
     model="Qwen/Qwen3-Omni-30B-A3B-Instruct",
     messages=[{"role": "user", "content": "Describe vLLM in brief."}],
-    modalities=["audio"]
+    modalities=["text", "audio"]
 )
 # Response contains two choices: one with text, one with audio
 print(response.choices[0].message.content)  # Text response
-print(response.choices[1].message.audio)    # Audio response
+
+# Save audio to file
+audio_data = base64.b64decode(response.choices[1].message.audio.data)
+with open("output.wav", "wb") as f:
+    f.write(audio_data)
 ```
 
 ## Speaker selection
@@ -175,9 +222,10 @@ curl http://localhost:8091/v1/chat/completions \
 Use the `--speaker` argument when generating audio:
 
 ```bash
-python openai_chat_completion_client_for_multimodal_generation.py \
+python examples/online_serving/openai_chat_completion_client_for_multimodal_generation.py \
     --query-type use_image \
     --modalities audio \
+    --model Qwen/Qwen3-Omni-30B-A3B-Instruct \
     --speaker "chelsie"
 ```
 
@@ -203,10 +251,11 @@ print(response.choices[1].message.audio)
 Supported speaker names depend on the model (e.g. `Ethan`, `Chelsie`, `Aiden`). Omit `speaker` to use the default.
 
 ## Streaming Output
-If you want to enable streaming output, please set the argument as below. The final output will be obtained just after generated by corresponding stage. Now we only support text streaming output. Other modalities can output normally.
+If you want to enable streaming output, please set the argument as below. The final output will be obtained just after generated by corresponding stage. We support both text streaming output and audio streaming output. Other modalities can output normally.
 ```bash
-python openai_chat_completion_client_for_multimodal_generation.py \
+python examples/online_serving/openai_chat_completion_client_for_multimodal_generation.py \
     --query-type use_image \
+    --model Qwen/Qwen3-Omni-30B-A3B-Instruct \
     --stream
 ```
 

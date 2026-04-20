@@ -376,6 +376,8 @@ class StableAudioDiTModel(nn.Module):
     layers to support multi-GPU execution.
     """
 
+    _repeated_blocks = ["StableAudioDiTBlock"]
+
     def __init__(
         self,
         od_config: OmniDiffusionConfig | None = None,
