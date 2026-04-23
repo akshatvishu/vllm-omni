@@ -2270,7 +2270,7 @@ class TestMingSpeechServing:
             speaker_embedding=[[0.1] * 192, [0.2] * 192],
         )
 
-        prompt = OmniOpenAIServingSpeech._build_ming_prompt(
+        prompt = OmniOpenAIServingSpeech._build_ming_dense_prompt(
             ming_speech_server,
             request,
             ref_audio_data=[
@@ -2311,7 +2311,7 @@ class TestMingSpeechServing:
             speaker_embedding=[[0.1] * 192, [0.2] * 192],
         )
 
-        OmniOpenAIServingSpeech._build_ming_prompt(
+        OmniOpenAIServingSpeech._build_ming_dense_prompt(
             ming_speech_server,
             request,
             ref_audio_data=[
@@ -2324,9 +2324,7 @@ class TestMingSpeechServing:
         assert captured["speaker_embedding"] == [[0.1] * 192, [0.2] * 192]
         assert captured["prompt_text"] == " speaker_1:参考一。\n speaker_2:参考二。\n"
 
-    def test_build_ming_prompt_uses_single_ref_audio_as_speaker_only_without_ref_text(
-        self, ming_speech_server, mocker: MockerFixture
-    ):
+    def test_build_ming_prompt_omits_prompt_waveform_without_ref_text(self, ming_speech_server, mocker: MockerFixture):
         captured = {}
 
         def _fake_build_ming_dense_prompt(*args, **kwargs):
@@ -2341,11 +2339,10 @@ class TestMingSpeechServing:
         request = OpenAICreateSpeechRequest(
             input="我竟然抢到了陈奕迅的演唱会门票！",
             ref_audio="data:audio/wav;base64,aaa",
-            speaker_embedding=[0.1] * 192,
             instructions='{"情感":"高兴"}',
         )
 
-        OmniOpenAIServingSpeech._build_ming_prompt(
+        OmniOpenAIServingSpeech._build_ming_dense_prompt(
             ming_speech_server,
             request,
             ref_audio_data=([0.1] * 10, 44100),
@@ -2353,7 +2350,7 @@ class TestMingSpeechServing:
 
         assert captured["prompt_waveform"] is None
         assert captured["prompt_text"] is None
-        assert captured["speaker_embedding"] == [0.1] * 192
+        assert captured["speaker_embedding"] is None
 
     def test_build_ming_prompt_keeps_single_ref_audio_waveform_with_ref_text(
         self, ming_speech_server, mocker: MockerFixture
@@ -2373,10 +2370,9 @@ class TestMingSpeechServing:
             input="我们的愿景是构建未来服务业的数字化基础设施。",
             ref_audio="data:audio/wav;base64,aaa",
             ref_text="在此奉劝大家别乱打美白针。",
-            speaker_embedding=[0.1] * 192,
         )
 
-        OmniOpenAIServingSpeech._build_ming_prompt(
+        OmniOpenAIServingSpeech._build_ming_dense_prompt(
             ming_speech_server,
             request,
             ref_audio_data=([0.1] * 10, 44100),
@@ -2384,7 +2380,7 @@ class TestMingSpeechServing:
 
         assert tuple(captured["prompt_waveform"].shape) == (1, 10)
         assert captured["prompt_text"] == "在此奉劝大家别乱打美白针。"
-        assert captured["speaker_embedding"] == [0.1] * 192
+        assert captured["speaker_embedding"] is None
 
     def test_prepare_speech_generation_sets_ming_stop_token(self, ming_speech_server):
         from vllm_omni.model_executor.models.ming_tts.config_ming_tts import TEXT_EOS_TOKEN_ID
@@ -2430,6 +2426,7 @@ class TestMingSpeechServing:
             ref_audio="data:audio/wav;base64,aaa",
             instructions='{"情感":"高兴"}',
         )
+        ming_speech_server._max_instructions_length = 500
         ming_speech_server._resolve_ref_audio = AsyncMock(return_value=([0.1, 0.2], 44100))
         ming_speech_server._extract_ming_speaker_embeddings_from_ref_audio = mocker.MagicMock(
             return_value=[[0.3] * 192]
