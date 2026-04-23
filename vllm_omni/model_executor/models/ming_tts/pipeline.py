@@ -13,7 +13,7 @@ _PROC = "vllm_omni.model_executor.stage_input_processors.ming_tts"
 MING_TTS_PIPELINE = PipelineConfig(
     model_type="ming_tts",
     model_arch="MingTTSForConditionalGeneration",
-    hf_architectures=("MingTTSForConditionalGeneration",),
+    hf_architectures=("BailingMMNativeForConditionalGeneration",),
     stages=(
         StagePipelineConfig(
             stage_id=0,
