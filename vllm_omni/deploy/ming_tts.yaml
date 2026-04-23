@@ -1,6 +1,10 @@
 # Ming-omni-tts deploy: stage-0 LLM+flow -> stage-1 audio VAE.
 # Verified legacy settings migrated from ming_tts.yaml and ming_tts_async_chunk.yaml.
 # Default mode is async-chunk streaming on a single GPU.
+# pipeline: required — HF config reports model_type="dense" with no architectures,
+# so auto-detection falls through. This key routes the deploy-config probe in
+# StageConfigFactory.create_from_model to the correct registry entry.
+pipeline: ming_tts
 async_chunk: true
 trust_remote_code: false
 dtype: bfloat16

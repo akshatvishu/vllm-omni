@@ -1029,6 +1029,22 @@ class StageConfigFactory:
                             registered.model_type, cli_overrides, deploy_config_path, cli_explicit_keys
                         )
 
+        # --- Deploy config pipeline override ---
+        # Models that report a generic model_type (e.g. "dense") with no HF
+        # architectures cannot be matched by the paths above. If an explicit
+        # deploy config is provided and it carries a ``pipeline:`` key, use
+        # that to resolve the registry entry. This completes the intent of
+        # DeployConfig.pipeline ("overrides auto-detected pipeline registry
+        # key") for the case where auto-detection itself fails.
+        if deploy_config_path is not None:
+            _deploy_path = Path(deploy_config_path)
+            if _deploy_path.exists():
+                _deploy_cfg = load_deploy_config(_deploy_path)
+                if _deploy_cfg.pipeline and _deploy_cfg.pipeline in _PIPELINE_REGISTRY:
+                    return cls._create_from_registry(
+                        _deploy_cfg.pipeline, cli_overrides, deploy_config_path, cli_explicit_keys
+                    )
+
         # --- Legacy path: load from pipeline YAML ---
         pipeline = cls._load_pipeline(model, trust_remote_code=trust_remote_code)
 
