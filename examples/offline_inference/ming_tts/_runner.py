@@ -21,21 +21,14 @@ from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
 
 def coerce_audio_tensor(audio, *, async_chunk: bool) -> torch.Tensor:
     if isinstance(audio, list):
-        if async_chunk:
-            parts = []
-            for item in audio:
-                tensor = torch.as_tensor(item, dtype=torch.float32).reshape(-1)
-                if tensor.numel() > 0:
-                    parts.append(tensor)
-            if not parts:
-                return torch.zeros((0,), dtype=torch.float32)
-            return torch.cat(parts, dim=0)
-
-        for item in reversed(audio):
+        parts = []
+        for item in audio:
             tensor = torch.as_tensor(item, dtype=torch.float32).reshape(-1)
             if tensor.numel() > 0:
-                return tensor
-        return torch.zeros((0,), dtype=torch.float32)
+                parts.append(tensor)
+        if not parts:
+            return torch.zeros((0,), dtype=torch.float32)
+        return torch.cat(parts, dim=0)
 
     return torch.as_tensor(audio, dtype=torch.float32).reshape(-1)
 
