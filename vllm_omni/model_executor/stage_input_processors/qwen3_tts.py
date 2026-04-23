@@ -5,6 +5,11 @@ from typing import Any
 import torch
 from vllm.logger import init_logger
 
+from vllm_omni.model_executor.stage_input_processors._chunk_transfer import (
+    get_initial_codec_chunk_frames,
+    get_request_payload_store,
+    get_transfer_extra_config,
+)
 from vllm_omni.model_executor.stage_input_processors.chunk_size_utils import (
     compute_dynamic_initial_chunk_size,
     max_ic_for_chunk_size,
@@ -138,10 +143,7 @@ def talker2code2wav_async_chunk(
 ) -> dict[str, Any] | None:
     request_id = request.external_req_id
     finished = bool(is_finished or request.is_finished())
-    request_payload = getattr(transfer_manager, "request_payload", None)
-    if request_payload is None:
-        request_payload = {}
-        transfer_manager.request_payload = request_payload
+    request_payload = get_request_payload_store(transfer_manager)
 
     if isinstance(pooling_output, dict):
         frame = _extract_last_frame(pooling_output)
@@ -154,26 +156,17 @@ def talker2code2wav_async_chunk(
     elif not finished:
         return None
 
-    connector = getattr(transfer_manager, "connector", None)
-    raw_cfg = getattr(connector, "config", {}) or {}
-    cfg = raw_cfg.get("extra", raw_cfg) if isinstance(raw_cfg, dict) else {}
+    cfg = get_transfer_extra_config(transfer_manager)
     chunk_size = int(cfg.get("codec_chunk_frames", 25))
     left_context_size_config = int(cfg.get("codec_left_context_frames", 25))
 
     # Per-request override takes priority over dynamic IC.
     per_request_override = False
     initial_chunk_size = 0
-    additional_information = getattr(request, "additional_information", None)
-
-    if (
-        additional_information is not None
-        and hasattr(additional_information, "entries")
-        and "initial_codec_chunk_frames" in additional_information.entries
-    ):
-        entry = additional_information.entries["initial_codec_chunk_frames"]
-        if entry.list_data is not None and len(entry.list_data) == 1:
-            initial_chunk_size = int(entry.list_data[0])
-            per_request_override = True
+    initial_codec_chunk_frames = get_initial_codec_chunk_frames(request)
+    if initial_codec_chunk_frames is not None:
+        initial_chunk_size = initial_codec_chunk_frames
+        per_request_override = True
 
     # Dynamic IC: cache per request so boundaries stay stable for its lifetime.
     if not per_request_override:

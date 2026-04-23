@@ -17,6 +17,11 @@ from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
     LATENT_LEFT_CONTEXT,
     PATCH_SIZE,
 )
+from vllm_omni.model_executor.stage_input_processors._chunk_transfer import (
+    get_chunk_config_int,
+    get_request_payload_store,
+    get_transfer_extra_config,
+)
 
 logger = init_logger(__name__)
 
@@ -115,20 +120,20 @@ def _decode_stop_reason(value: Any) -> str | None:
     return MING_STOP_REASON_BY_CODE.get(int(value))
 
 
-def _get_async_chunk_config_value(cfg: dict[str, Any], key: str, fallback: int) -> int:
-    if key not in cfg:
-        logger.warning("Ming async chunk config missing %s, using fallback value %s", key, fallback)
-        return fallback
-    return int(cfg[key])
-
-
 def _get_async_chunk_config(transfer_manager: Any) -> tuple[int, int]:
-    connector = getattr(transfer_manager, "connector", None)
-    raw_cfg = getattr(connector, "config", {}) or {}
-    cfg = raw_cfg.get("extra", raw_cfg) if isinstance(raw_cfg, dict) else {}
-
-    chunk_size = _get_async_chunk_config_value(cfg, "latent_chunk_size", LATENT_CHUNK_SIZE)
-    left_context = _get_async_chunk_config_value(cfg, "latent_left_context", LATENT_LEFT_CONTEXT)
+    cfg = get_transfer_extra_config(transfer_manager)
+    chunk_size = get_chunk_config_int(
+        cfg,
+        "latent_chunk_size",
+        LATENT_CHUNK_SIZE,
+        warning_prefix="Ming async chunk config",
+    )
+    left_context = get_chunk_config_int(
+        cfg,
+        "latent_left_context",
+        LATENT_LEFT_CONTEXT,
+        warning_prefix="Ming async chunk config",
+    )
     if chunk_size <= 0:
         raise ValueError(f"Invalid Ming latent_chunk_size={chunk_size}")
     # Stage-2 VAE caches past_key_values and stream_state by request_id.
@@ -174,7 +179,8 @@ def llm2audio_vae_async_chunk(
     finished = bool(is_finished or request.is_finished())
     final_decode_step = _extract_last_value(pooling_output, "ming_decode_step")
     stop_reason = _decode_stop_reason(_extract_last_value(pooling_output, MING_STOP_REASON_KEY))
-    request_state = transfer_manager.request_payload.get(request_id)
+    request_payload = get_request_payload_store(transfer_manager)
+    request_state = request_payload.get(request_id)
     if not isinstance(request_state, dict) or "_ming_async_state" not in request_state:
         request_state = {
             "_ming_async_state": {
@@ -182,7 +188,7 @@ def llm2audio_vae_async_chunk(
                 "terminal_sent": False,
             }
         }
-        transfer_manager.request_payload[request_id] = request_state
+        request_payload[request_id] = request_state
     state = request_state["_ming_async_state"]
     if bool(state.get("terminal_sent", False)):
         return None
