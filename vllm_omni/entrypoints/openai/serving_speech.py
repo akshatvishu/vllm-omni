@@ -1438,7 +1438,9 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             use_zero_spk_emb=use_zero_spk_emb,
         )
 
-    async def _generate_audio_chunks(self, generator, request_id: str, response_format: str = "pcm"):
+    async def _generate_audio_chunks(
+        self, generator, request_id: str, response_format: str = "pcm", raw_request: Request | None = None
+    ):
         """Generate audio chunks for streaming response.
 
         Handles two audio output modes from the engine:
