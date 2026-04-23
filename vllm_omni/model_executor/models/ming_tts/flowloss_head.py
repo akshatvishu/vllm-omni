@@ -5,8 +5,8 @@
 import torch
 import torch.nn as nn
 
-from .cfm import CFM
-from .dit import DiT
+from .fm.cfm import CFM
+from .fm.dit import DiT
 
 
 class FlowLoss(nn.Module):
@@ -40,7 +40,7 @@ class FlowLoss(nn.Module):
         noise = torch.randn(z.shape[0], self.z_channels, patch_size, device=z.device)
         if not torch.isfinite(noise).all():
             raise RuntimeError("Non-finite noise in FlowLoss.sample().")
-        noise = noise.to(dtype=z.dtype)  # match conditioning dtype — no autocast in vllm-omni
+        noise = noise.to(dtype=z.dtype)
         out, _ = self.cfm.sample(
             noise=noise,
             c=z,
@@ -50,5 +50,4 @@ class FlowLoss(nn.Module):
             sigma=sigma,
             temperature=temperature,
         )
-        # out shape: [B, patch_size, z_channels]
         return out

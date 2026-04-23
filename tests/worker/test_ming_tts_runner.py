@@ -501,7 +501,9 @@ def test_ming_forward_exposes_stop_reason_in_outputs_and_pending_state(monkeypat
         seq_token_counts=[1],
     )
 
-    assert output.multimodal_outputs[MING_STOP_REASON_KEY] == (MING_STOP_REASON_CONTINUE,)
+    stop_reason_codes = output.multimodal_outputs[MING_STOP_REASON_KEY]
+    assert isinstance(stop_reason_codes, torch.Tensor)
+    assert int(stop_reason_codes.reshape(-1)[0].item()) == 0
     pending = runner.llm.pop_postprocess_update("req-stop-reason")
     assert pending[MING_STOP_REASON_KEY] == MING_STOP_REASON_CONTINUE
 

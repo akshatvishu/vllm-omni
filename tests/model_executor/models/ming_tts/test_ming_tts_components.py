@@ -6,19 +6,19 @@ import pytest
 import torch
 import torch.nn as nn
 
+from vllm_omni.model_executor.models.ming_tts.aggregator import Aggregator
 from vllm_omni.model_executor.models.ming_tts.audio_tokenizer.configuration_audio_vae import AudioVAEconfig
 from vllm_omni.model_executor.models.ming_tts.audio_tokenizer.istft import ISTFT, ISTFTHead
 from vllm_omni.model_executor.models.ming_tts.audio_tokenizer.modeling_audio_vae import AudioVAE
 from vllm_omni.model_executor.models.ming_tts.audio_tokenizer.vae_modules import StreamingLinearUpsample
+from vllm_omni.model_executor.models.ming_tts.flowloss_head import FlowLoss
 from vllm_omni.model_executor.models.ming_tts.fm.cfm import CFM, Solver, get_epss_timesteps
 from vllm_omni.model_executor.models.ming_tts.fm.dit import (
-    Aggregator,
     CondEmbedder,
     DiT,
     SinusPositionEmbedding,
     TimestepEmbedder,
 )
-from vllm_omni.model_executor.models.ming_tts.fm.flowloss import FlowLoss
 from vllm_omni.model_executor.models.ming_tts.fm.modules import Attention, DiTBlock, RMSNorm
 from vllm_omni.model_executor.models.ming_tts.ming_tts import (
     _coerce_prompt_latents,
