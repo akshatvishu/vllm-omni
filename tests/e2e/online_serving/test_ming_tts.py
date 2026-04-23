@@ -19,19 +19,13 @@ from tests.utils import hardware_test
 from vllm_omni.model_executor.models.ming_tts.config_ming_tts import SAMPLE_RATE
 
 MODEL = "inclusionAI/Ming-omni-tts-0.5B"
-STAGE_CONFIG = str(
-    Path(__file__).parent.parent.parent.parent
-    / "vllm_omni"
-    / "model_executor"
-    / "stage_configs"
-    / "ming_tts_async_chunk.yaml"
-)
+DEPLOY_CONFIG = str(Path(__file__).parent.parent.parent.parent / "vllm_omni" / "deploy" / "ming_tts.yaml")
 
 SERVER_PARAMS = [
     pytest.param(
         OmniServerParams(
             model=MODEL,
-            stage_config_path=STAGE_CONFIG,
+            stage_config_path=DEPLOY_CONFIG,
             server_args=["--enforce-eager", "--disable-log-stats"],
         ),
         id="async_chunk",

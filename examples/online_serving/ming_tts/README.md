@@ -14,7 +14,7 @@ Please refer to [README.md](../../../README.md)
 
 ```bash
 vllm-omni serve inclusionAI/Ming-omni-tts-0.5B \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts_async_chunk.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --omni \
     --port 8091 \
     --enforce-eager
@@ -31,7 +31,7 @@ The recommended online-serving path is eager async-chunk mode through
 `/v1/audio/speech`. `run_server.sh` defaults to:
 
 - model: `inclusionAI/Ming-omni-tts-0.5B`
-- stage config: `vllm_omni/model_executor/stage_configs/ming_tts_async_chunk.yaml`
+- deploy config: `vllm_omni/deploy/ming_tts.yaml`
 - auth: local testing only, no real OpenAI key required
 
 ## Send Requests
@@ -131,24 +131,17 @@ python openai_speech_client.py \
 
 ### Curl examples
 
-Use the helper script for the common request types:
+`run_curl.sh` is intentionally small now. It keeps only three sanity checks:
 
 ```bash
 ./run_curl.sh basic
-./run_curl.sh style
-./run_curl.sh ip
-REF_AUDIO=/path/to/emotion_prompt.wav ./run_curl.sh emotion
-REF_AUDIO=/path/to/yue_prompt.wav ./run_curl.sh dialect
 REF_AUDIO=/path/to/reference.wav REF_TEXT="在此奉劝大家别乱打美白针。" ./run_curl.sh zero_shot
-REF_AUDIO=/path/to/speaker_1.wav REF_AUDIO_2=/path/to/speaker_2.wav REF_TEXT="speaker_1:你好。 speaker_2:你好。" ./run_curl.sh podcast
-REF_AUDIO=/path/to/00000309-00000300.wav ./run_curl.sh speech_bgm
-REF_AUDIO=/path/to/00000309-00000300.wav ./run_curl.sh speech_sound
-REF_AUDIO=/path/to/reference.wav REF_TEXT="在此奉劝大家别乱打美白针。" ./run_curl.sh clone_ref_audio
-SPEAKER_EMBEDDING=/path/to/ming_speaker_embedding.json ./run_curl.sh clone_embedding
 ./run_curl.sh stream
 ```
 
-Or send a direct request:
+For the broader request cookbook, use direct `curl` payloads in this README.
+
+Basic speech:
 
 ```bash
 curl -X POST http://localhost:8091/v1/audio/speech \
@@ -160,6 +153,117 @@ curl -X POST http://localhost:8091/v1/audio/speech \
         "response_format": "wav"
     }' \
     --output ming_output.wav
+```
+
+Style-conditioned speech:
+
+```bash
+curl -X POST http://localhost:8091/v1/audio/speech \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer EMPTY" \
+    -d '{
+        "model": "inclusionAI/Ming-omni-tts-0.5B",
+        "input": "我会一直在这里陪着你。",
+        "instructions": "轻柔的ASMR耳语，慢速，贴近麦克风",
+        "response_format": "wav"
+    }' \
+    --output ming_style.wav
+```
+
+IP voice generation:
+
+```bash
+curl -X POST http://localhost:8091/v1/audio/speech \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer EMPTY" \
+    -d '{
+        "model": "inclusionAI/Ming-omni-tts-0.5B",
+        "input": "这款产品的名字，叫变态坑爹牛肉丸。",
+        "voice": "灵小甄",
+        "response_format": "wav"
+    }' \
+    --output ming_ip.wav
+```
+
+Dialect control with structured instructions:
+
+```bash
+curl -X POST http://localhost:8091/v1/audio/speech \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer EMPTY" \
+    -d '{
+        "model": "inclusionAI/Ming-omni-tts-0.5B",
+        "input": "我觉得社会企业同个人都有责任",
+        "instructions": "{\"方言\":\"广粤话\"}",
+        "ref_audio": "data:audio/wav;base64,<BASE64_WAV>",
+        "response_format": "wav"
+    }' \
+    --output ming_dialect.wav
+```
+
+Zero-shot cloning with transcript:
+
+```bash
+curl -X POST http://localhost:8091/v1/audio/speech \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer EMPTY" \
+    -d '{
+        "model": "inclusionAI/Ming-omni-tts-0.5B",
+        "input": "我们的愿景是构建未来服务业的数字化基础设施。",
+        "ref_audio": "data:audio/wav;base64,<BASE64_WAV>",
+        "ref_text": "在此奉劝大家别乱打美白针。",
+        "response_format": "wav"
+    }' \
+    --output ming_zero_shot.wav
+```
+
+Podcast-style multi-speaker prompt:
+
+```bash
+curl -X POST http://localhost:8091/v1/audio/speech \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer EMPTY" \
+    -d '{
+        "model": "inclusionAI/Ming-omni-tts-0.5B",
+        "input": "speaker_1:你可以说一下。 speaker_2:我也不知道。",
+        "ref_audio": [
+            "data:audio/wav;base64,<BASE64_SPK1>",
+            "data:audio/wav;base64,<BASE64_SPK2>"
+        ],
+        "ref_text": "speaker_1:你好。 speaker_2:你好。",
+        "response_format": "wav"
+    }' \
+    --output ming_podcast.wav
+```
+
+Speaker-embedding cloning:
+
+```bash
+curl -X POST http://localhost:8091/v1/audio/speech \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer EMPTY" \
+    -d '{
+        "model": "inclusionAI/Ming-omni-tts-0.5B",
+        "input": "你好，这是一段使用说话人向量的合成语音。",
+        "speaker_embedding": [0.0, 0.0, 0.0],
+        "response_format": "wav"
+    }' \
+    --output ming_embedding.wav
+```
+
+Streaming PCM response:
+
+```bash
+curl -N -X POST http://localhost:8091/v1/audio/speech \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer EMPTY" \
+    -d '{
+        "model": "inclusionAI/Ming-omni-tts-0.5B",
+        "input": "你好，这是流式测试。",
+        "stream": true,
+        "response_format": "pcm"
+    }' \
+    --output ming_stream.pcm
 ```
 
 ## Request Types

@@ -27,16 +27,7 @@ from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
 from vllm_omni.model_executor.models.ming_tts.prompt_builder import build_ming_dense_prompt
 
 MODEL = "inclusionAI/Ming-omni-tts-0.5B"
-STAGE_CONFIG = str(
-    Path(__file__).parent.parent.parent.parent / "vllm_omni" / "model_executor" / "stage_configs" / "ming_tts.yaml"
-)
-STREAM_STAGE_CONFIG = str(
-    Path(__file__).parent.parent.parent.parent
-    / "vllm_omni"
-    / "model_executor"
-    / "stage_configs"
-    / "ming_tts_async_chunk.yaml"
-)
+DEPLOY_CONFIG = str(Path(__file__).parent.parent.parent.parent / "vllm_omni" / "deploy" / "ming_tts.yaml")
 TEST_TEXT = "我会一直在这里陪着你，直到你慢慢地沉入那个最温柔的梦里。"
 TEST_INSTRUCTION = "轻柔的ASMR耳语，慢速，贴近麦克风"
 MIN_AUDIO_SAMPLES = 1000
@@ -108,7 +99,7 @@ def test_ming_tts_offline_basic() -> None:
     """Test blocking Ming generation through Omni."""
     omni = Omni(
         model=MODEL,
-        stage_configs_path=STAGE_CONFIG,
+        deploy_config=DEPLOY_CONFIG,
         stage_init_timeout=300,
         enforce_eager=True,
     )
@@ -139,7 +130,7 @@ def test_ming_tts_speaker_conditioning_differs() -> None:
     """Test that different Ming speaker controls produce different waveform outputs."""
     omni = Omni(
         model=MODEL,
-        stage_configs_path=STAGE_CONFIG,
+        deploy_config=DEPLOY_CONFIG,
         stage_init_timeout=300,
         enforce_eager=True,
     )
@@ -185,7 +176,7 @@ def test_ming_tts_offline_streaming() -> None:
     async def _run() -> None:
         async_omni = AsyncOmni(
             model=MODEL,
-            stage_configs_path=STREAM_STAGE_CONFIG,
+            deploy_config=DEPLOY_CONFIG,
             stage_init_timeout=300,
             enforce_eager=True,
         )

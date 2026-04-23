@@ -9,13 +9,13 @@ set -e
 
 MODEL="${MODEL:-inclusionAI/Ming-omni-tts-0.5B}"
 PORT="${PORT:-8091}"
-STAGE_CONFIG="${STAGE_CONFIG:-vllm_omni/model_executor/stage_configs/ming_tts_async_chunk.yaml}"
+DEPLOY_CONFIG="${DEPLOY_CONFIG:-vllm_omni/deploy/ming_tts.yaml}"
 
 echo "Starting Ming-omni-tts server with model: $MODEL"
-echo "Stage config: $STAGE_CONFIG"
+echo "Deploy config: $DEPLOY_CONFIG"
 
 vllm-omni serve "$MODEL" \
-    --stage-configs-path "$STAGE_CONFIG" \
+    --deploy-config "$DEPLOY_CONFIG" \
     --host 0.0.0.0 \
     --port "$PORT" \
     --enforce-eager \

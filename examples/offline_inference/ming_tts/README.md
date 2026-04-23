@@ -2,6 +2,14 @@
 
 `end2end.py` runs Ming dense 0.5B end to end with vLLM-Omni. It uses the in-repo Ming prompt builder directly, so the example request shape matches the real integration instead of a simplified wrapper.
 
+## Files
+
+| File | Purpose |
+|---|---|
+| `end2end.py` | Driver: CLI, case loading, prompt construction, orchestration (~150 lines) |
+| `cases.yaml` | All 11 built-in case definitions (prompt, text, instruction, ref-audio flags, flow controls) |
+| `_runner.py` | Engine management and audio output (streaming + blocking paths; internal helper) |
+
 ## Model Overview
 
 Ming dense 0.5B is exposed here as a two-stage offline pipeline:
@@ -11,8 +19,8 @@ Ming dense 0.5B is exposed here as a two-stage offline pipeline:
 
 The example supports both:
 
-- **Sequential eager** via `ming_tts.yaml`
-- **Async chunk eager** via `ming_tts_async_chunk.yaml`
+- **Sequential eager** via `vllm_omni/deploy/ming_tts.yaml` with `--no-async-chunk`
+- **Async chunk eager** via `vllm_omni/deploy/ming_tts.yaml` (default `async_chunk: true`)
 
 ## Setup
 
@@ -50,7 +58,8 @@ Run the zero-speaker style example:
 ```bash
 python examples/offline_inference/ming_tts/end2end.py \
     --case style \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
+    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -61,7 +70,8 @@ python examples/offline_inference/ming_tts/end2end.py \
     --case zero_shot \
     --ref-audio /path/to/10002287-00000094.wav \
     --ref-text "在此奉劝大家别乱打美白针。" \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
+    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -71,7 +81,8 @@ Run emotion-controlled speech:
 python examples/offline_inference/ming_tts/end2end.py \
     --case emotion \
     --ref-audio /path/to/emotion_prompt.wav \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
+    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -81,7 +92,8 @@ Run podcast generation with two reference clips:
 python examples/offline_inference/ming_tts/end2end.py \
     --case podcast \
     --ref-audio-paths /path/to/CTS-CN-F2F-2019-11-11-423-012-A.wav /path/to/CTS-CN-F2F-2019-11-11-423-012-B.wav \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
+    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -100,7 +112,8 @@ Run text-to-audio event generation:
 ```bash
 python examples/offline_inference/ming_tts/end2end.py \
     --case tta \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
+    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -111,7 +124,7 @@ python examples/offline_inference/ming_tts/end2end.py \
     --case basic \
     --ref-audio /path/to/10002287-00000095.wav \
     --streaming \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts_async_chunk.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
 ```
 
@@ -124,7 +137,8 @@ Collect runtime stats and a manifest:
 ```bash
 python examples/offline_inference/ming_tts/end2end.py \
     --case style \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
+    --no-async-chunk \
     --enforce-eager \
     --enable-stats \
     --stats-log-file output_audio/ming_style_pipeline.log \
@@ -147,7 +161,7 @@ The upstream Ming cookbook uses these public audio fixtures from `inclusionAI/Mi
 The repo-facing example is intended to cover the same dense TTS workflows used
 by the local Ming validation script:
 
-| Case | Blocking `ming_tts.yaml` | Async chunk `ming_tts_async_chunk.yaml` | Extra inputs |
+| Case | Blocking `ming_tts.yaml` | Async chunk `deploy/ming_tts.yaml` | Extra inputs |
 |---|---:|---:|---|
 | `style` | Yes | Optional smoke test | none |
 | `ip` | Yes | Optional smoke test | none |
@@ -186,7 +200,7 @@ and Stage-1 patch counts for every case:
 | Argument | Description |
 |---|---|
 | `--model` | Hugging Face repo or local Ming checkpoint path |
-| `--stage-configs-path` | Stage config YAML. Use `ming_tts.yaml` for blocking generation or `ming_tts_async_chunk.yaml` for streaming |
+| `--deploy-config` | Deploy config YAML. Use `vllm_omni/deploy/ming_tts.yaml` |
 | `--case` | Built-in demo case |
 | `--ref-audio` | Single reference wav path for cloning-style cases |
 | `--ref-audio-paths` | Multiple reference wav paths, used by `podcast` |
