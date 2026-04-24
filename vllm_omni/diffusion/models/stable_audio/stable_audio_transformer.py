@@ -32,7 +32,10 @@ from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_modu
 logger = init_logger(__name__)
 
 
-def apply_rotary_emb_stable_audio(hidden_states, freqs_cis):
+def apply_rotary_emb_stable_audio(
+    hidden_states: torch.Tensor,
+    freqs_cis: tuple[torch.Tensor, torch.Tensor],
+) -> torch.Tensor:
     """
     Applies Rotary Positional Embeddings (RoPE) to the hidden states.
 
@@ -66,7 +69,7 @@ class StableAudioGaussianFourierProjection(nn.Module):
     representations using randomly initialized Fourier features.
     """
 
-    def __init__(self, embedding_size=256, scale=1.0):
+    def __init__(self, embedding_size: int = 256, scale: float = 1.0) -> None:
         super().__init__()
         # Standard initialization. Checkpoint load_weights will overwrite this.
         self.weight = nn.Parameter(
@@ -74,7 +77,7 @@ class StableAudioGaussianFourierProjection(nn.Module):
             requires_grad=False,
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Run Fourier projection in float32 safely to prevent precision overflow
         x_fp32 = x.float()
         fourier_weight = self.weight.float()
@@ -97,12 +100,12 @@ class StableAudioSelfAttention(nn.Module):
 
     def __init__(
         self,
-        dim,
-        num_attention_heads,
-        num_key_value_attention_heads,
-        attention_head_dim,
-        dropout=0.0,
-    ):
+        dim: int,
+        num_attention_heads: int,
+        num_key_value_attention_heads: int,
+        attention_head_dim: int,
+        dropout: float = 0.0,
+    ) -> None:
         super().__init__()
         self.head_dim = attention_head_dim
         self.inner_dim = num_attention_heads * attention_head_dim
@@ -132,7 +135,11 @@ class StableAudioSelfAttention(nn.Module):
             ]
         )
 
-    def forward(self, hidden_states, rotary_emb=None):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
         B, S, _ = hidden_states.shape
 
         # Projections: With attn1 set to MHA (24 heads each for Q, K, V),
@@ -177,13 +184,13 @@ class StableAudioCrossAttention(nn.Module):
 
     def __init__(
         self,
-        dim,
-        num_attention_heads,
-        num_key_value_attention_heads,
-        attention_head_dim,
-        cross_attention_dim,
-        dropout=0.0,
-    ):
+        dim: int,
+        num_attention_heads: int,
+        num_key_value_attention_heads: int,
+        attention_head_dim: int,
+        cross_attention_dim: int,
+        dropout: float = 0.0,
+    ) -> None:
         super().__init__()
 
         self.head_dim = attention_head_dim
@@ -217,7 +224,11 @@ class StableAudioCrossAttention(nn.Module):
             ]
         )
 
-    def forward(self, hidden_states, encoder_hidden_states):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+    ) -> torch.Tensor:
         B, Sq, _ = hidden_states.shape
         Sk = encoder_hidden_states.shape[1]
 
@@ -268,7 +279,7 @@ class StableAudioFeedForward(nn.Module):
     cross-rank reduction required in tensor parallelism.
     """
 
-    def __init__(self, dim, inner_dim):
+    def __init__(self, dim: int, inner_dim: int) -> None:
         super().__init__()
 
         self.net = nn.Sequential(
@@ -290,7 +301,7 @@ class StableAudioFeedForward(nn.Module):
             ),
         )
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         # ColumnParallelLinear
         hidden_states, _ = self.net[0]["proj"](hidden_states)
 
@@ -316,13 +327,13 @@ class StableAudioDiTBlock(nn.Module):
 
     def __init__(
         self,
-        dim,
-        num_attention_heads,
-        num_key_value_attention_heads,
-        attention_head_dim,
-        cross_attention_dim,
-        ff_mult=4,
-    ):
+        dim: int,
+        num_attention_heads: int,
+        num_key_value_attention_heads: int,
+        attention_head_dim: int,
+        cross_attention_dim: int,
+        ff_mult: int = 4,
+    ) -> None:
         super().__init__()
 
         self.norm1 = nn.LayerNorm(dim)
@@ -346,7 +357,12 @@ class StableAudioDiTBlock(nn.Module):
         self.norm3 = nn.LayerNorm(dim)
         self.ff = StableAudioFeedForward(dim, dim * ff_mult)
 
-    def forward(self, hidden_states, encoder_hidden_states, rotary_embedding=None):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
         residual = hidden_states
         hidden_states = self.norm1(hidden_states)
         hidden_states = self.attn1(hidden_states, rotary_embedding)
@@ -504,13 +520,13 @@ class StableAudioDiTModel(nn.Module):
 
     def forward(
         self,
-        hidden_states,
-        timestep,
-        encoder_hidden_states,
-        global_hidden_states,
-        rotary_embedding=None,
-        return_dict=True,
-    ):
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        global_hidden_states: torch.Tensor,
+        rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
+        return_dict: bool = True,
+    ) -> Transformer2DModelOutput | tuple[torch.Tensor]:
         # Cross attention conditioning (replicated)
         cross_attention_hidden_states = self.cross_attention_proj(encoder_hidden_states)
 
