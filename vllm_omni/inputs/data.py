@@ -280,6 +280,9 @@ class OmniDiffusionSamplingParams:
     trajectory_timesteps: list[torch.Tensor] | None = None
     trajectory_latents: torch.Tensor | None = None
 
+    # StableAudio: VAE decode chunk size. None = whole-batch (default). 1 = serial decode (T4 low-VRAM).
+    vae_chunk_size: int | None = None
+
     # Extra parameters that might be needed by specific pipeline implementations
     extra_args: dict[str, Any] = field(default_factory=dict)
 

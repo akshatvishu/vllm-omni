@@ -214,11 +214,6 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput, DiffusionPipelineProfil
     ) -> torch.Tensor:
         """Encode text prompt to embeddings."""
 
-        if negative_prompt_embeds is None:
-            negative_prompt_embeds = None
-        if negative_attention_mask is None:
-            negative_attention_mask = None
-
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
         elif prompt is not None and isinstance(prompt, list):
@@ -664,17 +659,18 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput, DiffusionPipelineProfil
             # Convert latents to VAE dtype (VAE uses float32)
             latents_for_vae = latents.to(dtype=self.vae.dtype)
 
-            # Memory Optimization: Decode latents in chunks to prevent VAE OOM spikes.
-            # Note: Safe default for 47s audio on T4.
-            chunk_size = 1
-            decoded_audio = []
+            vae_chunk_size = req.sampling_params.vae_chunk_size
+            if vae_chunk_size is not None and vae_chunk_size < 1:
+                raise ValueError(f"`vae_chunk_size` must be >= 1, got {vae_chunk_size}")
 
-            for i in range(0, latents_for_vae.shape[0], chunk_size):
-                chunk = latents_for_vae[i : i + chunk_size]
-                decoded = self.vae.decode(chunk).sample
-                decoded_audio.append(decoded)
-
-            audio = torch.cat(decoded_audio, dim=0)
+            if vae_chunk_size is None or vae_chunk_size >= latents_for_vae.shape[0]:
+                audio = self.vae.decode(latents_for_vae).sample
+            else:
+                decoded_audio = []
+                for i in range(0, latents_for_vae.shape[0], vae_chunk_size):
+                    chunk = latents_for_vae[i : i + vae_chunk_size]
+                    decoded_audio.append(self.vae.decode(chunk).sample)
+                audio = torch.cat(decoded_audio, dim=0)
 
         # Trim to requested length
         audio = audio[:, :, waveform_start:waveform_end]

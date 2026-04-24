@@ -56,3 +56,4 @@ Key arguments:
 - `--hsdp-replicate-size`: number of HSDP replica groups.
 - `--cache-backend`: cache acceleration backend. Stable Audio currently supports `tea_cache`.
 - `--output`: path to save the generated WAV file.
+- `--vae-chunk-size`: VAE decode chunk size. Omit (default) for whole-batch decode. Set to `1` on low-VRAM GPUs (e.g. T4) to decode one waveform at a time. Set to `N` to decode `N` waveforms per VAE call.

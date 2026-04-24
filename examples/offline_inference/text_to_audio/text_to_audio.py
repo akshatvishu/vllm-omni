@@ -99,6 +99,16 @@ def parse_args() -> argparse.Namespace:
         help="Number of GPUs used for tensor parallelism (TP).",
     )
     parser.add_argument(
+        "--vae-chunk-size",
+        type=int,
+        default=None,
+        help=(
+            "VAE decode chunk size. None (default) = whole-batch decode. "
+            "1 = serial decode per waveform (use on low-VRAM GPUs such as T4). "
+            "N > 1 = decode N waveforms per VAE call."
+        ),
+    )
+    parser.add_argument(
         "--cache-backend",
         type=str,
         default=None,
@@ -223,6 +233,7 @@ def main():
             guidance_scale=args.guidance_scale,
             num_inference_steps=args.num_inference_steps,
             num_outputs_per_prompt=args.num_waveforms,
+            vae_chunk_size=args.vae_chunk_size,
             extra_args={
                 "audio_start_in_s": args.audio_start,
                 "audio_end_in_s": audio_end_in_s,
