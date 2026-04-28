@@ -4,12 +4,7 @@
 """End-to-end offline inference tests for Ming-omni-tts."""
 
 import asyncio
-import os
 import uuid
-from pathlib import Path
-
-os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-os.environ["VLLM_TEST_CLEAN_GPU_MEMORY"] = "1"
 
 import numpy as np
 import pytest
@@ -17,8 +12,10 @@ import torch
 from transformers import AutoTokenizer
 from vllm import SamplingParams
 
-from tests.utils import hardware_test
-from vllm_omni import AsyncOmni, Omni
+from tests.helpers.mark import hardware_test
+from tests.helpers.runtime import OmniRunner
+from tests.helpers.stage_config import get_deploy_config_path
+from vllm_omni import AsyncOmni
 from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
     KEY_MAX_DECODE_STEPS,
     SAMPLE_RATE,
@@ -27,19 +24,35 @@ from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
 from vllm_omni.model_executor.models.ming_tts.prompt_builder import build_ming_dense_prompt
 
 MODEL = "inclusionAI/Ming-omni-tts-0.5B"
-DEPLOY_CONFIG = str(Path(__file__).parent.parent.parent.parent / "vllm_omni" / "deploy" / "ming_tts.yaml")
+DEPLOY_CONFIG = get_deploy_config_path("ming_tts.yaml")
 TEST_TEXT = "我会一直在这里陪着你，直到你慢慢地沉入那个最温柔的梦里。"
 TEST_INSTRUCTION = "轻柔的ASMR耳语，慢速，贴近麦克风"
 MIN_AUDIO_SAMPLES = 1000
 
 
+@pytest.fixture(scope="module")
+def ming_tokenizer():
+    return AutoTokenizer.from_pretrained(MODEL, trust_remote_code=False)
+
+
+@pytest.fixture(scope="module")
+def ming_engine():
+    with OmniRunner(
+        MODEL,
+        deploy_config=DEPLOY_CONFIG,
+        stage_init_timeout=300,
+        enforce_eager=True,
+    ) as runner:
+        yield runner.omni
+
+
 def _build_prompt(
+    tokenizer,
     *,
     text: str = TEST_TEXT,
     instruction=TEST_INSTRUCTION,
     use_zero_spk_emb: bool = True,
 ) -> dict:
-    tokenizer = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=False)
     return build_ming_dense_prompt(
         tokenizer,
         prompt="Please generate speech based on the following description.\n",
@@ -72,9 +85,9 @@ def _flatten_audio(audio) -> torch.Tensor:
 
 
 def _extract_audio(multimodal_output: dict) -> torch.Tensor:
-    audio = multimodal_output.get("audio")
-    if audio is None:
-        raise RuntimeError("Expected multimodal_output['audio']")
+    assert isinstance(multimodal_output, dict), f"Expected dict, got {type(multimodal_output)}"
+    audio = multimodal_output.get("audio", multimodal_output.get("model_outputs"))
+    assert audio is not None, f"No audio output found, keys={list(multimodal_output.keys())}"
     waveform = _flatten_audio(audio)
     if waveform.numel() == 0:
         raise RuntimeError("Generated audio waveform is empty")
@@ -92,85 +105,136 @@ def _extract_sample_rate(multimodal_output: dict) -> int:
     return int(sample_rate)
 
 
+def _extract_final_audio_outputs(outputs):
+    final_outputs = []
+    for item in outputs:
+        if getattr(item, "final_output_type", None) == "audio":
+            final_outputs.append(item)
+            continue
+        request_output = getattr(item, "request_output", None)
+        if request_output is None:
+            continue
+        multimodal_output = getattr(request_output, "multimodal_output", None)
+        if isinstance(multimodal_output, dict):
+            final_outputs.append(item)
+            continue
+        completions = getattr(request_output, "outputs", None) or []
+        if any(isinstance(getattr(completion, "multimodal_output", None), dict) for completion in completions):
+            final_outputs.append(item)
+    return final_outputs
+
+
+def _extract_multimodal_output(output) -> dict:
+    multimodal_output = getattr(output, "multimodal_output", None)
+    if isinstance(multimodal_output, dict):
+        return multimodal_output
+
+    request_output = getattr(output, "request_output", None)
+    if request_output is not None:
+        multimodal_output = getattr(request_output, "multimodal_output", None)
+        if isinstance(multimodal_output, dict):
+            return multimodal_output
+        completions = getattr(request_output, "outputs", None) or []
+        for completion in completions:
+            multimodal_output = getattr(completion, "multimodal_output", None)
+            if isinstance(multimodal_output, dict):
+                return multimodal_output
+
+    raise AssertionError("No multimodal audio output found in Ming generate results")
+
+
 @pytest.mark.advanced_model
 @pytest.mark.omni
 @hardware_test(res={"cuda": "L4"}, num_cards=1)
-def test_ming_tts_offline_basic() -> None:
+def test_ming_tts_offline_basic(ming_engine, ming_tokenizer) -> None:
     """Test blocking Ming generation through Omni."""
-    omni = Omni(
-        model=MODEL,
-        deploy_config=DEPLOY_CONFIG,
-        stage_init_timeout=300,
-        enforce_eager=True,
+    outputs = ming_engine.generate(
+        prompts=[_build_prompt(ming_tokenizer)],
+        sampling_params_list=_sampling_params_list(),
+        py_generator=False,
     )
-    try:
-        outputs = omni.generate(
-            prompts=[_build_prompt()],
-            sampling_params_list=_sampling_params_list(),
-            py_generator=False,
-        )
-        final_output = next((item for item in outputs if item.final_output_type == "audio"), None)
-        assert final_output is not None, "No final audio output produced"
-        multimodal_output = final_output.multimodal_output or {}
-        waveform = _extract_audio(multimodal_output)
-        sample_rate = _extract_sample_rate(multimodal_output)
-        assert waveform.ndim == 1
-        assert waveform.shape[0] == waveform.numel()
-        assert waveform.numel() > MIN_AUDIO_SAMPLES
-        assert np.max(np.abs(waveform.numpy())) > 0.01, "Audio appears silent"
-        assert sample_rate == SAMPLE_RATE, f"Expected Ming output sample rate {SAMPLE_RATE}, got {sample_rate}"
-    finally:
-        omni.close()
+    final_outputs = _extract_final_audio_outputs(outputs)
+    assert len(final_outputs) == 1, f"Expected one final audio output, got {len(final_outputs)}"
+    multimodal_output = _extract_multimodal_output(final_outputs[0])
+    waveform = _extract_audio(multimodal_output)
+    sample_rate = _extract_sample_rate(multimodal_output)
+    assert waveform.ndim == 1
+    assert waveform.shape[0] == waveform.numel()
+    assert waveform.numel() > MIN_AUDIO_SAMPLES
+    assert np.max(np.abs(waveform.numpy())) > 0.01, "Audio appears silent"
+    assert sample_rate == SAMPLE_RATE, f"Expected Ming output sample rate {SAMPLE_RATE}, got {sample_rate}"
 
 
 @pytest.mark.advanced_model
 @pytest.mark.omni
 @hardware_test(res={"cuda": "L4"}, num_cards=1)
-def test_ming_tts_speaker_conditioning_differs() -> None:
+def test_ming_tts_speaker_conditioning_differs(ming_engine, ming_tokenizer) -> None:
     """Test that different Ming speaker controls produce different waveform outputs."""
-    omni = Omni(
-        model=MODEL,
-        deploy_config=DEPLOY_CONFIG,
-        stage_init_timeout=300,
-        enforce_eager=True,
+    style_outputs = ming_engine.generate(
+        prompts=[_build_prompt(ming_tokenizer)],
+        sampling_params_list=_sampling_params_list(),
+        py_generator=False,
     )
-    try:
-        style_outputs = omni.generate(
-            prompts=[_build_prompt()],
-            sampling_params_list=_sampling_params_list(),
-            py_generator=False,
-        )
-        ip_outputs = omni.generate(
-            prompts=[_build_prompt(text=TEST_TEXT, instruction={"IP": "灵小甄"}, use_zero_spk_emb=True)],
-            sampling_params_list=_sampling_params_list(),
-            py_generator=False,
-        )
+    ip_outputs = ming_engine.generate(
+        prompts=[_build_prompt(ming_tokenizer, text=TEST_TEXT, instruction={"IP": "灵小甄"}, use_zero_spk_emb=True)],
+        sampling_params_list=_sampling_params_list(),
+        py_generator=False,
+    )
 
-        style_final_output = next((item for item in style_outputs if item.final_output_type == "audio"), None)
-        ip_final_output = next((item for item in ip_outputs if item.final_output_type == "audio"), None)
-        assert style_final_output is not None, "No style audio output produced"
-        assert ip_final_output is not None, "No IP audio output produced"
+    style_final_outputs = _extract_final_audio_outputs(style_outputs)
+    ip_final_outputs = _extract_final_audio_outputs(ip_outputs)
+    assert len(style_final_outputs) == 1, "No style audio output produced"
+    assert len(ip_final_outputs) == 1, "No IP audio output produced"
 
-        style_waveform = _extract_audio(style_final_output.multimodal_output or {})
-        ip_waveform = _extract_audio(ip_final_output.multimodal_output or {})
-        assert style_waveform.numel() > MIN_AUDIO_SAMPLES
-        assert ip_waveform.numel() > MIN_AUDIO_SAMPLES
-        assert np.max(np.abs(style_waveform.numpy())) > 0.01, "Style audio appears silent"
-        assert np.max(np.abs(ip_waveform.numpy())) > 0.01, "IP audio appears silent"
+    style_waveform = _extract_audio(_extract_multimodal_output(style_final_outputs[0]))
+    ip_waveform = _extract_audio(_extract_multimodal_output(ip_final_outputs[0]))
+    assert style_waveform.numel() > MIN_AUDIO_SAMPLES
+    assert ip_waveform.numel() > MIN_AUDIO_SAMPLES
+    assert np.max(np.abs(style_waveform.numpy())) > 0.01, "Style audio appears silent"
+    assert np.max(np.abs(ip_waveform.numpy())) > 0.01, "IP audio appears silent"
 
-        overlap = min(int(style_waveform.numel()), int(ip_waveform.numel()))
-        mean_abs_diff = torch.mean(torch.abs(style_waveform[:overlap] - ip_waveform[:overlap])).item()
-        assert style_waveform.shape != ip_waveform.shape or mean_abs_diff > 1e-4, (
-            "Speaker-conditioned outputs should differ, but style and IP waveforms were effectively identical"
-        )
-    finally:
-        omni.close()
+    overlap = min(int(style_waveform.numel()), int(ip_waveform.numel()))
+    mean_abs_diff = torch.mean(torch.abs(style_waveform[:overlap] - ip_waveform[:overlap])).item()
+    assert style_waveform.shape != ip_waveform.shape or mean_abs_diff > 1e-4, (
+        "Speaker-conditioned outputs should differ, but style and IP waveforms were effectively identical"
+    )
 
 
 @pytest.mark.advanced_model
 @pytest.mark.omni
 @hardware_test(res={"cuda": "L4"}, num_cards=1)
-def test_ming_tts_offline_streaming() -> None:
+def test_ming_tts_multiple_prompts_queued(ming_engine, ming_tokenizer) -> None:
+    """Regression: supported max_num_seqs=1 config must still drain queued prompts."""
+    prompts = [
+        _build_prompt(
+            ming_tokenizer,
+            text="第一条语音用于验证 Ming dense 队列中的长请求可以完成。",
+            instruction="平静自然的旁白，语速中等",
+        ),
+        _build_prompt(
+            ming_tokenizer,
+            text="第二条短语音也必须生成完成。",
+            instruction="清晰明亮的女声",
+        ),
+    ]
+    outputs = ming_engine.generate(
+        prompts=prompts,
+        sampling_params_list=_sampling_params_list(),
+        py_generator=False,
+    )
+    final_outputs = _extract_final_audio_outputs(outputs)
+    assert len(final_outputs) == len(prompts), f"Expected {len(prompts)} audio outputs, got {len(final_outputs)}"
+    for i, output in enumerate(final_outputs):
+        waveform = _extract_audio(_extract_multimodal_output(output))
+        duration_s = waveform.numel() / SAMPLE_RATE
+        assert 0.1 < duration_s < 30.0, f"Request {i} audio duration out of range: {duration_s:.2f}s"
+        assert np.max(np.abs(waveform.numpy())) > 0.01, f"Request {i} audio appears silent"
+
+
+@pytest.mark.advanced_model
+@pytest.mark.omni
+@hardware_test(res={"cuda": "L4"}, num_cards=1)
+def test_ming_tts_offline_streaming(ming_tokenizer) -> None:
     """Test async_chunk streaming Ming generation through AsyncOmni."""
 
     async def _run() -> None:
@@ -186,7 +250,7 @@ def test_ming_tts_offline_streaming() -> None:
             chunk_idx = 0
             sample_rate = None
             async for stage_output in async_omni.generate(
-                prompt=_build_prompt(),
+                prompt=_build_prompt(ming_tokenizer),
                 request_id=str(uuid.uuid4()),
                 sampling_params_list=_sampling_params_list(),
             ):
