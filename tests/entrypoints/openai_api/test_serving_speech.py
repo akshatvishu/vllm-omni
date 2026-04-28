@@ -2439,6 +2439,32 @@ class TestMingSpeechServing:
         )
         assert request.speaker_embedding == [0.3] * 192
 
+    def test_load_codec_frame_rate_derives_ming_rate_from_hf_config(self, mocker: MockerFixture):
+        server = object.__new__(OmniOpenAIServingSpeech)
+        server._tts_model_type = "ming_tts"
+        server.engine_client = mocker.MagicMock()
+        server.engine_client.model_config = mocker.MagicMock()
+        server.engine_client.model_config.model = "inclusionAI/Ming-omni-tts-0.5B"
+        server.engine_client.model_config.hf_config = SimpleNamespace(
+            llm_config={},
+            ditar_config={"patch_size": 4},
+            aggregator_config={},
+            audio_tokenizer_config={
+                "sample_rate": 44100,
+                "enc_kwargs": {
+                    "hop_size": 882,
+                    "input_dim": 882,
+                    "latent_dim": 80,
+                },
+                "dec_kwargs": {"output_dim": 882},
+                "patch_size": 16,
+            },
+        )
+
+        rate = OmniOpenAIServingSpeech._load_codec_frame_rate(server)
+
+        assert rate == pytest.approx(12.5)
+
 
 class TestWAVStreaming:
     """Integration tests for WAV format streaming."""
