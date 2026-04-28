@@ -36,7 +36,14 @@ class ISTFT(nn.Module):
         self.window_buffer = None
         self.buffer_len = self.win_length - self.hop_length
 
-    def __buffer_process(self, x, buffer, pad, last_chunk=False, streaming=False):
+    def __buffer_process(
+        self,
+        x: torch.Tensor,
+        buffer: torch.Tensor | None,
+        pad: int,
+        last_chunk: bool = False,
+        streaming: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         if streaming:
             if buffer is None:
                 # first chunk
@@ -54,7 +61,14 @@ class ISTFT(nn.Module):
 
         return x, buffer
 
-    def forward(self, spec: torch.Tensor, audio_buffer=None, window_buffer=None, streaming=False, last_chunk=False):
+    def forward(
+        self,
+        spec: torch.Tensor,
+        audio_buffer: torch.Tensor | None = None,
+        window_buffer: torch.Tensor | None = None,
+        streaming: bool = False,
+        last_chunk: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
         """
         Compute the Inverse Short Time Fourier Transform (ISTFT) of a complex spectrogram.
 
@@ -68,7 +82,7 @@ class ISTFT(nn.Module):
             last_chunk: When `streaming=True` and `last_chunk=True`, the function can perform final "flush" operations
 
         Returns:
-            Tensor: Reconstructed time-domain signal of shape (B, L), where L is the length of the output signal.
+            Reconstructed signal, plus streaming buffers when `padding="same"`.
         """
         if self.padding == "center":
             # Fallback to pytorch native implementation
@@ -156,7 +170,14 @@ class ISTFTHead(FourierHead):
         self.out = torch.nn.Linear(dim, out_dim)
         self.istft = ISTFT(n_fft=n_fft, hop_length=hop_length, win_length=n_fft, padding=padding)
 
-    def forward(self, x: torch.Tensor, audio_buffer=None, window_buffer=None, streaming=False, last_chunk=False):
+    def forward(
+        self,
+        x: torch.Tensor,
+        audio_buffer: torch.Tensor | None = None,
+        window_buffer: torch.Tensor | None = None,
+        streaming: bool = False,
+        last_chunk: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
         """
         Forward pass of the ISTFTHead module.
 
@@ -165,7 +186,7 @@ class ISTFTHead(FourierHead):
                         L is the sequence length, and H denotes the model dimension.
 
         Returns:
-            Tensor: Reconstructed time-domain audio signal of shape (B, T), where T is the length of the output signal.
+            Audio, predicted spectrogram coefficients, and streaming buffers.
         """
         x_pred = self.out(x)
         # x_pred = x

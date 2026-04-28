@@ -12,7 +12,7 @@ Please refer to [README.md](https://github.com/vllm-project/vllm-omni/tree/main/
 
 ```bash
 vllm-omni serve inclusionAI/Ming-omni-tts-0.5B \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts_async_chunk.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --omni \
     --port 8091 \
     --enforce-eager

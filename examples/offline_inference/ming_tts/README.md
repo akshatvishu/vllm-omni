@@ -19,7 +19,7 @@ Ming dense 0.5B is exposed here as a two-stage offline pipeline:
 
 The example supports both:
 
-- **Sequential eager** via `vllm_omni/deploy/ming_tts.yaml` with `--no-async-chunk`
+- **Blocking eager** via `vllm_omni/deploy/ming_tts.yaml`
 - **Async chunk eager** via `vllm_omni/deploy/ming_tts.yaml` (default `async_chunk: true`)
 
 ## Setup
@@ -59,7 +59,6 @@ Run the zero-speaker style example:
 python examples/offline_inference/ming_tts/end2end.py \
     --case style \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
-    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -71,7 +70,6 @@ python examples/offline_inference/ming_tts/end2end.py \
     --ref-audio /path/to/10002287-00000094.wav \
     --ref-text "在此奉劝大家别乱打美白针。" \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
-    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -82,7 +80,6 @@ python examples/offline_inference/ming_tts/end2end.py \
     --case emotion \
     --ref-audio /path/to/emotion_prompt.wav \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
-    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -93,7 +90,6 @@ python examples/offline_inference/ming_tts/end2end.py \
     --case podcast \
     --ref-audio-paths /path/to/CTS-CN-F2F-2019-11-11-423-012-A.wav /path/to/CTS-CN-F2F-2019-11-11-423-012-B.wav \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
-    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -113,7 +109,6 @@ Run text-to-audio event generation:
 python examples/offline_inference/ming_tts/end2end.py \
     --case tta \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
-    --no-async-chunk \
     --enforce-eager
 ```
 
@@ -138,7 +133,6 @@ Collect runtime stats and a manifest:
 python examples/offline_inference/ming_tts/end2end.py \
     --case style \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
-    --no-async-chunk \
     --enforce-eager \
     --enable-stats \
     --stats-log-file output_audio/ming_style_pipeline.log \
@@ -161,7 +155,7 @@ The upstream Ming cookbook uses these public audio fixtures from `inclusionAI/Mi
 The repo-facing example is intended to cover the same dense TTS workflows used
 by the local Ming validation script:
 
-| Case | Blocking `ming_tts.yaml` | Async chunk `deploy/ming_tts.yaml` | Extra inputs |
+| Case | Blocking `deploy/ming_tts.yaml` | Async chunk `deploy/ming_tts.yaml` | Extra inputs |
 |---|---:|---:|---|
 | `style` | Yes | Optional smoke test | none |
 | `ip` | Yes | Optional smoke test | none |

@@ -11,7 +11,7 @@ Run a zero-speaker style case:
 ```bash
 python examples/offline_inference/ming_tts/end2end.py \
     --case style \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
 ```
 
@@ -21,7 +21,7 @@ Run emotion-controlled speech:
 python examples/offline_inference/ming_tts/end2end.py \
     --case emotion \
     --ref-audio /path/to/emotion_prompt.wav \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
 ```
 
@@ -32,7 +32,7 @@ python examples/offline_inference/ming_tts/end2end.py \
     --case zero_shot \
     --ref-audio /path/to/reference.wav \
     --ref-text "在此奉劝大家别乱打美白针。" \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
 ```
 
@@ -42,7 +42,7 @@ Run podcast generation:
 python examples/offline_inference/ming_tts/end2end.py \
     --case podcast \
     --ref-audio-paths /path/to/CTS-CN-F2F-2019-11-11-423-012-A.wav /path/to/CTS-CN-F2F-2019-11-11-423-012-B.wav \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
 ```
 
@@ -51,7 +51,7 @@ Run text-to-audio event generation:
 ```bash
 python examples/offline_inference/ming_tts/end2end.py \
     --case tta \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
 ```
 
@@ -60,7 +60,7 @@ Run with stats and a manifest:
 ```bash
 python examples/offline_inference/ming_tts/end2end.py \
     --case style \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager \
     --enable-stats \
     --stats-log-file output_audio/ming_style_pipeline.log \
@@ -90,7 +90,7 @@ python examples/offline_inference/ming_tts/end2end.py \
     --case basic \
     --ref-audio /path/to/10002287-00000095.wav \
     --streaming \
-    --stage-configs-path vllm_omni/model_executor/stage_configs/ming_tts_async_chunk.yaml \
+    --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
 ```
 

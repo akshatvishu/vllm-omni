@@ -4,7 +4,7 @@
 
 Please refer to [README.md](../../../README.md)
 
-## Model
+## Ming Model
 
 | Model | Description |
 |-------|-------------|
