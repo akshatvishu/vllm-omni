@@ -7,7 +7,6 @@ import concurrent.futures
 import io
 import os
 import wave
-from pathlib import Path
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 os.environ["VLLM_TEST_CLEAN_GPU_MEMORY"] = "0"
@@ -16,10 +15,11 @@ import pytest
 
 from tests.helpers.mark import hardware_test
 from tests.helpers.runtime import OmniServerParams
+from tests.helpers.stage_config import get_deploy_config_path
 from vllm_omni.model_executor.models.ming_tts.config_ming_tts import SAMPLE_RATE
 
 MODEL = "inclusionAI/Ming-omni-tts-0.5B"
-DEPLOY_CONFIG = str(Path(__file__).parent.parent.parent.parent / "vllm_omni" / "deploy" / "ming_tts.yaml")
+DEPLOY_CONFIG = get_deploy_config_path("ming_tts.yaml")
 
 SERVER_PARAMS = [
     pytest.param(

@@ -46,6 +46,18 @@ def ming_engine():
         yield runner.omni
 
 
+@pytest.fixture(scope="module")
+def async_omni_engine():
+    engine = AsyncOmni(
+        model=MODEL,
+        deploy_config=DEPLOY_CONFIG,
+        stage_init_timeout=300,
+        enforce_eager=True,
+    )
+    yield engine
+    engine.shutdown()
+
+
 def _build_prompt(
     tokenizer,
     *,
@@ -234,53 +246,44 @@ def test_ming_tts_multiple_prompts_queued(ming_engine, ming_tokenizer) -> None:
 @pytest.mark.advanced_model
 @pytest.mark.omni
 @hardware_test(res={"cuda": "L4"}, num_cards=1)
-def test_ming_tts_offline_streaming(ming_tokenizer) -> None:
+def test_ming_tts_offline_streaming(async_omni_engine, ming_tokenizer) -> None:
     """Test async_chunk streaming Ming generation through AsyncOmni."""
 
     async def _run() -> None:
-        async_omni = AsyncOmni(
-            model=MODEL,
-            deploy_config=DEPLOY_CONFIG,
-            stage_init_timeout=300,
-            enforce_eager=True,
-        )
-        try:
-            all_audio_chunks = []
-            accumulated_samples = 0
-            chunk_idx = 0
-            sample_rate = None
-            async for stage_output in async_omni.generate(
-                prompt=_build_prompt(ming_tokenizer),
-                request_id=str(uuid.uuid4()),
-                sampling_params_list=_sampling_params_list(),
-            ):
-                multimodal_output = stage_output.multimodal_output or {}
-                audio = multimodal_output.get("audio")
-                if "sr" in multimodal_output:
-                    sample_rate = _extract_sample_rate(multimodal_output)
-                if audio is None:
-                    continue
-                finished = stage_output.finished
-                if isinstance(audio, torch.Tensor):
-                    if finished:
-                        audio_chunk = audio[accumulated_samples:].float().detach().cpu()
-                    else:
-                        audio_chunk = audio.float().detach().cpu()
-                elif isinstance(audio, list):
-                    audio_chunk = torch.as_tensor(audio[chunk_idx], dtype=torch.float32).reshape(-1).cpu()
+        all_audio_chunks = []
+        accumulated_samples = 0
+        chunk_idx = 0
+        sample_rate = None
+        async for stage_output in async_omni_engine.generate(
+            prompt=_build_prompt(ming_tokenizer),
+            request_id=str(uuid.uuid4()),
+            sampling_params_list=_sampling_params_list(),
+        ):
+            multimodal_output = stage_output.multimodal_output or {}
+            audio = multimodal_output.get("audio")
+            if "sr" in multimodal_output:
+                sample_rate = _extract_sample_rate(multimodal_output)
+            if audio is None:
+                continue
+            finished = stage_output.finished
+            if isinstance(audio, torch.Tensor):
+                if finished:
+                    audio_chunk = audio[accumulated_samples:].float().detach().cpu()
                 else:
-                    audio_chunk = torch.as_tensor(audio, dtype=torch.float32).reshape(-1).cpu()
-                accumulated_samples += int(audio_chunk.numel())
-                chunk_idx += 1
-                if audio_chunk.numel() > 0:
-                    all_audio_chunks.append(audio_chunk)
-            assert all_audio_chunks, "No streaming audio chunks received"
-            waveform = torch.cat(all_audio_chunks, dim=0)
-            assert waveform.numel() > MIN_AUDIO_SAMPLES
-            assert np.max(np.abs(waveform.numpy())) > 0.01, "Audio appears silent"
-            assert sample_rate is not None, "Streaming path did not return a sample rate"
-            assert sample_rate == SAMPLE_RATE, f"Expected Ming output sample rate {SAMPLE_RATE}, got {sample_rate}"
-        finally:
-            async_omni.shutdown()
+                    audio_chunk = audio.float().detach().cpu()
+            elif isinstance(audio, list):
+                audio_chunk = torch.as_tensor(audio[chunk_idx], dtype=torch.float32).reshape(-1).cpu()
+            else:
+                audio_chunk = torch.as_tensor(audio, dtype=torch.float32).reshape(-1).cpu()
+            accumulated_samples += int(audio_chunk.numel())
+            chunk_idx += 1
+            if audio_chunk.numel() > 0:
+                all_audio_chunks.append(audio_chunk)
+        assert all_audio_chunks, "No streaming audio chunks received"
+        waveform = torch.cat(all_audio_chunks, dim=0)
+        assert waveform.numel() > MIN_AUDIO_SAMPLES
+        assert np.max(np.abs(waveform.numpy())) > 0.01, "Audio appears silent"
+        assert sample_rate is not None, "Streaming path did not return a sample rate"
+        assert sample_rate == SAMPLE_RATE, f"Expected Ming output sample rate {SAMPLE_RATE}, got {sample_rate}"
 
     asyncio.run(_run())
