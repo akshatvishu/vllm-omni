@@ -131,6 +131,8 @@ def test_llm2audio_vae_async_chunk_emits_full_chunk():
     )
 
     assert payload is not None
+    assert payload["codes"]["audio"] == [0]
+    assert payload["meta"]["finished"].item() is False
     assert payload["finished"].item() is False
     assert payload["stream_finished"].item() is False
     assert payload[KEY_REQUEST_ID] == request_id
@@ -210,6 +212,8 @@ def test_llm2audio_vae_async_chunk_finish_after_full_chunk_only_emits_eof():
     )
 
     assert finish_payload == {
+        "codes": {"audio": []},
+        "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
         "code_predictor_codes": [],
         "finished": torch.tensor(True, dtype=torch.bool),
         "stream_finished": torch.tensor(True, dtype=torch.bool),
@@ -238,6 +242,8 @@ def test_llm2audio_vae_async_chunk_flushes_tail_on_finish_without_new_patch():
     )
 
     assert payload is not None
+    assert payload["codes"]["audio"] == [0]
+    assert payload["meta"]["finished"].item() is True
     assert payload["finished"].item() is True
     assert payload["stream_finished"].item() is True
     assert payload[KEY_REQUEST_ID] == request_id
@@ -262,6 +268,8 @@ def test_llm2audio_vae_async_chunk_final_flush_emits_partial_chunk_with_new_patc
     )
 
     assert payload is not None
+    assert payload["codes"]["audio"] == [0]
+    assert payload["meta"]["finished"].item() is True
     assert payload["finished"].item() is True
     assert payload["stream_finished"].item() is True
     assert payload[MING_EMIT_PATCH_COUNT_KEY] == 2
@@ -283,6 +291,8 @@ def test_llm2audio_vae_async_chunk_emits_eof_when_finished_without_frames():
     )
 
     assert payload == {
+        "codes": {"audio": []},
+        "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
         "code_predictor_codes": [],
         "finished": torch.tensor(True, dtype=torch.bool),
         "stream_finished": torch.tensor(True, dtype=torch.bool),
@@ -308,6 +318,8 @@ def test_llm2audio_vae_async_chunk_zero_latent_final_flush_returns_empty_payload
     )
 
     assert payload == {
+        "codes": {"audio": []},
+        "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
         "code_predictor_codes": [],
         "finished": torch.tensor(True, dtype=torch.bool),
         "stream_finished": torch.tensor(True, dtype=torch.bool),

@@ -207,6 +207,8 @@ def llm2audio_vae_async_chunk(
         if finished and not bool(state.get("terminal_sent", False)):
             observability = _build_chunk_observability(None, final_flush=True)
             payload = {
+                "codes": {"audio": []},
+                "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
                 "code_predictor_codes": [],
                 "finished": torch.tensor(True, dtype=torch.bool),
                 "stream_finished": torch.tensor(True, dtype=torch.bool),
@@ -233,6 +235,8 @@ def llm2audio_vae_async_chunk(
     observability = _build_chunk_observability(latent_patches, final_flush=finished)
 
     payload = {
+        "codes": {"audio": [0]},
+        "meta": {"finished": torch.tensor(finished, dtype=torch.bool)},
         "code_predictor_codes": [0],
         "ming_latent_patches": latent_patches,
         "finished": torch.tensor(finished, dtype=torch.bool),
