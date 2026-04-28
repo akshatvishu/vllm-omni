@@ -14,7 +14,7 @@ os.environ["VLLM_TEST_CLEAN_GPU_MEMORY"] = "0"
 
 import pytest
 
-from tests.conftest import OmniServerParams
+from tests.helpers.runtime import OmniServerParams
 from tests.utils import hardware_test
 from vllm_omni.model_executor.models.ming_tts.config_ming_tts import SAMPLE_RATE
 
