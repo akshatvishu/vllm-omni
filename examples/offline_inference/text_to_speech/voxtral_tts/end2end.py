@@ -30,6 +30,7 @@ from vllm import SamplingParams
 from vllm.utils.argparse_utils import FlexibleArgumentParser
 
 from vllm_omni import AsyncOmni
+from vllm_omni.engine.arg_utils import nullify_stage_engine_defaults
 from vllm_omni.entrypoints.omni import Omni
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,7 @@ async def run_streaming(inputs, sampling_params_list, model_name, args, output_d
     )
 
     async_omni.shutdown()
-    torch.cuda.empty_cache()
+    torch.accelerator.empty_cache()
     gc.collect()
 
 
@@ -224,7 +225,7 @@ def run_non_streaming(inputs, sampling_params_list, model_name, args, output_dir
     print(f"RTF: {output_audio_dur / vllm_elapsed:.4f}")
 
     del llm
-    torch.cuda.empty_cache()
+    torch.accelerator.empty_cache()
     gc.collect()
 
 
@@ -243,7 +244,7 @@ def parse_args() -> Namespace:
         help="Text to synthesize.",
     )
     parser.add_argument(
-        "--audio-path",
+        "--ref-audio",
         type=str,
         default=None,
         help="Path to reference audio file for voice cloning.",
@@ -301,11 +302,18 @@ def parse_args() -> Namespace:
         help="Voice to use instead of audio file.",
     )
     parser.add_argument(
+        "--cfg-alpha",
+        type=float,
+        default=None,
+        help="CFG alpha for flow-matching guidance (default: use value from stage config, typically 1.2).",
+    )
+    parser.add_argument(
         "--quantization",
         type=str,
         default=None,
         help="Quantization method (e.g. 'fp8'). Applied to the language model only.",
     )
+    nullify_stage_engine_defaults(parser)
     return parser.parse_args()
 
 
@@ -346,10 +354,10 @@ def main(args: Any) -> None:
     model_name = args.model
     output_dir = args.output_dir
 
-    if args.voice is None and args.audio_path is None:
-        raise ValueError("Either --voice or --audio-path must be provided.")
+    if args.voice is None and args.ref_audio is None:
+        raise ValueError("Either --voice or --ref-audio must be provided.")
 
-    audio_prompt_file = args.audio_path
+    audio_prompt_file = args.ref_audio
     text_chunk = TextChunk(text=args.text)
 
     if args.write_audio:
@@ -357,8 +365,13 @@ def main(args: Any) -> None:
 
     inputs = compose_request(model_name, text_chunk, audio_prompt_file, args)
 
+    extra_args = {}
+    if args.cfg_alpha is not None:
+        extra_args["cfg_alpha"] = args.cfg_alpha
+
     sampling_params = SamplingParams(
         max_tokens=max_num_tokens,
+        extra_args=extra_args if extra_args else None,
     )
     sampling_params_list = [
         sampling_params,
@@ -374,7 +387,7 @@ def main(args: Any) -> None:
             f"--num-prompts ({args.num_prompts}) must be divisible by --concurrency ({args.concurrency})"
         )
 
-    torch.cuda.empty_cache()
+    torch.accelerator.empty_cache()
     gc.collect()
 
     if args.streaming:
