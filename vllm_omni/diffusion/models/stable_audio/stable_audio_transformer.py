@@ -380,39 +380,20 @@ class StableAudioFeedForward(nn.Module):
     Matches diffusers FeedForward structure with activation_fn="swiglu".
     """
 
-    def __init__(
-        self,
-        dim: int,
-        inner_dim: int,
-        bias: bool = True,
-        quant_config: "QuantizationConfig | None" = None,
-        prefix: str = "",
-    ):
+    def __init__(self, dim: int, inner_dim: int, bias: bool = True):
         super().__init__()
         # Structure matches diffusers FeedForward:
         # net.0 = SwiGLU (proj.weight, proj.bias)
         # net.1 = Dropout
         # net.2 = Linear (weight, bias)
-        self.net = nn.ModuleList(
-            [
-                SwiGLU(dim, inner_dim, bias=bias),
-                nn.Dropout(0.0),
-                ReplicatedLinear(
-                    inner_dim,
-                    dim,
-                    bias=bias,
-                    quant_config=quant_config,
-                    prefix=f"{prefix}.net.2",
-                    return_bias=False,
-                ),
-            ]
+        self.net = nn.Sequential(
+            SwiGLU(dim, inner_dim, bias=bias),
+            nn.Dropout(0.0),
+            nn.Linear(inner_dim, dim, bias=bias),
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.net[0](hidden_states)
-        hidden_states = self.net[1](hidden_states)
-        hidden_states = self.net[2](hidden_states)
-        return hidden_states
+        return self.net(hidden_states)
 
 
 class StableAudioDiTBlock(nn.Module):
@@ -459,7 +440,7 @@ class StableAudioDiTBlock(nn.Module):
         # Feed-forward with SwiGLU activation
         # inner_dim = dim * ff_mult (e.g., 1536 * 4 = 6144)
         self.norm3 = nn.LayerNorm(dim, elementwise_affine=True)
-        self.ff = StableAudioFeedForward(dim, inner_dim=dim * ff_mult, quant_config=quant_config, prefix=f"{prefix}.ff")
+        self.ff = StableAudioFeedForward(dim, inner_dim=dim * ff_mult)
 
     def forward(
         self,
