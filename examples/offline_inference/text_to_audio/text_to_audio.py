@@ -98,7 +98,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         choices=["fp8"],
         help="Quantization method for the DiT transformer. "
-        "'fp8' quantizes attention and FFN layers; conditioning projections stay BF16. "
+        "'fp8' quantizes attention projections only; FFN and conditioning projections stay BF16. "
         "Requires Ada/Hopper GPU (SM89+). Default: None (BF16).",
     )
     parser.add_argument(
