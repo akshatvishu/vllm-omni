@@ -41,7 +41,7 @@ guide. FP8 on Ampere may use a weight-only path where available.
 | FLUX.2-klein | `black-forest-labs/FLUX.2-klein-4B` | Yes | Yes | All layers | None | |
 | HunyuanImage-3.0 | `tencent/HunyuanImage-3.0`, `tencent/HunyuanImage-3.0-Instruct` | Yes | Yes | All layers; use the Hunyuan stage config for multi-stage runs | None | |
 | HunyuanVideo-1.5 | `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v`, `720p_t2v`, `480p_i2v` | Yes | Yes | All layers | None | |
-| Stable Audio Open | `stabilityai/stable-audio-open-1.0` | Yes | Not validated | Attention + FFN layers; conditioning stays BF16 | None | |
+| Stable Audio Open | `stabilityai/stable-audio-open-1.0` | Yes | Not validated | Attention projections + FFN output projection; SwiGLU gate/up and conditioning stay BF16 | None | |
 
 ### Multi-Stage Omni/TTS Model (Qwen3-Omni, Qwen3-TTS)
 

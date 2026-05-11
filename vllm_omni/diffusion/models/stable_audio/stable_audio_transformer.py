@@ -363,23 +363,9 @@ class StableAudioCrossAttention(nn.Module):
 class SwiGLU(nn.Module):
     """SwiGLU activation - matches diffusers structure."""
 
-    def __init__(
-        self,
-        dim_in: int,
-        dim_out: int,
-        bias: bool = True,
-        quant_config: "QuantizationConfig | None" = None,
-        prefix: str = "",
-    ):
+    def __init__(self, dim_in: int, dim_out: int, bias: bool = True):
         super().__init__()
-        self.proj = ReplicatedLinear(
-            dim_in,
-            dim_out * 2,
-            bias=bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.proj",
-            return_bias=False,
-        )
+        self.proj = nn.Linear(dim_in, dim_out * 2, bias=bias)
         self.activation = nn.SiLU()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -409,7 +395,7 @@ class StableAudioFeedForward(nn.Module):
         # net.2 = Linear (weight, bias)
         self.net = nn.ModuleList(
             [
-                SwiGLU(dim, inner_dim, bias=bias, quant_config=quant_config, prefix=f"{prefix}.net.0"),
+                SwiGLU(dim, inner_dim, bias=bias),
                 nn.Dropout(0.0),
                 ReplicatedLinear(
                     inner_dim,
