@@ -6,6 +6,7 @@ Stable Audio DiT Model for vLLM-Omni.
 """
 
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -18,6 +19,9 @@ from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
 from vllm_omni.diffusion.layers.fourier import GaussianFourierProjection
+
+if TYPE_CHECKING:
+    from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
 
 logger = init_logger(__name__)
 
@@ -179,6 +183,8 @@ class StableAudioSelfAttention(nn.Module):
         num_key_value_attention_heads: int,
         attention_head_dim: int,
         dropout: float = 0.0,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
     ):
         super().__init__()
 
@@ -188,14 +194,22 @@ class StableAudioSelfAttention(nn.Module):
         self.inner_dim = num_attention_heads * attention_head_dim
 
         # All projections use inner_dim for output
-        self.to_q = ReplicatedLinear(dim, self.inner_dim, bias=False)
-        self.to_k = ReplicatedLinear(dim, self.inner_dim, bias=False)
-        self.to_v = ReplicatedLinear(dim, self.inner_dim, bias=False)
+        self.to_q = ReplicatedLinear(
+            dim, self.inner_dim, bias=False, quant_config=quant_config, prefix=f"{prefix}.to_q"
+        )
+        self.to_k = ReplicatedLinear(
+            dim, self.inner_dim, bias=False, quant_config=quant_config, prefix=f"{prefix}.to_k"
+        )
+        self.to_v = ReplicatedLinear(
+            dim, self.inner_dim, bias=False, quant_config=quant_config, prefix=f"{prefix}.to_v"
+        )
 
         # Output projection
         self.to_out = nn.ModuleList(
             [
-                ReplicatedLinear(self.inner_dim, dim, bias=False),
+                ReplicatedLinear(
+                    self.inner_dim, dim, bias=False, quant_config=quant_config, prefix=f"{prefix}.to_out.0"
+                ),
                 nn.Dropout(dropout),
             ]
         )
@@ -263,6 +277,8 @@ class StableAudioCrossAttention(nn.Module):
         attention_head_dim: int,
         cross_attention_dim: int,
         dropout: float = 0.0,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
     ):
         super().__init__()
 
@@ -277,14 +293,22 @@ class StableAudioCrossAttention(nn.Module):
         self.num_kv_groups = num_attention_heads // num_key_value_attention_heads
 
         # Q outputs inner_dim, K/V output kv_dim (GQA)
-        self.to_q = ReplicatedLinear(dim, self.inner_dim, bias=False)
-        self.to_k = ReplicatedLinear(cross_attention_dim, self.kv_dim, bias=False)
-        self.to_v = ReplicatedLinear(cross_attention_dim, self.kv_dim, bias=False)
+        self.to_q = ReplicatedLinear(
+            dim, self.inner_dim, bias=False, quant_config=quant_config, prefix=f"{prefix}.to_q"
+        )
+        self.to_k = ReplicatedLinear(
+            cross_attention_dim, self.kv_dim, bias=False, quant_config=quant_config, prefix=f"{prefix}.to_k"
+        )
+        self.to_v = ReplicatedLinear(
+            cross_attention_dim, self.kv_dim, bias=False, quant_config=quant_config, prefix=f"{prefix}.to_v"
+        )
 
         # Output projection
         self.to_out = nn.ModuleList(
             [
-                ReplicatedLinear(self.inner_dim, dim, bias=False),
+                ReplicatedLinear(
+                    self.inner_dim, dim, bias=False, quant_config=quant_config, prefix=f"{prefix}.to_out.0"
+                ),
                 nn.Dropout(dropout),
             ]
         )
@@ -339,9 +363,23 @@ class StableAudioCrossAttention(nn.Module):
 class SwiGLU(nn.Module):
     """SwiGLU activation - matches diffusers structure."""
 
-    def __init__(self, dim_in: int, dim_out: int, bias: bool = True):
+    def __init__(
+        self,
+        dim_in: int,
+        dim_out: int,
+        bias: bool = True,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
+    ):
         super().__init__()
-        self.proj = nn.Linear(dim_in, dim_out * 2, bias=bias)
+        self.proj = ReplicatedLinear(
+            dim_in,
+            dim_out * 2,
+            bias=bias,
+            quant_config=quant_config,
+            prefix=f"{prefix}.proj",
+            return_bias=False,
+        )
         self.activation = nn.SiLU()
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -356,20 +394,39 @@ class StableAudioFeedForward(nn.Module):
     Matches diffusers FeedForward structure with activation_fn="swiglu".
     """
 
-    def __init__(self, dim: int, inner_dim: int, bias: bool = True):
+    def __init__(
+        self,
+        dim: int,
+        inner_dim: int,
+        bias: bool = True,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
+    ):
         super().__init__()
         # Structure matches diffusers FeedForward:
         # net.0 = SwiGLU (proj.weight, proj.bias)
         # net.1 = Dropout
         # net.2 = Linear (weight, bias)
-        self.net = nn.Sequential(
-            SwiGLU(dim, inner_dim, bias=bias),
-            nn.Dropout(0.0),
-            nn.Linear(inner_dim, dim, bias=bias),
+        self.net = nn.ModuleList(
+            [
+                SwiGLU(dim, inner_dim, bias=bias, quant_config=quant_config, prefix=f"{prefix}.net.0"),
+                nn.Dropout(0.0),
+                ReplicatedLinear(
+                    inner_dim,
+                    dim,
+                    bias=bias,
+                    quant_config=quant_config,
+                    prefix=f"{prefix}.net.2",
+                    return_bias=False,
+                ),
+            ]
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        return self.net(hidden_states)
+        hidden_states = self.net[0](hidden_states)
+        hidden_states = self.net[1](hidden_states)
+        hidden_states = self.net[2](hidden_states)
+        return hidden_states
 
 
 class StableAudioDiTBlock(nn.Module):
@@ -385,6 +442,8 @@ class StableAudioDiTBlock(nn.Module):
         attention_head_dim: int,
         cross_attention_dim: int,
         ff_mult: int = 4,
+        quant_config: "QuantizationConfig | None" = None,
+        prefix: str = "",
     ):
         super().__init__()
 
@@ -395,6 +454,8 @@ class StableAudioDiTBlock(nn.Module):
             num_attention_heads=num_attention_heads,
             num_key_value_attention_heads=num_key_value_attention_heads,
             attention_head_dim=attention_head_dim,
+            quant_config=quant_config,
+            prefix=f"{prefix}.attn1",
         )
 
         # Cross-attention with layer norm
@@ -405,12 +466,14 @@ class StableAudioDiTBlock(nn.Module):
             num_key_value_attention_heads=num_key_value_attention_heads,
             attention_head_dim=attention_head_dim,
             cross_attention_dim=cross_attention_dim,
+            quant_config=quant_config,
+            prefix=f"{prefix}.attn2",
         )
 
         # Feed-forward with SwiGLU activation
         # inner_dim = dim * ff_mult (e.g., 1536 * 4 = 6144)
         self.norm3 = nn.LayerNorm(dim, elementwise_affine=True)
-        self.ff = StableAudioFeedForward(dim, inner_dim=dim * ff_mult)
+        self.ff = StableAudioFeedForward(dim, inner_dim=dim * ff_mult, quant_config=quant_config, prefix=f"{prefix}.ff")
 
     def forward(
         self,
@@ -482,6 +545,7 @@ class StableAudioDiTModel(nn.Module):
         time_proj_dim: int = 256,
         global_states_input_dim: int = 1536,
         cross_attention_input_dim: int = 768,
+        quant_config: "QuantizationConfig | None" = None,
     ):
         super().__init__()
 
@@ -557,8 +621,10 @@ class StableAudioDiTModel(nn.Module):
                     num_key_value_attention_heads=num_key_value_attention_heads,
                     attention_head_dim=attention_head_dim,
                     cross_attention_dim=cross_attention_dim,
+                    quant_config=quant_config,
+                    prefix=f"transformer_blocks.{i}",
                 )
-                for _ in range(num_layers)
+                for i in range(num_layers)
             ]
         )
 
