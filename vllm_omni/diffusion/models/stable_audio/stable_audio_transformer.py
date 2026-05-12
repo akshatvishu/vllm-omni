@@ -375,9 +375,13 @@ class SwiGLU(nn.Module):
 
 
 class StableAudioFeedForward(nn.Module):
-    """
-    Feed-forward network with SwiGLU activation for Stable Audio.
+    """Feed-forward network with SwiGLU activation for Stable Audio.
+
     Matches diffusers FeedForward structure with activation_fn="swiglu".
+
+    Kept in BF16 for FP8 runs. `net.2` receives the unnormalized SwiGLU output
+    `hidden * silu(gate)`; quantizing `net.2` or the full FFN regressed audio
+    quality in validation, likely due to per-feature activation outliers.
     """
 
     def __init__(self, dim: int, inner_dim: int, bias: bool = True):
