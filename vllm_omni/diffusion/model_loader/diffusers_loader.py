@@ -453,8 +453,7 @@ class DiffusersPipelineLoader:
             gguf_models = quant_config.get("gguf_models")
             if not gguf_model and not gguf_models:
                 raise ValueError(
-                    "GGUF quantization requires quantization_config.gguf_model "
-                    "or quantization_config.gguf_models"
+                    "GGUF quantization requires quantization_config.gguf_model or quantization_config.gguf_models"
                 )
             return True
 
@@ -471,8 +470,7 @@ class DiffusersPipelineLoader:
         gguf_models = getattr(quant_config, "gguf_models", None)
         if gguf_model is None and not gguf_models:
             raise ValueError(
-                "GGUF quantization requires quantization_config.gguf_model "
-                "or quantization_config.gguf_models"
+                "GGUF quantization requires quantization_config.gguf_model or quantization_config.gguf_models"
             )
         return True
 
@@ -489,9 +487,16 @@ class DiffusersPipelineLoader:
     def _resolve_gguf_model_path(self, gguf_model: str, revision: str | None) -> str:
         if os.path.isfile(gguf_model):
             return gguf_model
-        # repo_id/filename.gguf
+        # owner/repo/filename.gguf, where filename may include subdirectories.
         if "/" in gguf_model and gguf_model.endswith(".gguf"):
-            repo_id, filename = gguf_model.rsplit("/", 1)
+            parts = gguf_model.split("/", 2)
+            if len(parts) != 3 or not parts[2]:
+                raise ValueError(
+                    f"Unrecognized GGUF reference: {gguf_model!r} (expected local file, "
+                    "<repo_id>/<filename>.gguf, or <repo_id>:<quant_type>)"
+                )
+            repo_id = f"{parts[0]}/{parts[1]}"
+            filename = parts[2]
             return hf_hub_download(
                 repo_id=repo_id,
                 filename=filename,

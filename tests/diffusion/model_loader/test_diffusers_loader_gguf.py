@@ -141,17 +141,57 @@ def test_resolve_gguf_model_path_returns_local_file(tmp_path):
 
 def test_resolve_gguf_model_path_downloads_explicit_gguf_filename(monkeypatch: pytest.MonkeyPatch):
     loader = _make_loader()
+    calls = []
 
     monkeypatch.setattr(loader_module.os.path, "isfile", lambda _path: False)
     monkeypatch.setattr(
         loader_module,
         "hf_hub_download",
-        lambda repo_id, filename, revision, cache_dir: f"{cache_dir}/{repo_id}/{filename}",
+        lambda repo_id, filename, revision, cache_dir: calls.append((repo_id, filename, revision, cache_dir))
+        or f"{cache_dir}/{repo_id}/{filename}",
     )
 
     resolved = loader._resolve_gguf_model_path("owner/repo/model-Q4_0.gguf", revision="main")
 
+    assert calls == [("owner/repo", "model-Q4_0.gguf", "main", "cache-dir")]
     assert resolved == "cache-dir/owner/repo/model-Q4_0.gguf"
+
+
+def test_resolve_gguf_model_path_downloads_nested_explicit_gguf_filename(monkeypatch: pytest.MonkeyPatch):
+    loader = _make_loader()
+    calls = []
+
+    monkeypatch.setattr(loader_module.os.path, "isfile", lambda _path: False)
+    monkeypatch.setattr(
+        loader_module,
+        "hf_hub_download",
+        lambda repo_id, filename, revision, cache_dir: calls.append((repo_id, filename, revision, cache_dir))
+        or f"{cache_dir}/{repo_id}/{filename}",
+    )
+
+    resolved = loader._resolve_gguf_model_path(
+        "QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf",
+        revision="main",
+    )
+
+    assert calls == [
+        (
+            "QuantStack/Wan2.2-T2V-A14B-GGUF",
+            "HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf",
+            "main",
+            "cache-dir",
+        )
+    ]
+    assert resolved == "cache-dir/QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf"
+
+
+def test_resolve_gguf_model_path_rejects_missing_repo_segment(monkeypatch: pytest.MonkeyPatch):
+    loader = _make_loader()
+
+    monkeypatch.setattr(loader_module.os.path, "isfile", lambda _path: False)
+
+    with pytest.raises(ValueError, match="Unrecognized GGUF reference"):
+        loader._resolve_gguf_model_path("owner/model-Q4_0.gguf", revision="main")
 
 
 def test_resolve_gguf_model_path_downloads_by_quant_type(monkeypatch: pytest.MonkeyPatch):
