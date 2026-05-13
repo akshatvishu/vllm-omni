@@ -255,23 +255,17 @@ def llm2audio_vae_async_chunk(
 
 
 def llm2audio_vae(
-    stage_list: list[Any],
-    engine_input_source: list[int],
+    source_outputs: list[Any],
     prompt: OmniTokensPrompt | TextPrompt | None = None,
     requires_multimodal_data: bool = False,
+    streaming_context: Any = None,
 ) -> list[OmniTokensPrompt]:
-    del prompt, requires_multimodal_data
-    if not engine_input_source:
-        raise ValueError("engine_input_source cannot be empty")
-
-    source_stage_id = engine_input_source[0]
-    if source_stage_id >= len(stage_list):
-        raise IndexError(f"Invalid stage_id: {source_stage_id}")
-    if stage_list[source_stage_id].engine_outputs is None:
-        raise RuntimeError(f"Stage {source_stage_id} has no outputs yet")
+    del prompt, requires_multimodal_data, streaming_context
+    if not source_outputs:
+        raise ValueError("source_outputs cannot be empty")
 
     outputs = []
-    for stage_output in stage_list[source_stage_id].engine_outputs:
+    for stage_output in source_outputs:
         finished = bool(getattr(stage_output, "finished", True))
         if not finished:
             continue
