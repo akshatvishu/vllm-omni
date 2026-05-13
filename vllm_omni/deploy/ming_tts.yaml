@@ -8,6 +8,7 @@ pipeline: ming_tts
 async_chunk: true
 trust_remote_code: false
 dtype: bfloat16
+enable_prefix_caching: false
 
 connectors:
   connector_of_shared_memory:
@@ -21,6 +22,7 @@ stages:
     max_num_seqs: 1
     gpu_memory_utilization: 0.45
     enforce_eager: true
+    enable_prefix_caching: false
     async_scheduling: false
     max_num_batched_tokens: 8192
     max_model_len: 8192
@@ -38,6 +40,7 @@ stages:
     max_num_seqs: 1
     gpu_memory_utilization: 0.25
     enforce_eager: true
+    enable_prefix_caching: false
     async_scheduling: false
     max_num_batched_tokens: 8192
     max_model_len: 8192
