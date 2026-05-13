@@ -72,16 +72,9 @@ zero_shot:
 
 podcast:
   prompt: "Please generate speech based on the following description.\n"
-  text: |
-    speaker_1:你可以说一下，就大概说一下，可能虽然我也不知道，我看过那部电影没有。
-    speaker_2:就是那个叫什么，变相一节课的嘛。
-    speaker_1:嗯。
-    speaker_2:一部搞笑的电影。
-    speaker_1:一部搞笑的。
+  text: " speaker_1:你可以说一下，就大概说一下，可能虽然我也不知道，我看过那部电影没有。\n speaker_2:就是那个叫什么，变相一节课的嘛。\n speaker_1:嗯。\n speaker_2:一部搞笑的电影。\n speaker_1:一部搞笑的。\n"
   instruction: null
-  prompt_text: |
-    speaker_1:并且我们还要进行每个月还要考核 笔试的话还要进行笔试，做个，当服务员还要去笔试了
-    speaker_2:对啊，这真的很奇怪，就是 单纯的因，单纯自己工资不高，只是因为可能人家那个店比较出名一点，就对你苛刻要求
+  prompt_text: " speaker_1:并且我们还要进行每个月还要考核 笔试的话还要进行笔试，做个，当服务员还要去笔试了\n speaker_2:对啊，这真的很奇怪，就是 单纯的因，单纯自己工资不高，只是因为可能人家那个店比较出名一点，就对你苛刻要求\n"
   requires_ref_audio_count: 2
   auto_extract_speaker_embeddings: true
   max_decode_steps: 200
