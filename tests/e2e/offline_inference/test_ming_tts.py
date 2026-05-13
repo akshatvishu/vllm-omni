@@ -21,7 +21,7 @@ from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
     SAMPLE_RATE,
     TEXT_EOS_TOKEN_ID,
 )
-from vllm_omni.model_executor.models.ming_tts.prompt_utils import build_ming_dense_prompt
+from vllm_omni.model_executor.models.ming_tts.prompt_utils import DEFAULT_PROMPT, build_ming_dense_prompt
 
 MODEL = "inclusionAI/Ming-omni-tts-0.5B"
 DEPLOY_CONFIG = get_deploy_config_path("ming_tts.yaml")
@@ -67,7 +67,7 @@ def _build_prompt(
 ) -> dict:
     return build_ming_dense_prompt(
         tokenizer,
-        prompt="Please generate speech based on the following description.\n",
+        prompt=DEFAULT_PROMPT,
         text=text,
         instruction=instruction,
         runtime_controls={KEY_MAX_DECODE_STEPS: 200},

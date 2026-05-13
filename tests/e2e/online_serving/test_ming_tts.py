@@ -86,4 +86,8 @@ def test_ming_tts_audio_speech_streaming(omni_server, openai_client) -> None:
         "stream": True,
         "response_format": "wav",
     }
-    openai_client.send_audio_speech_request(request_config)
+    responses = openai_client.send_audio_speech_request(request_config)
+    assert len(responses) == 1
+    assert responses[0].audio_bytes is not None, "Expected streamed WAV bytes from /v1/audio/speech"
+    sample_rate = _wav_sample_rate(responses[0].audio_bytes)
+    assert sample_rate == SAMPLE_RATE, f"Expected Ming output sample rate {SAMPLE_RATE}, got {sample_rate}"
