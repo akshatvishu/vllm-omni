@@ -90,11 +90,11 @@ class MingDenseConfig(PretrainedConfig):
         architectures: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(architectures=architectures, **kwargs)
         self.llm_config = _coerce_qwen2_config(llm_config or {})
         self.ditar_config = dict(ditar_config or {})
         self.aggregator_config = dict(aggregator_config or {})
         self.audio_tokenizer_config = _coerce_ming_dense_audio_vae_config(audio_tokenizer_config)
+        super().__init__(architectures=architectures, **kwargs)
 
     def get_text_config(self, decoder: bool = False, **kwargs: Any) -> Qwen2Config:
         del decoder, kwargs
