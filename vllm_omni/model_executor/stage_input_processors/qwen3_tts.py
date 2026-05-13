@@ -5,16 +5,16 @@ from typing import Any
 import torch
 from vllm.logger import init_logger
 
-from vllm_omni.model_executor.stage_input_processors._chunk_transfer import (
-    get_request_payload_store,
-    get_transfer_extra_config,
-)
 from vllm_omni.data_entry_keys import (
     CodesStruct,
     MetaStruct,
     OmniPayload,
     OmniPayloadStruct,
     to_dict,
+)
+from vllm_omni.model_executor.stage_input_processors._chunk_transfer import (
+    get_request_payload_store,
+    get_transfer_extra_config,
 )
 from vllm_omni.model_executor.stage_input_processors.chunk_size_utils import (
     compute_dynamic_initial_chunk_size,
