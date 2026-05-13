@@ -18,6 +18,14 @@ def resolve_model_to_local_path(model):
     return snapshot_download(model)
 
 
+def _load_with_soundfile(audio_path):
+    import soundfile as sf
+
+    data, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
+    waveform = torch.from_numpy(data).T.contiguous()
+    return waveform, sample_rate
+
+
 class MingSpeakerEmbeddingExtractor:
     def __init__(self, model, target_sr=16000):
         local_model_path = resolve_model_to_local_path(model)
@@ -47,7 +55,7 @@ class MingSpeakerEmbeddingExtractor:
         except RuntimeError as e:
             if not any(tok in str(e) for tok in ("torchcodec", "libavutil", "libtorchcodec")):
                 raise
-            waveform, sample_rate = torchaudio.load(audio_path, backend="soundfile")
+            waveform, sample_rate = _load_with_soundfile(audio_path)
         return self.extract_from_waveform(waveform, sample_rate)
 
     def extract_many(self, audio_paths):
