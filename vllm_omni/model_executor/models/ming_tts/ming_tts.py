@@ -32,13 +32,16 @@ from .config_ming_tts import (
     MingTTSConfig,
 )
 from .loader import (
+    load_weights,
+)
+from .prompt_utils import (
     _coerce_prompt_latents,
     _find_audio_placeholder_positions,
     _find_speaker_placeholder_positions,
     _initial_history,
     _resolve_prompt_latents,
     _take_scalar,
-    load_weights,
+    coerce_speaker_embeddings,
 )
 
 MING_STOP_REASON_KEY = "ming_stop_reason"
@@ -167,8 +170,6 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
         speaker_embedding = info_dict.get(KEY_SPEAKER_EMBEDDING, info_dict.get("speaker_embedding"))
         speaker_embeddings = None
         if speaker_embedding is not None:
-            from .prompt_builder import coerce_speaker_embeddings
-
             speaker_embeddings = coerce_speaker_embeddings(
                 speaker_embedding,
                 use_zero_spk_emb=bool(info_dict.get("use_zero_spk_emb", False)),

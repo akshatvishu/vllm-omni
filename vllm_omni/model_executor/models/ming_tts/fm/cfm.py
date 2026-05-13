@@ -4,7 +4,6 @@
 
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 
@@ -73,51 +72,6 @@ class CFM(nn.Module):
     @property
     def device(self):
         return next(self.parameters()).device
-
-    def forward(
-        self,
-        cond,
-        target,
-        latent_history,
-        mask,
-        patch_size,
-    ):
-        if patch_size <= 0:
-            raise ValueError(f"patch_size must be positive, got {patch_size}")
-        if cond.ndim != 3:
-            raise ValueError(f"Expected cond rank-3 [Batch, Time, Dimension], got {tuple(cond.shape)}")
-        if target.ndim != 3:
-            raise ValueError(f"Expected target rank-3 [Batch, Time, Dimension], got {tuple(target.shape)}")
-        if latent_history.ndim != 3:
-            raise ValueError(
-                f"Expected latent_history rank-3 [Batch, Time, Dimension], got {tuple(latent_history.shape)}"
-            )
-        if cond.shape[0] != target.shape[0] or cond.shape[0] != latent_history.shape[0]:
-            raise ValueError(
-                "Batch mismatch across cond, target, and latent_history: "
-                f"{cond.shape[0]}, {target.shape[0]}, {latent_history.shape[0]}"
-            )
-        token_mask = _coerce_token_mask(
-            mask, batch_size=target.shape[0], target_steps=target.shape[1], device=target.device
-        )
-
-        x1 = target
-        batch, dtype = x1.shape[0], x1.dtype
-        x0 = torch.randn_like(x1)
-        time = torch.rand((batch,), dtype=dtype, device=self.device)
-        # sample xt (φ_t(x) in the paper)
-        t = time.unsqueeze(-1).unsqueeze(-1)
-        x = (1 - t) * x0 + t * x1
-        flow = x1 - x0
-
-        pred = self.model(x=x, t=time, c=cond, latent_history=latent_history, mask=token_mask)
-        pred = pred[:, -patch_size:, :]
-
-        loss = F.mse_loss(pred, flow, reduction="none")
-        loss_mask = token_mask.unsqueeze(-1).expand_as(loss)
-        loss = loss[loss_mask]
-
-        return loss.mean()
 
     @torch.no_grad()
     def sample(
@@ -193,15 +147,3 @@ class CFM(nn.Module):
         out = sampled
 
         return out, trajectory
-
-
-def _coerce_token_mask(mask, *, batch_size, target_steps, device):
-    if not isinstance(mask, torch.Tensor):
-        mask = torch.as_tensor(mask, device=device)
-    if mask.ndim == 3 and mask.shape[-1] == 1:
-        mask = mask.squeeze(-1)
-    if mask.ndim != 2:
-        raise ValueError(f"Expected mask rank-2 [Batch, Time] or rank-3 [Batch, Time, 1], got {tuple(mask.shape)}")
-    if mask.shape[0] != batch_size or mask.shape[1] != target_steps:
-        raise ValueError(f"Mask shape mismatch: got {tuple(mask.shape)}, expected {(batch_size, target_steps)}")
-    return mask.to(device=device, dtype=torch.bool)

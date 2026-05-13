@@ -17,7 +17,7 @@ from .config_ming_tts import (
     KEY_TEXT_MODE,
     MingTTSConfig,
 )
-from .prompt_builder import (
+from .prompt_utils import (
     build_dense_prompt_token_ids,
     coerce_speaker_embeddings,
     count_prompt_waveform_patches,

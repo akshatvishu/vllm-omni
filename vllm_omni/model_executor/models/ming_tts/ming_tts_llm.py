@@ -10,8 +10,8 @@ import torch
 import torch.nn as nn
 from vllm.config import VllmConfig
 from vllm.logger import init_logger
-from vllm.model_executor.model_loader.weight_utils import default_weight_loader, maybe_remap_kv_scale_name
-from vllm.model_executor.models.utils import init_vllm_registered_model, is_pp_missing_parameter
+from vllm.model_executor.models.qwen2 import Qwen2Model
+from vllm.model_executor.models.utils import AutoWeightsLoader, WeightsMapper, maybe_prefix
 from vllm.sequence import IntermediateTensors
 from vllm.v1.outputs import SamplerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
@@ -19,7 +19,6 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 
 from .aggregator import Aggregator
-from .backbone import MingQwen2Backbone
 from .config_ming_tts import (
     KEY_CFG,
     KEY_DECODE_STEP,
@@ -53,23 +52,23 @@ from .patch_emission import (
 )
 
 logger = init_logger(__name__)
-_ORIGINAL_INIT_VLLM_REGISTERED_MODEL = init_vllm_registered_model
 
 
 class MingLLMModel(nn.Module):
+    hf_to_vllm_mapper = WeightsMapper(
+        orig_to_new_prefix={
+            "model.model.": "model.",
+        }
+    )
+
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
         self.ming_config = MingTTSConfig.from_hf_config(vllm_config.model_config.hf_config)
         self.ming_config.validate()
         self.vllm_config = vllm_config
         self.prefix = prefix
-        self.quant_config = vllm_config.quant_config
         self.fm_dtype = _resolve_ming_runtime_dtype(vllm_config)
-        self.model = (
-            init_vllm_registered_model(vllm_config=vllm_config, architectures=["Qwen2ForCausalLM"])
-            if init_vllm_registered_model is not _ORIGINAL_INIT_VLLM_REGISTERED_MODEL
-            else MingQwen2Backbone(vllm_config=vllm_config, prefix=prefix)
-        )
+        self.model = Qwen2Model(vllm_config=vllm_config, prefix=maybe_prefix(prefix, "model"))
         self.linear_proj_audio = Aggregator(
             in_channels=self.ming_config.latent_dim,
             llm_input_dim=self.ming_config.llm_hidden_size,
@@ -465,67 +464,11 @@ class MingLLMModel(nn.Module):
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        loaded_params: set[str] = set()
-        skipped: list[str] = []
-        mapping = [
-            ("qkv_proj", "q_proj", "q"),
-            ("qkv_proj", "k_proj", "k"),
-            ("qkv_proj", "v_proj", "v"),
-            ("gate_up_proj", "gate_proj", 0),
-            ("gate_up_proj", "up_proj", 1),
-        ]
-        for ckpt_name, loaded_weight in weights:
-            name = ckpt_name
-            if self.quant_config is not None and (scale_name := self.quant_config.get_cache_scale(name)):
-                if scale_name not in params_dict:
-                    skipped.append(ckpt_name)
-                    continue
-                param = params_dict[scale_name]
-                weight_loader = getattr(param, "weight_loader", default_weight_loader)
-                weight_loader(param, loaded_weight if loaded_weight.dim() == 0 else loaded_weight[0])
-                loaded_params.add(scale_name)
-                continue
-            mapped_name = None
-            for param_name, weight_name, shard_id in mapping:
-                if weight_name not in name:
-                    continue
-                mapped_name = name.replace(weight_name, param_name)
-                if mapped_name.endswith(".bias") and mapped_name not in params_dict:
-                    mapped_name = None
-                    break
-                if is_pp_missing_parameter(mapped_name, self) or mapped_name not in params_dict:
-                    mapped_name = None
-                    continue
-                param = params_dict[mapped_name]
-                weight_loader = getattr(param, "weight_loader", default_weight_loader)
-                weight_loader(param, loaded_weight) if weight_loader == default_weight_loader else weight_loader(
-                    param, loaded_weight, shard_id
-                )
-                loaded_params.add(mapped_name)
-                break
-            if mapped_name in loaded_params or name.endswith(".bias") and name not in params_dict:
-                continue
-            name = maybe_remap_kv_scale_name(name, params_dict)
-            if name is None:
-                continue
-            if name.startswith("model.") and name not in params_dict and f"model.{name}" in params_dict:
-                name = f"model.{name}"
-            if is_pp_missing_parameter(name, self):
-                continue
-            if name not in params_dict:
-                skipped.append(ckpt_name)
-                continue
-            getattr(params_dict[name], "weight_loader", default_weight_loader)(params_dict[name], loaded_weight)
-            loaded_params.add(name)
+        loaded_params = AutoWeightsLoader(self).load_weights(weights, mapper=self.hf_to_vllm_mapper)
         _warn_missing_prefix("flowloss", params_dict, loaded_params, prefix="flowloss.", fatal=True)
         _warn_missing_prefix("linear_proj_audio", params_dict, loaded_params, prefix="linear_proj_audio.", fatal=True)
         _warn_missing_prefix("stop_head", params_dict, loaded_params, prefix="stop_head.", fatal=True)
         _warn_missing_prefix("spk_head", params_dict, loaded_params, prefix="spk_head.", fatal=True)
-        if skipped:
-            warnings.warn(
-                f"MingLLMModel: skipped {len(skipped)} checkpoint keys during load. First few: {skipped[:8]}",
-                stacklevel=2,
-            )
         return loaded_params
 
 

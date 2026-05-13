@@ -46,27 +46,12 @@ class TimestepEmbedder(nn.Module):
 class CondEmbedder(nn.Module):
     def __init__(self, input_feature_size, hidden_size, dropout_prob):
         super().__init__()
-        self.dropout_prob = dropout_prob
+        del dropout_prob
         self.cond_embedder = nn.Linear(input_feature_size, hidden_size)
 
-    def cond_drop(self, llm_cond):
+    def forward(self, llm_cond):
         if llm_cond.ndim != 3:
             raise ValueError(f"Expected conditioning rank-3 [Batch, Time, Dimension], got {tuple(llm_cond.shape)}")
-        bsz = llm_cond.shape[0]
-        drop_latent_mask = torch.rand(bsz) < self.dropout_prob
-        drop_latent_mask = drop_latent_mask.unsqueeze(-1).unsqueeze(-1).to(llm_cond.dtype).to(llm_cond.device)
-        fake_latent = torch.zeros_like(llm_cond)
-        llm_cond = drop_latent_mask * fake_latent + (1 - drop_latent_mask) * llm_cond
-
-        return llm_cond
-
-    def forward(self, llm_cond, train):
-        if llm_cond.ndim != 3:
-            raise ValueError(f"Expected conditioning rank-3 [Batch, Time, Dimension], got {tuple(llm_cond.shape)}")
-        use_dropout = self.dropout_prob > 0
-        if train and use_dropout:
-            llm_cond = self.cond_drop(llm_cond)
-
         llm_cond = self.cond_embedder(llm_cond)
 
         return llm_cond
@@ -130,7 +115,7 @@ class DiT(nn.Module):
         x_now = self.x_embedder(x)
         x_history = self.x_embedder(latent_history)
         x = torch.cat([x_history, x_now], dim=1)
-        c = self.c_embedder(c, self.training)
+        c = self.c_embedder(c)
         y = t + c
         x = torch.cat([y, x], dim=1)
         rope = self.rotary_embed.forward_from_seq_len(x.shape[1])

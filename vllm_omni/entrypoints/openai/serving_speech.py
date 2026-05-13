@@ -101,7 +101,7 @@ _REF_AUDIO_MAX_DURATION = 30.0  # seconds
 _TTS_MAX_INSTRUCTIONS_LENGTH = 500
 _TTS_MAX_NEW_TOKENS_MIN = 1
 _TTS_MAX_NEW_TOKENS_MAX = 4096
-_MING_DEFAULT_PROMPT = "Please generate speech based on the following description.\n"
+_MING_DEFAULT_PROMPT = MING_DEFAULT_PROMPT
 
 
 def _create_wav_header(sample_rate: int, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
@@ -1738,7 +1738,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         from transformers import AutoTokenizer
 
         from vllm_omni.model_executor.models.ming_tts.config_ming_tts import KEY_MAX_DECODE_STEPS
-        from vllm_omni.model_executor.models.ming_tts.prompt_builder import build_ming_dense_prompt
+        from vllm_omni.model_executor.models.ming_tts.prompt_utils import build_ming_dense_prompt
 
         if self._tts_tokenizer is None:
             model_name = self.engine_client.model_config.model
@@ -2937,16 +2937,6 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
 
         succeeded = sum(1 for r in final_results if r.status == "success")
         return BatchSpeechResponse(
-            id=batch_id,
-            results=final_results,
-            total=len(final_results),
-            succeeded=succeeded,
-            failed=len(final_results) - succeeded,
-        )
-
-
-ServingSpeech = OmniOpenAIServingSpeech
-     return BatchSpeechResponse(
             id=batch_id,
             results=final_results,
             total=len(final_results),
