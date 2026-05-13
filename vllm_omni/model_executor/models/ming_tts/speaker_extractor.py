@@ -42,7 +42,12 @@ class MingSpeakerEmbeddingExtractor:
         return embedding.squeeze(0).to(dtype=torch.float32)
 
     def extract_from_file(self, audio_path):
-        waveform, sample_rate = torchaudio.load(audio_path)
+        try:
+            waveform, sample_rate = torchaudio.load(audio_path)
+        except RuntimeError as e:
+            if not any(tok in str(e) for tok in ("torchcodec", "libavutil", "libtorchcodec")):
+                raise
+            waveform, sample_rate = torchaudio.load(audio_path, backend="soundfile")
         return self.extract_from_waveform(waveform, sample_rate)
 
     def extract_many(self, audio_paths):
