@@ -1,131 +1,92 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""
+E2E online serving tests for Ming-omni-tts (dense) model.
+Tests text-to-audio via /v1/audio/speech endpoint.
+"""
 
-"""E2E online-serving tests for Ming-omni-tts."""
-
-import concurrent.futures
-import io
 import os
-import wave
 
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-os.environ["VLLM_TEST_CLEAN_GPU_MEMORY"] = "0"
 
 import pytest
 
 from tests.helpers.mark import hardware_test
 from tests.helpers.runtime import OmniServerParams
 from tests.helpers.stage_config import get_deploy_config_path
-from vllm_omni.model_executor.models.ming_tts.config_ming_tts import SAMPLE_RATE
+
+pytestmark = [pytest.mark.advanced_model, pytest.mark.omni]
 
 MODEL = "inclusionAI/Ming-omni-tts-0.5B"
 DEPLOY_CONFIG = get_deploy_config_path("ming_tts.yaml")
 
-SERVER_PARAMS = [
+no_async_chunk_params = [
     pytest.param(
         OmniServerParams(
             model=MODEL,
             stage_config_path=DEPLOY_CONFIG,
-            server_args=["--enforce-eager", "--disable-log-stats"],
+            server_args=["--enforce-eager", "--no-async-chunk"],
+        ),
+        id="no_async_chunk",
+    )
+]
+
+async_chunk_params = [
+    pytest.param(
+        OmniServerParams(
+            model=MODEL,
+            stage_config_path=DEPLOY_CONFIG,
+            server_args=["--enforce-eager"],
         ),
         id="async_chunk",
     )
 ]
 
 
-def _wav_sample_rate(audio_bytes: bytes) -> int:
-    with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
-        return int(wav_file.getframerate())
-
-
-def _assert_wav_audio(audio_bytes: bytes) -> None:
-    assert len(audio_bytes) > 44, f"Expected WAV payload, got {len(audio_bytes)} bytes"
-    assert audio_bytes[:4] == b"RIFF", "Expected RIFF WAV header"
-    assert audio_bytes[8:12] == b"WAVE", "Expected WAVE WAV header"
-    sample_rate = _wav_sample_rate(audio_bytes)
-    assert sample_rate == SAMPLE_RATE, f"Expected Ming output sample rate {SAMPLE_RATE}, got {sample_rate}"
-
-
-def _read_non_streaming_audio(openai_client, request_config: dict) -> bytes:
-    kwargs = {
-        "model": request_config["model"],
-        "input": request_config["input"],
-        "response_format": request_config["response_format"],
-        "timeout": request_config.get("timeout", 300.0),
+def get_prompt(prompt_type="zh"):
+    prompts = {
+        "zh": "我会一直在这里陪着你，直到你慢慢地沉入那个最温柔的梦里。",
+        "zh_short": "这款产品的名字，叫变态坑爹牛肉丸。",
     }
-    if request_config.get("voice") is not None:
-        kwargs["voice"] = request_config["voice"]
-    response = openai_client.client.audio.speech.create(**kwargs)
-    if hasattr(response, "read") and callable(response.read):
-        return response.read()
-    if hasattr(response, "content"):
-        return response.content
-    raise TypeError(f"Unsupported audio speech response type: {type(response)}")
+    return prompts.get(prompt_type, prompts["zh"])
 
 
-def _read_streaming_audio(openai_client, request_config: dict) -> bytes:
-    data = bytearray()
-    kwargs = {
-        "model": request_config["model"],
-        "input": request_config["input"],
-        "response_format": request_config["response_format"],
-        "timeout": request_config.get("timeout", 300.0),
-    }
-    if request_config.get("voice") is not None:
-        kwargs["voice"] = request_config["voice"]
-    with openai_client.client.audio.speech.with_streaming_response.create(**kwargs) as response:
-        for chunk in response.iter_bytes():
-            if chunk:
-                data.extend(chunk)
-    return bytes(data)
-
-
-@pytest.mark.advanced_model
-@pytest.mark.omni
 @hardware_test(res={"cuda": "L4"}, num_cards=1)
-@pytest.mark.parametrize("omni_server", SERVER_PARAMS, indirect=True)
-def test_ming_tts_audio_speech_non_streaming(omni_server, openai_client) -> None:
-    """Test non-streaming Ming generation through /v1/audio/speech."""
+@pytest.mark.parametrize("omni_server", no_async_chunk_params, indirect=True)
+def test_text_to_audio_non_streaming_001(omni_server, openai_client) -> None:
+    """
+    Deploy Setting: ming_tts.yaml with --no-async-chunk
+    Input Modal: text
+    Output Modal: audio
+    Input Setting: stream=False
+    Datasets: two concurrent requests
+    """
     request_config = {
         "model": omni_server.model,
-        "input": "我会一直在这里陪着你，直到你慢慢地沉入那个最温柔的梦里。",
+        "input": get_prompt("zh"),
         "stream": False,
         "response_format": "wav",
         "timeout": 300.0,
     }
-    request_inputs = [
-        "我会一直在这里陪着你，直到你慢慢地沉入那个最温柔的梦里。",
-        "这款产品的名字，叫变态坑爹牛肉丸。",
-    ]
-
-    def _send_one(text):
-        per_request_config = {**request_config, "input": text}
-        audio_bytes = _read_non_streaming_audio(openai_client, per_request_config)
-        return text, audio_bytes
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(request_inputs)) as executor:
-        futures = [executor.submit(_send_one, text) for text in request_inputs]
-        results = [future.result() for future in concurrent.futures.as_completed(futures)]
-
-    assert {text for text, _ in results} == set(request_inputs)
-    assert len(results) == len(request_inputs)
-    for _, audio_bytes in results:
-        _assert_wav_audio(audio_bytes)
+    openai_client.send_audio_speech_request(request_config, request_num=2)
 
 
-@pytest.mark.advanced_model
-@pytest.mark.omni
 @hardware_test(res={"cuda": "L4"}, num_cards=1)
-@pytest.mark.parametrize("omni_server", SERVER_PARAMS, indirect=True)
-def test_ming_tts_audio_speech_streaming(omni_server, openai_client) -> None:
-    """Test streaming Ming generation through /v1/audio/speech."""
+@pytest.mark.parametrize("omni_server", async_chunk_params, indirect=True)
+def test_text_to_audio_streaming_001(omni_server, openai_client) -> None:
+    """
+    Deploy Setting: ming_tts.yaml (async_chunk=true)
+    Input Modal: text + voice
+    Output Modal: audio (streamed)
+    Input Setting: stream=True
+    Datasets: single request
+    """
     request_config = {
         "model": omni_server.model,
-        "input": "这款产品的名字，叫变态坑爹牛肉丸。",
+        "input": get_prompt("zh_short"),
         "voice": "灵小甄",
         "stream": True,
         "response_format": "wav",
         "timeout": 300.0,
     }
-    audio_bytes = _read_streaming_audio(openai_client, request_config)
-    _assert_wav_audio(audio_bytes)
+    openai_client.send_audio_speech_request(request_config)
