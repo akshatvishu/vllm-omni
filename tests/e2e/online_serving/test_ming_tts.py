@@ -38,6 +38,48 @@ def _wav_sample_rate(audio_bytes: bytes) -> int:
         return int(wav_file.getframerate())
 
 
+def _assert_wav_audio(audio_bytes: bytes) -> None:
+    assert len(audio_bytes) > 44, f"Expected WAV payload, got {len(audio_bytes)} bytes"
+    assert audio_bytes[:4] == b"RIFF", "Expected RIFF WAV header"
+    assert audio_bytes[8:12] == b"WAVE", "Expected WAVE WAV header"
+    sample_rate = _wav_sample_rate(audio_bytes)
+    assert sample_rate == SAMPLE_RATE, f"Expected Ming output sample rate {SAMPLE_RATE}, got {sample_rate}"
+
+
+def _read_non_streaming_audio(openai_client, request_config: dict) -> bytes:
+    kwargs = {
+        "model": request_config["model"],
+        "input": request_config["input"],
+        "response_format": request_config["response_format"],
+        "timeout": request_config.get("timeout", 300.0),
+    }
+    if request_config.get("voice") is not None:
+        kwargs["voice"] = request_config["voice"]
+    response = openai_client.client.audio.speech.create(**kwargs)
+    if hasattr(response, "read") and callable(response.read):
+        return response.read()
+    if hasattr(response, "content"):
+        return response.content
+    raise TypeError(f"Unsupported audio speech response type: {type(response)}")
+
+
+def _read_streaming_audio(openai_client, request_config: dict) -> bytes:
+    data = bytearray()
+    kwargs = {
+        "model": request_config["model"],
+        "input": request_config["input"],
+        "response_format": request_config["response_format"],
+        "timeout": request_config.get("timeout", 300.0),
+    }
+    if request_config.get("voice") is not None:
+        kwargs["voice"] = request_config["voice"]
+    with openai_client.client.audio.speech.with_streaming_response.create(**kwargs) as response:
+        for chunk in response.iter_bytes():
+            if chunk:
+                data.extend(chunk)
+    return bytes(data)
+
+
 @pytest.mark.advanced_model
 @pytest.mark.omni
 @hardware_test(res={"cuda": "L4"}, num_cards=1)
@@ -49,6 +91,7 @@ def test_ming_tts_audio_speech_non_streaming(omni_server, openai_client) -> None
         "input": "我会一直在这里陪着你，直到你慢慢地沉入那个最温柔的梦里。",
         "stream": False,
         "response_format": "wav",
+        "timeout": 300.0,
     }
     request_inputs = [
         "我会一直在这里陪着你，直到你慢慢地沉入那个最温柔的梦里。",
@@ -57,9 +100,8 @@ def test_ming_tts_audio_speech_non_streaming(omni_server, openai_client) -> None
 
     def _send_one(text):
         per_request_config = {**request_config, "input": text}
-        responses = openai_client.send_audio_speech_request(per_request_config)
-        assert len(responses) == 1
-        return text, responses[0]
+        audio_bytes = _read_non_streaming_audio(openai_client, per_request_config)
+        return text, audio_bytes
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(request_inputs)) as executor:
         futures = [executor.submit(_send_one, text) for text in request_inputs]
@@ -67,10 +109,8 @@ def test_ming_tts_audio_speech_non_streaming(omni_server, openai_client) -> None
 
     assert {text for text, _ in results} == set(request_inputs)
     assert len(results) == len(request_inputs)
-    for _, response in results:
-        assert response.audio_bytes is not None, "Expected WAV bytes from /v1/audio/speech"
-        sample_rate = _wav_sample_rate(response.audio_bytes)
-        assert sample_rate == SAMPLE_RATE, f"Expected Ming output sample rate {SAMPLE_RATE}, got {sample_rate}"
+    for _, audio_bytes in results:
+        _assert_wav_audio(audio_bytes)
 
 
 @pytest.mark.advanced_model
@@ -85,9 +125,7 @@ def test_ming_tts_audio_speech_streaming(omni_server, openai_client) -> None:
         "voice": "灵小甄",
         "stream": True,
         "response_format": "wav",
+        "timeout": 300.0,
     }
-    responses = openai_client.send_audio_speech_request(request_config)
-    assert len(responses) == 1
-    assert responses[0].audio_bytes is not None, "Expected streamed WAV bytes from /v1/audio/speech"
-    sample_rate = _wav_sample_rate(responses[0].audio_bytes)
-    assert sample_rate == SAMPLE_RATE, f"Expected Ming output sample rate {SAMPLE_RATE}, got {sample_rate}"
+    audio_bytes = _read_streaming_audio(openai_client, request_config)
+    _assert_wav_audio(audio_bytes)

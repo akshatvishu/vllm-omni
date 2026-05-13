@@ -35,7 +35,7 @@ def ming_tokenizer():
     return AutoTokenizer.from_pretrained(MODEL, trust_remote_code=False)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def ming_engine():
     with OmniRunner(
         MODEL,
@@ -46,7 +46,7 @@ def ming_engine():
         yield runner.omni
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def async_omni_engine():
     engine = AsyncOmni(
         model=MODEL,
@@ -272,7 +272,7 @@ def test_ming_tts_offline_streaming(async_omni_engine, ming_tokenizer) -> None:
                 else:
                     audio_chunk = audio.float().detach().cpu()
             elif isinstance(audio, list):
-                audio_chunk = torch.as_tensor(audio[chunk_idx], dtype=torch.float32).reshape(-1).cpu()
+                audio_chunk = _flatten_audio(audio)
             else:
                 audio_chunk = torch.as_tensor(audio, dtype=torch.float32).reshape(-1).cpu()
             accumulated_samples += int(audio_chunk.numel())
