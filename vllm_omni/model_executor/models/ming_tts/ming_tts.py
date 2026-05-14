@@ -68,6 +68,7 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
         self.has_postprocess = False
         self.requires_raw_input_tokens = False
         self.model_stage = vllm_config.model_config.model_stage
+        self.requires_sampled_multimodal_outputs = self.model_stage == "llm"
         self._prompt_encoder = None
 
         if self.model_stage == "llm":

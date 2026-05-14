@@ -40,6 +40,7 @@ from vllm.v1.worker.utils import is_residual_scattered_for_sp
 
 from vllm_omni.data_entry_keys import flatten_payload
 from vllm_omni.distributed.omni_connectors.kv_transfer_manager import OmniKVTransferManager
+from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.outputs import OmniModelRunnerOutput
 from vllm_omni.utils.mm_outputs import build_mm_cpu, to_payload_element
 from vllm_omni.worker.gpu_model_runner import OmniGPUModelRunner
@@ -174,6 +175,45 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
         if engine_output_type == "audio" and not downstream_req_ids:
             downstream_req_ids = req_ids_output_copy
         return engine_output_type, downstream_req_ids
+
+    def _slice_multimodal_outputs_for_logits(
+        self,
+        multimodal_outputs: Any,
+        logits_indices: torch.Tensor,
+        num_tokens: int,
+    ) -> Any:
+        if not multimodal_outputs:
+            return multimodal_outputs
+
+        def _slice(value):
+            if isinstance(value, torch.Tensor):
+                if value.ndim > 0 and int(value.shape[0]) == int(num_tokens):
+                    return value[logits_indices]
+                return value
+            if isinstance(value, dict):
+                return {key: _slice(item) for key, item in value.items()}
+            if isinstance(value, list) and len(value) == int(num_tokens):
+                indices = logits_indices.detach().cpu().tolist()
+                return [value[int(index)] for index in indices]
+            return value
+
+        return _slice(multimodal_outputs)
+
+    def _build_compute_logits_input(
+        self,
+        sample_hidden_states: torch.Tensor,
+        multimodal_outputs: Any,
+        logits_indices: torch.Tensor,
+        num_tokens: int,
+    ) -> torch.Tensor | OmniOutput:
+        if getattr(self.model, "requires_sampled_multimodal_outputs", False) and multimodal_outputs:
+            return OmniOutput(
+                text_hidden_states=sample_hidden_states,
+                multimodal_outputs=self._slice_multimodal_outputs_for_logits(
+                    multimodal_outputs, logits_indices, num_tokens
+                ),
+            )
+        return sample_hidden_states
 
     def capture_model(self) -> int:
         result = super().capture_model()
@@ -599,18 +639,30 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
                     )
 
                 sample_hidden_states = hidden_states[logits_indices]
+                compute_logits_input = self._build_compute_logits_input(
+                    sample_hidden_states,
+                    multimodal_outputs,
+                    logits_indices,
+                    int(hidden_states.shape[0]),
+                )
                 # Try with sampling_metadata first; fall back to without for models that don't support it
                 try:
                     logits = self.model.compute_logits(
-                        sample_hidden_states, sampling_metadata=self.input_batch.sampling_metadata
+                        compute_logits_input, sampling_metadata=self.input_batch.sampling_metadata
                     )
                 except TypeError:
-                    logits = self.model.compute_logits(sample_hidden_states)
+                    logits = self.model.compute_logits(compute_logits_input)
             else:
                 # Rare case.
                 assert not self.is_pooling_model
 
                 sample_hidden_states = hidden_states[logits_indices]
+                compute_logits_input = self._build_compute_logits_input(
+                    sample_hidden_states,
+                    multimodal_outputs,
+                    logits_indices,
+                    int(hidden_states.shape[0]),
+                )
                 if not get_pp_group().is_last_rank:
                     all_gather_tensors = {
                         "residual": not is_residual_scattered_for_sp(self.vllm_config, num_tokens_padded)
@@ -625,10 +677,10 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
                     # Try with sampling_metadata first; fall back to without for models that don't support it
                     try:
                         logits = self.model.compute_logits(
-                            sample_hidden_states, sampling_metadata=self.input_batch.sampling_metadata
+                            compute_logits_input, sampling_metadata=self.input_batch.sampling_metadata
                         )
                     except TypeError:
-                        logits = self.model.compute_logits(sample_hidden_states)
+                        logits = self.model.compute_logits(compute_logits_input)
 
                 model_output_broadcast_data: dict[str, Any] = {}
                 if logits is not None:
