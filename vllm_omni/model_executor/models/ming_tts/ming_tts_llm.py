@@ -49,6 +49,7 @@ from .patch_emission import (
     _resolve_runtime_float,
     _resolve_runtime_int,
     _resolve_stop_probs_batch,
+    _validate_ming_decode_window,
 )
 
 logger = init_logger(__name__)
@@ -86,11 +87,6 @@ class MingLLMModel(nn.Module):
         self.stop_head.to(dtype=self.fm_dtype)
         self.spk_head.to(dtype=self.fm_dtype)
         self._pending_postprocess_updates: dict[str, dict[str, Any]] = {}
-        self._last_sample_decode_steps = None
-        self._last_sample_stop_probs = None
-        self._last_sample_max_decode_steps = None
-        self._last_sample_min_decode_steps = None
-        self._pending_sample_stop_inputs = None
         self._last_text_mode = False
 
     def embed_input_ids(
@@ -124,6 +120,11 @@ class MingLLMModel(nn.Module):
         if model_intermediate_buffer is None:
             model_intermediate_buffer = kwargs.get("runtime_additional_information")
         request_infos = _normalize_request_infos(model_intermediate_buffer)
+        _validate_ming_decode_window(
+            request_infos,
+            min_stop_step=int(self.ming_config.stop_head_min_steps),
+            default_max_decode_steps=self.ming_config.max_decode_steps,
+        )
         backbone_out = self.model(
             input_ids=input_ids,
             positions=positions,
@@ -139,10 +140,6 @@ class MingLLMModel(nn.Module):
             raise RuntimeError("Mixed Ming text/audio modes in one Stage-0 batch are unsupported.")
         if text_mode:
             self._last_text_mode = True
-            self._last_sample_decode_steps = None
-            self._last_sample_stop_probs = None
-            self._last_sample_max_decode_steps = None
-            self._last_sample_min_decode_steps = None
             return OmniOutput(
                 text_hidden_states=hidden_states,
                 multimodal_outputs={KEY_TEXT_MODE: True},
@@ -162,10 +159,6 @@ class MingLLMModel(nn.Module):
             stop_reason_code_tokens
         ) = None
         pending_updates: dict[str, dict[str, Any]] = {}
-        sampled_decode_steps: list[int] = []
-        sampled_stop_probs: list[torch.Tensor] = []
-        sampled_max_decode_steps: list[int] = []
-        sampled_min_decode_steps: list[int] = []
         cursor = 0
         any_decode = False
         for req_idx, token_count in enumerate(token_counts):
@@ -217,10 +210,6 @@ class MingLLMModel(nn.Module):
             max_decode_step_tokens[output_index : output_index + 1] = req_max_decode_steps
             min_decode_step_tokens[output_index : output_index + 1] = req_min_decode_steps
             has_patch[output_index : output_index + 1] = True
-            sampled_decode_steps.append(decode_step)
-            sampled_stop_probs.append(stop_probs.reshape(-1)[0])
-            sampled_max_decode_steps.append(req_max_decode_steps)
-            sampled_min_decode_steps.append(req_min_decode_steps)
             stop_reason, _, _, _, _ = _resolve_ming_stop_decision(
                 step=decode_step,
                 stop_prob=float(stop_probs.reshape(-1)[0].item()),
@@ -245,31 +234,9 @@ class MingLLMModel(nn.Module):
 
         self._pending_postprocess_updates = pending_updates
         if not any_decode:
-            self._last_sample_decode_steps = None
-            self._last_sample_stop_probs = None
-            self._last_sample_max_decode_steps = None
-            self._last_sample_min_decode_steps = None
             return OmniOutput(
                 text_hidden_states=hidden_states, multimodal_outputs=None, intermediate_tensors=intermediate_tensors
             )
-        self._last_sample_decode_steps = (
-            torch.tensor(sampled_decode_steps, dtype=torch.int32, device=hidden_states.device)
-            if sampled_decode_steps
-            else None
-        )
-        self._last_sample_stop_probs = (
-            torch.stack(sampled_stop_probs).to(device=hidden_states.device) if sampled_stop_probs else None
-        )
-        self._last_sample_max_decode_steps = (
-            torch.tensor(sampled_max_decode_steps, dtype=torch.int32, device=hidden_states.device)
-            if sampled_max_decode_steps
-            else None
-        )
-        self._last_sample_min_decode_steps = (
-            torch.tensor(sampled_min_decode_steps, dtype=torch.int32, device=hidden_states.device)
-            if sampled_min_decode_steps
-            else None
-        )
         return OmniOutput(
             text_hidden_states=hidden_states,
             multimodal_outputs={
@@ -303,22 +270,17 @@ class MingLLMModel(nn.Module):
             min_decode_steps_tensor = mm.get("ming_min_decode_steps")
             hidden_states = hidden_states.text_hidden_states
         if text_mode:
-            self._pending_sample_stop_inputs = None
             return (
                 None
                 if hidden_states is None or hidden_states.numel() == 0
                 else self.model.compute_logits(hidden_states)
             )
-        max_decode_steps_tensor = (
-            self._last_sample_max_decode_steps if max_decode_steps_tensor is None else max_decode_steps_tensor
-        )
-        min_decode_steps_tensor = (
-            self._last_sample_min_decode_steps if min_decode_steps_tensor is None else min_decode_steps_tensor
-        )
-        decode_steps = self._last_sample_decode_steps if decode_steps is None else decode_steps
-        stop_probs_tensor = self._last_sample_stop_probs if stop_probs_tensor is None else stop_probs_tensor
+        if max_decode_steps_tensor is None or decode_steps is None or stop_probs_tensor is None:
+            raise RuntimeError(
+                "compute_logits received plain Tensor, not OmniOutput - "
+                "multimodal decode state unavailable. Pipeline-parallel split unsupported for MingTTS."
+            )
         if hidden_states is None or hidden_states.numel() == 0:
-            self._pending_sample_stop_inputs = None
             return None
         if hidden_states.dim() != 2:
             raise RuntimeError(
@@ -354,12 +316,6 @@ class MingLLMModel(nn.Module):
                 text_eos_token_id=int(self.ming_config.text_eos_token_id),
             )
             logits[i, int(next_token_id)] = 0.0
-        self._pending_sample_stop_inputs = {
-            "steps": steps,
-            "stop_probs": stop_prob_values,
-            "max_decode_steps": max_decode_steps,
-            "min_decode_steps": min_decode_steps,
-        }
         return logits
 
     def sample(self, logits, sampling_metadata):
@@ -368,27 +324,8 @@ class MingLLMModel(nn.Module):
         if self._last_text_mode:
             return self.model.sample(logits, sampling_metadata)
         del sampling_metadata
-        stop_inputs = self._pending_sample_stop_inputs
-        self._pending_sample_stop_inputs = None
-        if stop_inputs is None:
-            return SamplerOutput(
-                sampled_token_ids=logits.argmax(dim=-1, keepdim=True).to(dtype=torch.int32), logprobs_tensors=None
-            )
-        sampled_ids = []
-        for i in range(logits.shape[0]):
-            _, _, _, _, next_token_id = _resolve_ming_stop_decision(
-                step=int(stop_inputs["steps"][i]),
-                stop_prob=float(stop_inputs["stop_probs"][i]),
-                stop_threshold=float(self.ming_config.stop_head_threshold),
-                min_stop_step=int(self.ming_config.stop_head_min_steps),
-                min_decode_steps=int(stop_inputs["min_decode_steps"][i]),
-                max_decode_steps=int(stop_inputs["max_decode_steps"][i]),
-                audio_dummy_token_id=int(self.ming_config.audio_dummy_token_id),
-                text_eos_token_id=int(self.ming_config.text_eos_token_id),
-            )
-            sampled_ids.append(next_token_id)
         return SamplerOutput(
-            sampled_token_ids=torch.tensor(sampled_ids, dtype=torch.int32, device=logits.device).reshape(-1, 1),
+            sampled_token_ids=logits.argmax(dim=-1, keepdim=True).to(dtype=torch.int32),
             logprobs_tensors=None,
         )
 

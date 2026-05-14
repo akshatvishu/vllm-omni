@@ -7,7 +7,7 @@ from typing import Any
 import torch
 from vllm.forward_context import get_forward_context, is_forward_context_available
 
-from .config_ming_tts import MingTTSConfig
+from .config_ming_tts import KEY_MAX_DECODE_STEPS, KEY_MIN_DECODE_STEPS, KEY_REQUEST_ID, MingTTSConfig
 
 MING_STOP_REASON_CONTINUE = "continue"
 MING_STOP_REASON_STOP_HEAD = "stop_head"
@@ -113,6 +113,25 @@ def _resolve_optional_runtime_int(req_info: dict[str, Any], key: str, default_va
     if value < 0:
         raise RuntimeError(f"Invalid {key}: expected non-negative value, got {value}")
     return value
+
+
+def _validate_ming_decode_window(
+    request_infos: list[dict[str, Any]],
+    *,
+    min_stop_step: int,
+    default_max_decode_steps: int,
+) -> None:
+    for i, info in enumerate(request_infos):
+        max_steps = _resolve_runtime_int(info, KEY_MAX_DECODE_STEPS, default_max_decode_steps)
+        min_steps = _resolve_optional_runtime_int(info, KEY_MIN_DECODE_STEPS, 0)
+        min_required = max(min_stop_step + 1, min_steps)
+        if max_steps < min_required:
+            req_id = info.get(KEY_REQUEST_ID, f"idx={i}")
+            raise ValueError(
+                f"Ming request {req_id!r}: max_decode_steps={max_steps} < "
+                f"min_required_decode_steps={min_required} "
+                f"(min_stop_step={min_stop_step}, min_decode_steps={min_steps})"
+            )
 
 
 def _resolve_max_decode_steps_batch(

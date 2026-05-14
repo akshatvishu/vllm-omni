@@ -13,6 +13,8 @@ from transformers import PretrainedConfig, PreTrainedModel, Qwen2Config, Qwen2Mo
 from transformers.utils import is_flash_attn_2_available
 from vllm.logger import init_logger
 
+from vllm_omni.model_executor.models.ming_utils.audio_dsp import ISTFTHead
+
 logger = init_logger(__name__)
 
 
@@ -34,101 +36,6 @@ class AudioVAEConfig(PretrainedConfig):
         self.init_method = init_method
         self.patch_size = patch_size
         super().__init__(**kwargs)
-
-
-class ISTFT(nn.Module):
-    def __init__(self, n_fft: int, hop_length: int, win_length: int, padding: str = "same"):
-        super().__init__()
-        if padding not in ["center", "same"]:
-            raise ValueError("Padding must be 'center' or 'same'.")
-        self.padding = padding
-        self.n_fft = n_fft
-        self.hop_length = hop_length
-        self.win_length = win_length
-        window = torch.hann_window(win_length)
-        self.register_buffer("window", window)
-        self.buffer_len = self.win_length - self.hop_length
-
-    def _buffer_process(self, x, buffer, pad, last_chunk=False, streaming=False):
-        if streaming:
-            if buffer is None:
-                x = x[:, pad:]
-            if buffer is not None:
-                x[:, : self.buffer_len] += buffer
-            buffer = x[:, -self.buffer_len :]
-            if not last_chunk:
-                x = x[:, : -self.buffer_len]
-            else:
-                x = x[:, :-pad]
-        else:
-            x = x[:, pad:-pad]
-        return x, buffer
-
-    def forward(self, spec, audio_buffer=None, window_buffer=None, streaming=False, last_chunk=False):
-        if self.padding == "center":
-            return torch.istft(spec, self.n_fft, self.hop_length, self.win_length, self.window, center=True)
-        elif self.padding == "same":
-            pad = (self.win_length - self.hop_length) // 2
-        else:
-            raise ValueError("Padding must be 'center' or 'same'.")
-
-        B, N, T = spec.shape
-        ifft = torch.fft.irfft(spec, self.n_fft, dim=1, norm="backward")
-        ifft = ifft * self.window[None, :, None]
-
-        output_size = (T - 1) * self.hop_length + self.win_length
-        y = torch.nn.functional.fold(
-            ifft,
-            output_size=(1, output_size),
-            kernel_size=(1, self.win_length),
-            stride=(1, self.hop_length),
-        )[:, 0, 0, :]
-
-        y, audio_buffer = self._buffer_process(y, audio_buffer, pad, last_chunk=last_chunk, streaming=streaming)
-
-        window_sq = self.window.square().expand(1, T, -1).transpose(1, 2)
-        window_envelope = (
-            torch.nn.functional.fold(
-                window_sq,
-                output_size=(1, output_size),
-                kernel_size=(1, self.win_length),
-                stride=(1, self.hop_length),
-            )
-            .squeeze(0)
-            .squeeze(0)
-        )
-
-        window_envelope, window_buffer = self._buffer_process(
-            window_envelope, window_buffer, pad, last_chunk=last_chunk, streaming=streaming
-        )
-        window_envelope = window_envelope.squeeze()
-
-        assert (window_envelope > 1e-11).all()
-        y = y / window_envelope
-
-        return y, audio_buffer, window_buffer
-
-
-class ISTFTHead(nn.Module):
-    def __init__(self, dim: int, n_fft: int, hop_length: int, padding: str = "same"):
-        super().__init__()
-        out_dim = n_fft + 2
-        self.out = nn.Linear(dim, out_dim)
-        self.istft = ISTFT(n_fft=n_fft, hop_length=hop_length, win_length=n_fft, padding=padding)
-
-    def forward(self, x, audio_buffer=None, window_buffer=None, streaming=False, last_chunk=False):
-        x_pred = self.out(x)
-        x_pred = x_pred.transpose(1, 2)
-        mag, p = x_pred.chunk(2, dim=1)
-        mag = torch.exp(mag)
-        mag = torch.clip(mag, max=1e2)
-        x = torch.cos(p)
-        y = torch.sin(p)
-        S = mag * (x + 1j * y)
-        audio, audio_buffer, window_buffer = self.istft(
-            S, audio_buffer=audio_buffer, window_buffer=window_buffer, streaming=streaming, last_chunk=last_chunk
-        )
-        return audio.unsqueeze(1), x_pred, audio_buffer, window_buffer
 
 
 class StreamingLinearUpsample(nn.Module):

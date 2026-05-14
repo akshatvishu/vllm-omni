@@ -15,9 +15,7 @@ from safetensors import safe_open
 from vllm_omni.engine.stage_init_utils import _resolve_model_to_local_path
 from vllm_omni.model_executor.models.ming_flash_omni.prompt_utils import (
     DEFAULT_PROMPT,
-)
-from vllm_omni.model_executor.models.ming_flash_omni.prompt_utils import (
-    create_instruction as _create_ming_instruction,
+    create_instruction,
 )
 
 from .audio_tokenizer.modeling_audio_vae import AudioVAE
@@ -40,16 +38,6 @@ from .config_ming_tts import (
 )
 
 _DURATION_SECONDS_RE = re.compile(r"Duration:\s*([0-9]+(?:\.[0-9]+)?)\s*s\b", re.IGNORECASE)
-
-
-def create_instruction(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    if not isinstance(value, dict):
-        raise ValueError(f"Ming instruction must be str or dict, got {type(value).__name__}")
-    return _create_ming_instruction(value)
 
 
 def parse_duration_seconds(text: str | None) -> float | None:
