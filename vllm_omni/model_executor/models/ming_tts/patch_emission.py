@@ -7,7 +7,7 @@ from typing import Any
 import torch
 from vllm.forward_context import get_forward_context, is_forward_context_available
 
-from .config_ming_tts import KEY_MAX_DECODE_STEPS, KEY_MIN_DECODE_STEPS, KEY_REQUEST_ID, MingTTSConfig
+from .config_ming_tts import KEY_MAX_DECODE_STEPS, KEY_MIN_DECODE_STEPS, KEY_REQUEST_ID, KEY_TEXT_MODE, MingTTSConfig
 
 MING_STOP_REASON_CONTINUE = "continue"
 MING_STOP_REASON_STOP_HEAD = "stop_head"
@@ -122,6 +122,8 @@ def _validate_ming_decode_window(
     default_max_decode_steps: int,
 ) -> None:
     for i, info in enumerate(request_infos):
+        if info.get(KEY_TEXT_MODE):
+            continue
         max_steps = _resolve_runtime_int(info, KEY_MAX_DECODE_STEPS, default_max_decode_steps)
         min_steps = _resolve_optional_runtime_int(info, KEY_MIN_DECODE_STEPS, 0)
         min_required = max(min_stop_step + 1, min_steps)
