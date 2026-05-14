@@ -275,11 +275,6 @@ class MingLLMModel(nn.Module):
                 if hidden_states is None or hidden_states.numel() == 0
                 else self.model.compute_logits(hidden_states)
             )
-        if max_decode_steps_tensor is None or decode_steps is None or stop_probs_tensor is None:
-            raise RuntimeError(
-                "compute_logits received plain Tensor, not OmniOutput - "
-                "multimodal decode state unavailable. Pipeline-parallel split unsupported for MingTTS."
-            )
         if hidden_states is None or hidden_states.numel() == 0:
             return None
         if hidden_states.dim() != 2:
