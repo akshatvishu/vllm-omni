@@ -510,6 +510,8 @@ class GlmImagePipeline(nn.Module, DiffusionPipelineProfilerMixin):
         # Enable CFG-parallel: rank0 computes positive, rank1 computes negative
         cfg_parallel_ready = do_classifier_free_guidance and get_classifier_free_guidance_world_size() > 1
 
+        self.transformer.do_true_cfg = do_classifier_free_guidance
+
         for i, t in enumerate(timesteps):
             latent_model_input = latents.to(transformer_dtype)
             timestep = t.expand(latents.shape[0]) - 1
