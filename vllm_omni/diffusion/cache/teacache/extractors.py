@@ -412,25 +412,22 @@ def extract_glmimage_context(
         raise ValueError("Module must contain transformer_blocks.")
 
     device = hidden_states.device
-    dtype = hidden_states.dtype
     return_dict = kwargs.get("return_dict", True)
 
-    orig_batch, orig_c, orig_h, orig_w = hidden_states.shape
-
-    if image_rotary_emb is None:
-        image_rotary_emb = module.rope(hidden_states)
-        image_rotary_emb = (
-            image_rotary_emb[0].to(device),
-            image_rotary_emb[1].to(device),
-        )
-
-    hidden_states = module.image_projector(hidden_states)
+    orig_batch = hidden_states.shape[0]
     encoder_hidden_states = module.glyph_projector(encoder_hidden_states)
 
     prior_embedding = module.prior_token_embedding(prior_token_id).clone()
     prior_embedding[prior_token_drop] *= 0.0
     prior_hidden_states = module.prior_projector(prior_embedding)
-    hidden_states = hidden_states + prior_hidden_states
+
+    hidden_states, rope_cos, rope_sin, post_patch_height_t, post_patch_width_t = module.prepare(
+        hidden_states,
+        prior_hidden_states,
+    )
+    if image_rotary_emb is None:
+        image_rotary_emb = (rope_cos, rope_sin)
+    dtype = hidden_states.dtype
 
     target_size = target_size.to(device)
     crop_coords = crop_coords.to(device)
@@ -442,6 +439,25 @@ def extract_glmimage_context(
         crop_coords,
         dtype,
     )
+
+    hidden_states_mask = None
+    sp_size = getattr(getattr(module, "parallel_config", None), "sequence_parallel_size", None)
+    if sp_size is not None and sp_size > 1:
+        from vllm_omni.diffusion.forward_context import is_forward_context_available
+
+        if is_forward_context_available():
+            ctx = get_forward_context()
+            if ctx.sp_original_seq_len is not None and ctx.sp_padding_size > 0:
+                padded_seq_len = ctx.sp_original_seq_len + ctx.sp_padding_size
+                hidden_states_mask = torch.ones(
+                    orig_batch,
+                    padded_seq_len,
+                    dtype=torch.bool,
+                    device=hidden_states.device,
+                )
+                hidden_states_mask[:, ctx.sp_original_seq_len :] = False
+                if hidden_states_mask.all():
+                    hidden_states_mask = None
 
     first_block = module.transformer_blocks[0]
 
@@ -479,6 +495,7 @@ def extract_glmimage_context(
                 attention_kwargs=attention_kwargs,
                 kv_cache=layer_kv_cache,
                 kv_cache_mode=kv_cache_mode,
+                hidden_states_mask=hidden_states_mask,
             )
 
         return (h, e)
@@ -487,11 +504,11 @@ def extract_glmimage_context(
         h = module.norm_out(h, temb)
         h = module.proj_out(h)
 
-        # Reconstruct spatial layout from patch tokens using original latent shape.
+        # Reconstruct spatial layout from patch tokens using the prepare() shape.
         # Mirrors GlmImageTransformer2DModel.forward() unpatchify logic.
         p = module.patch_size
-        post_patch_height = orig_h // p
-        post_patch_width = orig_w // p
+        post_patch_height = int(post_patch_height_t.item())
+        post_patch_width = int(post_patch_width_t.item())
 
         h = h.reshape(orig_batch, post_patch_height, post_patch_width, -1, p, p)
         output = h.permute(0, 3, 1, 4, 2, 5).flatten(4, 5).flatten(2, 3)

@@ -666,6 +666,12 @@ class GlmImagePipeline(nn.Module, DiffusionPipelineProfilerMixin):
                 return_dict=False,
             )
 
+        if hasattr(self.transformer, "_hook_registry"):
+            from vllm_omni.diffusion.cache.teacache.hook import TeaCacheHook
+
+            if self.transformer._hook_registry.get_hook(TeaCacheHook._HOOK_NAME) is not None:
+                self.transformer._hook_registry.reset_hook(TeaCacheHook._HOOK_NAME)
+
         return kv_caches
 
     @torch.inference_mode()
