@@ -144,6 +144,8 @@ def test_build_add_request_message_uses_ingress_processed_prompt_for_additional_
     assert call_kwargs["parent_req"] is None
     assert call_kwargs["request_index"] == 0
     assert call_kwargs["queue"] is None
+
+
 class _FakeStageClient:
     stage_type = "llm"
     final_output = False

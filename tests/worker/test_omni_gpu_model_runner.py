@@ -392,6 +392,8 @@ def test_update_additional_information_uses_legacy_additional_information():
     info = runner.model_intermediate_buffer["r1"]
     assert info["new_field"] == 1
     assert info["cached_field"] == 3
+
+
 def test_maybe_run_batch_preprocess_calls_model_hook():
     runner = object.__new__(OmniGPUModelRunner)
     runner.model_intermediate_buffer = {"r1": {"text": ["hello"]}}

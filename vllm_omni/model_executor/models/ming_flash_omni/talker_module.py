@@ -30,7 +30,7 @@ import torch.nn as nn
 from transformers import PreTrainedTokenizerBase, Qwen2Config, Qwen2Model, StaticCache
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
-from x_transformers.x_transformers import RotaryEmbedding, apply_rotary_pos_emb
+from x_transformers.x_transformers import RotaryEmbedding
 
 from vllm_omni.model_executor.layers.timestep_embedding import DiTTimestepEmbedding
 from vllm_omni.model_executor.models.ming_utils.dit import CondEmbedder, DiTBlock, FinalLayer, get_epss_timesteps
