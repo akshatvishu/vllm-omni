@@ -193,9 +193,8 @@ class FinalLayer(nn.Module):
 
 
 class CondEmbedder(nn.Module):
-    def __init__(self, input_feature_size, hidden_size, dropout_prob=None):
+    def __init__(self, input_feature_size, hidden_size):
         super().__init__()
-        del dropout_prob
         self.cond_embedder = nn.Linear(input_feature_size, hidden_size)
 
     def forward(self, llm_cond):

@@ -52,7 +52,6 @@ class DiT(nn.Module):
         num_heads=16,
         mlp_ratio=4.0,
         llm_cond_dim=896,
-        cfg_dropout_prob=0.1,
         **kwargs,
     ):
         super().__init__()
@@ -62,7 +61,7 @@ class DiT(nn.Module):
         self.num_heads = num_heads
         self.t_embedder = TimestepEmbedder(hidden_size)
         self.x_embedder = nn.Linear(in_channels, hidden_size)
-        self.c_embedder = CondEmbedder(llm_cond_dim, hidden_size, cfg_dropout_prob)
+        self.c_embedder = CondEmbedder(llm_cond_dim, hidden_size)
         self.hidden_size = hidden_size
         self.rotary_embed = RotaryEmbedding(hidden_size // num_heads)
         self.blocks = nn.ModuleList(
