@@ -45,7 +45,7 @@ async_chunk_params = [
 
 def get_prompt(prompt_type="zh"):
     prompts = {
-        "zh": "我会一直在这里陪着你，直到你慢慢地沉入那个最温柔的梦里。",
+        "zh": "今天天气真不错，适合出去散散步。",
         "zh_short": "这款产品的名字，叫变态坑爹牛肉丸。",
     }
     return prompts.get(prompt_type, prompts["zh"])
