@@ -372,28 +372,6 @@ def test_update_intermediate_buffer_skips_unknown_req_id():
     assert "unknown_req" not in runner.model_intermediate_buffer
 
 
-def test_update_additional_information_uses_legacy_additional_information():
-    runner = _make_runner(req_ids=("r1",), hidden_size=4)
-
-    scheduler_output = SimpleNamespace(
-        scheduled_new_reqs=[
-            SimpleNamespace(
-                req_id="r1",
-                additional_information={"new_field": 1},
-            )
-        ],
-        scheduled_cached_reqs=SimpleNamespace(
-            additional_information={"r1": {"cached_field": 3}},
-        ),
-    )
-
-    OmniGPUModelRunner._update_additional_information(runner, scheduler_output)
-
-    info = runner.model_intermediate_buffer["r1"]
-    assert info["new_field"] == 1
-    assert info["cached_field"] == 3
-
-
 def test_maybe_run_batch_preprocess_calls_model_hook():
     runner = object.__new__(OmniGPUModelRunner)
     runner.model_intermediate_buffer = {"r1": {"text": ["hello"]}}

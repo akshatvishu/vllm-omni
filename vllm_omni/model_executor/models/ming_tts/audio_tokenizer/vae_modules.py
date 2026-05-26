@@ -6,9 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import Qwen2Config, Qwen2Model
 
+from vllm_omni.model_executor.models.ming_utils.audio_dsp import ISTFTHead
 from vllm_omni.model_executor.models.ming_utils.audio_vae import StreamingLinearUpsample
-
-from .istft import ISTFTHead
 
 
 class Encoder(nn.Module):
