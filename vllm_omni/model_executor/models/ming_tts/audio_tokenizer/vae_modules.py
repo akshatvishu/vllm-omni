@@ -6,67 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import Qwen2Config, Qwen2Model
 
+from vllm_omni.model_executor.models.ming_utils.audio_vae import StreamingLinearUpsample
+
 from .istft import ISTFTHead
-
-
-class StreamingLinearUpsample(nn.Module):
-    def __init__(self, scale_factor=4):
-        super().__init__()
-        self.scale_factor = scale_factor
-        self.upsampler = nn.Upsample(scale_factor=scale_factor, mode="linear", align_corners=False)
-
-    def forward(self, x, state=None, is_last=False):
-        if x is None and is_last and (state is None or state.get("prev_chunk") is None):
-            raise ValueError("Received end-of-stream without any latent chunk to upsample.")
-        # 初始化状态
-        if state is None:
-            state = {"prev_chunk": None, "history_last": None, "is_first": True}
-
-        if x is None and not is_last:
-            return None, state
-
-        if state["is_first"] and is_last:
-            out = self.upsampler(x.transpose(1, 2)).transpose(1, 2)
-            return out, None  # 结束后清除状态
-
-        output_chunks = []
-
-        if state["is_first"]:
-            state["prev_chunk"] = x
-            state["is_first"] = False
-            if not is_last:
-                return None, state
-
-        if state["prev_chunk"] is not None:
-            p = state["prev_chunk"].transpose(1, 2)
-
-            if state["history_last"] is None:
-                lookahead = x[:, :1, :].transpose(1, 2)
-                inp = torch.cat([p, lookahead], dim=2)
-                up = self.upsampler(inp)
-                out_prev = up[:, :, : p.size(2) * self.scale_factor]
-            else:
-                lookahead = x[:, :1, :].transpose(1, 2)
-                inp = torch.cat([state["history_last"], p, lookahead], dim=2)
-                up = self.upsampler(inp)
-                start = self.scale_factor
-                end = start + p.size(2) * self.scale_factor
-                out_prev = up[:, :, start:end]
-
-            output_chunks.append(out_prev.transpose(1, 2))
-            state["history_last"] = p[:, :, -1:]
-            state["prev_chunk"] = x
-
-        if is_last:
-            p = state["prev_chunk"].transpose(1, 2)
-            inp = torch.cat([state["history_last"], p], dim=2)
-            up = self.upsampler(inp)
-            out_last = up[:, :, self.scale_factor :]
-            output_chunks.append(out_last.transpose(1, 2))
-            state = None  # 结束
-
-        final_out = torch.cat(output_chunks, dim=1) if output_chunks else None
-        return final_out, state
 
 
 class Encoder(nn.Module):
@@ -130,21 +72,13 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, decoder_args, output_dim=320, latent_dim=64, semantic_model=None, patch_size=-1):
+    def __init__(self, decoder_args, output_dim=320, latent_dim=64, patch_size=-1):
         super().__init__()
         config = Qwen2Config.from_dict(config_dict=decoder_args)
         self.decoder = Qwen2Model(config)
         self.output_dim = output_dim
         self.latent_dim = latent_dim
         self.fc1 = nn.Linear(latent_dim, config.hidden_size)
-
-        if semantic_model is not None:
-            self.gelu = nn.GELU()
-            self.fc2 = nn.Linear(config.hidden_size, semantic_model.audio_emb_dim)
-            self.semantic_model = semantic_model
-            self.fc3 = nn.Linear(semantic_model.audio_emb_dim, config.hidden_size)
-        else:
-            self.semantic_model = None
 
         self.hop_length = output_dim
         self.head = ISTFTHead(
@@ -154,20 +88,8 @@ class Decoder(nn.Module):
         if self.patch_size != -1:
             self.upsampling = StreamingLinearUpsample(scale_factor=patch_size)
 
-    def forward(self, x, only_semantic_emb=False, past_key_values=None, use_cache=False):
+    def forward(self, x):
         x = self.fc1(x)
-
-        if self.semantic_model is not None:
-            x = self.fc2(self.gelu(x))
-            x, past_key_values = self.semantic_model(
-                whisper_feats=x, past_key_values=past_key_values, use_cache=use_cache
-            )
-            unified_emb = x
-            if only_semantic_emb:
-                return unified_emb, past_key_values
-            x = self.fc3(x)
-        else:
-            unified_emb = None
 
         if self.patch_size != -1:
             x = self.upsampling(x.transpose(1, 2)).transpose(1, 2)
@@ -177,7 +99,7 @@ class Decoder(nn.Module):
 
         x, _ = self.head(x)
 
-        return x, unified_emb
+        return x, None
 
     def low_level_reconstruct(self, x, past_key_values=None, use_cache=False, stream_state=None, last_chunk=False):
         # Guard against None on first chunk (connector initialises per-request)

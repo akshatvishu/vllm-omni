@@ -6,8 +6,7 @@ import torch
 import torch.nn as nn
 from x_transformers.x_transformers import RotaryEmbedding
 
-from .config_ming_tts import MingTTSConfig
-from .fm.modules import DiTBlock, FinalLayer
+from vllm_omni.model_executor.models.ming_utils.dit import DiTBlock, FinalLayer
 
 
 class Aggregator(nn.Module):
@@ -64,13 +63,4 @@ class Aggregator(nn.Module):
         return x[:, :1, :]
 
 
-def build_ming_aggregator(cfg: MingTTSConfig) -> Aggregator:
-    """Build the Ming Stage-1 latent patch projector from the parsed config."""
-    return Aggregator(
-        in_channels=cfg.latent_dim,
-        llm_input_dim=cfg.llm_hidden_size,
-        **cfg.aggregator_config,
-    )
-
-
-__all__ = ["Aggregator", "build_ming_aggregator"]
+__all__ = ["Aggregator"]

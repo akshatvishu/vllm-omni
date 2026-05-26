@@ -38,28 +38,20 @@ def _to_plain_dict(obj: Any) -> dict[str, Any]:
 
 
 def _coerce_audio_vae_config(atc_raw: Any) -> AudioVAEconfig | None:
-    """
-    Normalize audio_tokenizer_config into AudioVAEconfig when possible.
-    Handles:
-      - already AudioVAEconfig
-      - dict
-      - PretrainedConfig-like object
-    """
     if atc_raw is None:
         return None
-    atc_dict = _to_plain_dict(atc_raw)
-    if not atc_dict:
+    if isinstance(atc_raw, AudioVAEconfig):
         return atc_raw
+    if isinstance(atc_raw, PretrainedConfig):
+        atc_dict = atc_raw.to_dict()
+    elif isinstance(atc_raw, dict):
+        atc_dict = dict(atc_raw)
+    elif hasattr(atc_raw, "to_dict") and callable(atc_raw.to_dict):
+        atc_dict = dict(atc_raw.to_dict())
+    else:
+        raise TypeError(f"Unsupported audio_tokenizer_config type for Ming dense config: {type(atc_raw)!r}")
 
-    if hasattr(AudioVAEconfig, "from_dict") and callable(getattr(AudioVAEconfig, "from_dict")):
-        try:
-            return AudioVAEconfig.from_dict(atc_dict)
-        except Exception:
-            pass
-    try:
-        return AudioVAEconfig(**atc_dict)
-    except Exception:
-        return atc_raw
+    return AudioVAEconfig(**atc_dict)
 
 
 def _nested_get(obj: Any, *keys: str, default: Any = None) -> Any:

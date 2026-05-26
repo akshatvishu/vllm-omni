@@ -171,7 +171,3 @@ class MingIngressProcessor:
                 elapsed_ms,
             )
         return finalized_prompt
-
-
-def build_ming_ingress_processor(*, vllm_config: Any, tokenizer: Any) -> MingIngressProcessor:
-    return MingIngressProcessor(vllm_config=vllm_config, tokenizer=tokenizer)

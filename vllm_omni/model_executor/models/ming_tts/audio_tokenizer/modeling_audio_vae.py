@@ -88,19 +88,13 @@ class AudioVAE(nn.Module):
             patch_size=config.patch_size,
         )
 
-        # Semantic module is null for this checkpoint.
         if config.semantic_module_kwargs is not None:
-            from .audio_encoder import WhisperAudioEncoder
-
-            semantic_model = WhisperAudioEncoder.from_pretrained(dims=config.semantic_module_kwargs["whisper_encoder"])
-        else:
-            semantic_model = None
+            raise ValueError("Ming dense 0.5B expects semantic_module_kwargs to be null.")
 
         self.decoder = Decoder(
             decoder_args=dec_kwargs["backbone"],  # IMPORTANT: decoder uses dec_kwargs.backbone
             output_dim=dec_kwargs["output_dim"],  # Ming checkpoint uses 882
             latent_dim=dec_kwargs["latent_dim"],
-            semantic_model=semantic_model,
             patch_size=config.patch_size,
         )
 

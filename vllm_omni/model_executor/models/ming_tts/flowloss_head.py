@@ -17,9 +17,6 @@ class FlowLoss(nn.Module):
         self.z_channels = z_channels
         self.cfm = CFM(model=DiT(in_channels=z_channels, llm_cond_dim=llm_cond_dim, **kwargs))
 
-    def forward(self, cond, target, latent_history, mask, patch_size):
-        return self.cfm(cond=cond, target=target, latent_history=latent_history, mask=mask, patch_size=patch_size)
-
     def sample(self, z, latent_history, cfg=2.0, patch_size=1, sigma=0.25, temperature=0):
         if z.ndim != 3:
             raise ValueError(f"Expected z rank-3 [Batch, Time, Dimension], got {tuple(z.shape)}")

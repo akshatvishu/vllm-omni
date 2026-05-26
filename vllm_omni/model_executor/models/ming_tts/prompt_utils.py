@@ -21,14 +21,11 @@ from vllm_omni.model_executor.models.ming_flash_omni.prompt_utils import (
 from .audio_tokenizer.modeling_audio_vae import AudioVAE
 from .config_ming_tts import (
     AUDIO_FRAME_HOP,
-    KEY_CFG,
     KEY_MAX_DECODE_STEPS,
     KEY_MIN_DECODE_STEPS,
     KEY_PROMPT_LATENTS,
     KEY_REQUEST_ID,
-    KEY_SIGMA,
     KEY_SPEAKER_EMBEDDING,
-    KEY_TEMPERATURE,
     LATENT_DIM,
     PATCH_SIZE,
     SAMPLE_RATE,
@@ -342,28 +339,6 @@ def build_ming_dense_prompt(
     }
 
 
-def build_runtime_controls(
-    *,
-    cfg: float | None = None,
-    sigma: float | None = None,
-    temperature: float | None = None,
-    min_decode_steps: int | None = None,
-    max_decode_steps: int | None = None,
-) -> dict[str, torch.Tensor]:
-    controls = {}
-    if cfg is not None:
-        controls[KEY_CFG] = torch.tensor(float(cfg), dtype=torch.float32)
-    if sigma is not None:
-        controls[KEY_SIGMA] = torch.tensor(float(sigma), dtype=torch.float32)
-    if temperature is not None:
-        controls[KEY_TEMPERATURE] = torch.tensor(float(temperature), dtype=torch.float32)
-    if min_decode_steps is not None:
-        controls[KEY_MIN_DECODE_STEPS] = torch.tensor(int(min_decode_steps), dtype=torch.int32)
-    if max_decode_steps is not None:
-        controls[KEY_MAX_DECODE_STEPS] = torch.tensor(int(max_decode_steps), dtype=torch.int32)
-    return controls
-
-
 def _resolve_prompt_latents(wrapper: Any, info_dict: dict[str, Any]) -> dict[str, torch.Tensor] | None:
     raw_latents = info_dict.get(KEY_PROMPT_LATENTS, info_dict.get("prompt_latents"))
     raw_waveform = info_dict.get("prompt_waveform", info_dict.get("prompt_waveforms"))
@@ -616,7 +591,6 @@ __all__ = [
     "DEFAULT_PROMPT",
     "build_dense_prompt_token_ids",
     "build_ming_dense_prompt",
-    "build_runtime_controls",
     "coerce_prompt_waveform",
     "coerce_speaker_embeddings",
     "count_prompt_latent_patches",

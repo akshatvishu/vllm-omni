@@ -187,7 +187,6 @@ class ISTFTHead(FourierHead):
             Audio, predicted spectrogram coefficients, and streaming buffers.
         """
         x_pred = self.out(x)
-        # x_pred = x
         x_pred = x_pred.transpose(1, 2)
         mag, p = x_pred.chunk(2, dim=1)
         mag = torch.exp(mag)

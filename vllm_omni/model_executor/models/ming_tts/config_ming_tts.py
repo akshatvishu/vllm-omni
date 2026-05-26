@@ -18,7 +18,6 @@ from .constants import (
     DEFAULT_CFG,
     DEFAULT_SIGMA,
     DEFAULT_TEMPERATURE,
-    EOS_TOKEN_ID,
     HISTORY_PATCH_SIZE,
     KEY_CFG,
     KEY_CHUNK_ID,
@@ -41,7 +40,6 @@ from .constants import (
     LLM_HIDDEN_SIZE,
     LLM_VOCAB_SIZE,
     MAX_DECODE_STEPS,
-    PAD_TOKEN_ID,
     PATCH_SIZE,
     SAMPLE_RATE,
     STOP_HEAD_MIN_STEPS,
@@ -63,21 +61,6 @@ def _coerce_qwen2_config(value: Any) -> Qwen2Config:
     raise TypeError(f"Unsupported llm_config type for Ming dense config: {type(value)!r}")
 
 
-def _coerce_ming_dense_audio_vae_config(value: Any) -> AudioVAEconfig | None:
-    if value is None:
-        return None
-    if isinstance(value, AudioVAEconfig):
-        value = value.to_dict()
-    elif isinstance(value, PretrainedConfig):
-        value = value.to_dict()
-    elif isinstance(value, dict):
-        value = dict(value)
-    else:
-        raise TypeError(f"Unsupported audio_tokenizer_config type for Ming dense config: {type(value)!r}")
-
-    return AudioVAEconfig(**value)
-
-
 class MingDenseConfig(PretrainedConfig):
     model_type = "dense"
 
@@ -93,7 +76,7 @@ class MingDenseConfig(PretrainedConfig):
         self.llm_config = _coerce_qwen2_config(llm_config or {})
         self.ditar_config = dict(ditar_config or {})
         self.aggregator_config = dict(aggregator_config or {})
-        self.audio_tokenizer_config = _coerce_ming_dense_audio_vae_config(audio_tokenizer_config)
+        self.audio_tokenizer_config = _coerce_audio_vae_config(audio_tokenizer_config)
         super().__init__(architectures=architectures, **kwargs)
 
     def get_text_config(self, decoder: bool = False, **kwargs: Any) -> Qwen2Config:
@@ -132,8 +115,6 @@ class MingTTSConfig:
     latent_left_context: int = LATENT_LEFT_CONTEXT
 
     text_eos_token_id: int = TEXT_EOS_TOKEN_ID
-    eos_token_id: int = EOS_TOKEN_ID
-    pad_token_id: int = PAD_TOKEN_ID
     audio_dummy_token_id: int = AUDIO_DUMMY_TOKEN_ID
     audio_start_token_id: int = AUDIO_START_TOKEN_ID
     audio_end_token_id: int = AUDIO_END_TOKEN_ID
@@ -156,9 +137,7 @@ class MingTTSConfig:
         atc_patch_size = _nested_get(atc, "patch_size", default=VAE_PATCH_SIZE)
         atc_sample_rate = _nested_get(atc, "sample_rate", default=SAMPLE_RATE)
 
-        enc_input_dim = _nested_get(atc, "enc_kwargs", "input_dim", default=AUDIO_FRAME_HOP)
         enc_hop_size = _nested_get(atc, "enc_kwargs", "hop_size", default=AUDIO_FRAME_HOP)
-        dec_output_dim = _nested_get(atc, "dec_kwargs", "output_dim", default=AUDIO_FRAME_HOP)
 
         cfg = cls(
             llm_hidden_size=llm_dict.get("hidden_size", LLM_HIDDEN_SIZE),
@@ -174,31 +153,10 @@ class MingTTSConfig:
             sample_rate=atc_sample_rate,
             audio_frame_hop=enc_hop_size if enc_hop_size is not None else AUDIO_FRAME_HOP,
         )
-        cfg._enc_input_dim = enc_input_dim
-        cfg._enc_hop_size = enc_hop_size
-        cfg._dec_output_dim = dec_output_dim
         return cfg
 
     def validate(self) -> None:
         validate_ming_tts_config(self)
-
-    def make_qwen2_config(self) -> Qwen2Config:
-        """Reconstruct Qwen2Config for Stage-1 LLM backbone init."""
-        if not self.llm_config:
-            raise ValueError("llm_config is empty; from_hf_config() failed to parse nested llm_config.")
-        return Qwen2Config.from_dict(self.llm_config)
-
-    @property
-    def latent_patch_shape(self) -> tuple[int, int]:
-        return (self.patch_size, self.latent_dim)
-
-    @property
-    def chunk_frames(self) -> int:
-        return self.latent_chunk_size * self.patch_size
-
-    @property
-    def approx_chunk_seconds(self) -> float:
-        return (self.chunk_frames * self.audio_frame_hop) / float(self.sample_rate)
 
 
 __all__ = [
@@ -211,7 +169,6 @@ __all__ = [
     "DEFAULT_CFG",
     "DEFAULT_SIGMA",
     "DEFAULT_TEMPERATURE",
-    "EOS_TOKEN_ID",
     "HISTORY_PATCH_SIZE",
     "KEY_CFG",
     "KEY_CHUNK_ID",
@@ -236,7 +193,6 @@ __all__ = [
     "MAX_DECODE_STEPS",
     "MingDenseConfig",
     "MingTTSConfig",
-    "PAD_TOKEN_ID",
     "PATCH_SIZE",
     "SAMPLE_RATE",
     "STOP_HEAD_MIN_STEPS",

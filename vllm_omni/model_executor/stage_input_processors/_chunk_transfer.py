@@ -36,16 +36,3 @@ def get_request_payload_store(transfer_manager: Any) -> dict[str, Any]:
         request_payload = {}
         transfer_manager.request_payload = request_payload
     return request_payload
-
-
-def get_initial_codec_chunk_frames(request: Any) -> int | None:
-    additional_information = getattr(request, "additional_information", None)
-    if additional_information is None or not hasattr(additional_information, "entries"):
-        return None
-    if "initial_codec_chunk_frames" not in additional_information.entries:
-        return None
-
-    entry = additional_information.entries["initial_codec_chunk_frames"]
-    if entry.list_data is None or len(entry.list_data) != 1:
-        return None
-    return int(entry.list_data[0])

@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from x_transformers.x_transformers import RotaryEmbedding
 
-from .modules import DiTBlock, FinalLayer
+from vllm_omni.model_executor.models.ming_utils.dit import CondEmbedder, DiTBlock, FinalLayer
 
 
 class SinusPositionEmbedding(nn.Module):
@@ -41,20 +41,6 @@ class TimestepEmbedder(nn.Module):
         time_hidden = time_hidden.to(timestep.dtype)
         time = self.time_mlp(time_hidden)  # b d
         return time
-
-
-class CondEmbedder(nn.Module):
-    def __init__(self, input_feature_size, hidden_size, dropout_prob):
-        super().__init__()
-        del dropout_prob
-        self.cond_embedder = nn.Linear(input_feature_size, hidden_size)
-
-    def forward(self, llm_cond):
-        if llm_cond.ndim != 3:
-            raise ValueError(f"Expected conditioning rank-3 [Batch, Time, Dimension], got {tuple(llm_cond.shape)}")
-        llm_cond = self.cond_embedder(llm_cond)
-
-        return llm_cond
 
 
 class DiT(nn.Module):
@@ -135,8 +121,6 @@ class DiT(nn.Module):
         return x
 
     def forward_with_cfg(self, x, t, c, cfg_scale, latent_history, patch_size):
-        if patch_size <= 0:
-            raise ValueError(f"patch_size must be positive, got {patch_size}")
         if not cfg_scale == 1:
             x = torch.cat([x, x], dim=0)
             latent_history = torch.cat([latent_history, latent_history], dim=0)

@@ -13,10 +13,6 @@ AUDIO_EOS_TOKEN_ID = 151704  # <end_of_audio>
 VISION_START_TOKEN_ID = 151652  # <|vision_start|>
 
 TEXT_EOS_TOKEN_ID = 151669  # <text_eos>
-PAD_TOKEN_ID = 151643  # <|endoftext|>
-
-# Backward-compat alias for older code paths
-EOS_TOKEN_ID = TEXT_EOS_TOKEN_ID
 
 
 # ---------------------------------------------------------------------------

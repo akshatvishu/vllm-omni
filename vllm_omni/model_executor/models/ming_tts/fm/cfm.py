@@ -6,6 +6,8 @@
 import torch
 from torch import nn
 
+from vllm_omni.model_executor.models.ming_utils.dit import get_epss_timesteps
+
 
 class Solver:
     def __init__(self, func, y0, sigma=0.25, temperature=1.5) -> None:
@@ -45,22 +47,6 @@ class Solver:
         return y0 + slope * (y1 - y0)
 
 
-def get_epss_timesteps(n, device, dtype):
-    dt = 1 / 32
-    predefined_timesteps = {
-        5: [0, 2, 4, 8, 16, 32],
-        6: [0, 2, 4, 6, 8, 16, 32],
-        7: [0, 2, 4, 6, 8, 16, 24, 32],
-        10: [0, 2, 4, 6, 8, 12, 16, 20, 24, 28, 32],
-        12: [0, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32],
-        16: [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32],
-    }
-    t = predefined_timesteps.get(n, [])
-    if not t:
-        return torch.linspace(0, 1, n + 1, device=device, dtype=dtype)
-    return dt * torch.tensor(t, device=device, dtype=dtype)
-
-
 class CFM(nn.Module):
     def __init__(
         self,
@@ -89,8 +75,6 @@ class CFM(nn.Module):
     ):
         if steps <= 0:
             raise ValueError(f"steps must be positive, got {steps}")
-        if patch_size <= 0:
-            raise ValueError(f"patch_size must be positive, got {patch_size}")
         if noise.ndim != 3:
             raise ValueError(f"Expected noise rank-3 [Batch, Dimension, Time], got {tuple(noise.shape)}")
         if c.ndim != 3:
@@ -132,12 +116,10 @@ class CFM(nn.Module):
             return pred + (pred - null_pred) * cfg_scale
 
         y0 = noise.transpose(1, 2)
-        t_start = 0
-
-        if t_start == 0 and use_epss:  # use Empirically Pruned Step Sampling for low NFE
+        if use_epss:
             t = get_epss_timesteps(steps, device=self.device, dtype=noise.dtype)
         else:
-            t = torch.linspace(t_start, 1, steps + 1, device=self.device, dtype=noise.dtype)
+            t = torch.linspace(0, 1, steps + 1, device=self.device, dtype=noise.dtype)
         if sway_sampling_coef is not None:
             t = t + sway_sampling_coef * (torch.cos(torch.pi / 2 * t) - 1 + t)
 
