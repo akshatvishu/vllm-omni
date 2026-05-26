@@ -79,10 +79,8 @@ def pad_prompt_waveform(
     *,
     patch_size: int = PATCH_SIZE,
     sample_rate: int = SAMPLE_RATE,
-    frame_hop: int = AUDIO_FRAME_HOP,
 ) -> torch.Tensor:
     tensor = coerce_prompt_waveform(waveform)
-    del frame_hop
     pad_align = int((float(sample_rate) / 12.5) * int(patch_size))
     new_len = ((int(tensor.shape[-1]) + pad_align - 1) // pad_align) * pad_align
     if new_len == int(tensor.shape[-1]):
@@ -177,7 +175,7 @@ def count_prompt_waveform_patches(
 ) -> int:
     if value is None:
         return 0
-    waveform = pad_prompt_waveform(value, patch_size=patch_size, frame_hop=frame_hop)
+    waveform = pad_prompt_waveform(value, patch_size=patch_size)
     frame_count = int(math.ceil(float(waveform.shape[-1]) / float(frame_hop)))
     latent_frames = int(math.ceil(float(frame_count) / float(vae_patch_size)))
     if latent_frames % int(patch_size) != 0:
@@ -429,7 +427,6 @@ def _encode_prompt_waveform_to_latents(wrapper: Any, waveform: Any, waveform_len
         waveform,
         patch_size=wrapper.ming_config.patch_size,
         sample_rate=wrapper.ming_config.sample_rate,
-        frame_hop=wrapper.ming_config.audio_frame_hop,
     )
     dev = next(encoder.encoder.parameters()).device
     waveform = waveform.to(device=dev, dtype=next(encoder.encoder.parameters()).dtype)

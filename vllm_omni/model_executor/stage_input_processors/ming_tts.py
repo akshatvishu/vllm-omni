@@ -17,6 +17,10 @@ from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
     LATENT_LEFT_CONTEXT,
     PATCH_SIZE,
 )
+from vllm_omni.model_executor.models.ming_tts.patch_emission import (
+    MING_STOP_REASON_CODES,
+    MING_STOP_REASON_KEY,
+)
 from vllm_omni.model_executor.stage_input_processors._chunk_transfer import (
     get_chunk_config_int,
     get_request_payload_store,
@@ -29,13 +33,8 @@ MING_EMIT_PATCH_COUNT_KEY = "ming_emit_patch_count"
 MING_LATENT_SHAPE_KEY = "ming_latent_shape"
 MING_ESTIMATED_BYTES_KEY = "ming_estimated_bytes"
 MING_FINAL_FLUSH_KEY = "ming_final_flush"
-MING_STOP_REASON_KEY = "ming_stop_reason"
 MING_FINAL_DECODE_STEP_KEY = "ming_final_decode_step"
-MING_STOP_REASON_BY_CODE = {
-    0: "continue",
-    1: "stop_head",
-    2: "max_decode_steps",
-}
+MING_STOP_REASON_BY_CODE = {code: reason for reason, code in MING_STOP_REASON_CODES.items()}
 
 
 def _extract_last_patch(pooling_output: dict[str, Any] | None) -> torch.Tensor | None:

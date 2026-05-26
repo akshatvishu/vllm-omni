@@ -16,10 +16,10 @@ from vllm_omni.model_executor.models.output_templates import OmniOutput
 
 from .audio_tokenizer.modeling_audio_vae import AudioVAE
 from .config_ming_tts import KEY_CHUNK_ID, KEY_REQUEST_ID, MingTTSConfig
+from .patch_emission import MING_STOP_REASON_KEY
 
 logger = init_logger(__name__)
 
-MING_STOP_REASON_KEY = "ming_stop_reason"
 MING_FINAL_DECODE_STEP_KEY = "ming_final_decode_step"
 
 

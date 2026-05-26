@@ -34,6 +34,7 @@ from .config_ming_tts import (
 from .loader import (
     load_weights,
 )
+from .patch_emission import MING_STOP_REASON_KEY
 from .prompt_utils import (
     _coerce_prompt_latents,
     _find_audio_placeholder_positions,
@@ -43,8 +44,6 @@ from .prompt_utils import (
     _take_scalar,
     coerce_speaker_embeddings,
 )
-
-MING_STOP_REASON_KEY = "ming_stop_reason"
 
 
 class _ModelSampleAdapter(nn.Module):
@@ -119,9 +118,6 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
             if int(input_ids.shape[0]) > 1
             else self._decode_preprocess(input_ids, input_embeds, **info_dict)
         )
-
-    def preprocess_input(self, input_ids: torch.Tensor, input_embeds: torch.Tensor | None, **info_dict: Any):
-        return self.preprocess(input_ids, input_embeds, **info_dict)
 
     def postprocess(self, hidden_states: torch.Tensor, **info_dict: Any) -> dict[str, Any]:
         if self.model_stage != "llm" or hidden_states.numel() == 0:
