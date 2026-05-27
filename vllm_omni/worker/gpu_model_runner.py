@@ -1508,7 +1508,6 @@ class OmniGPUModelRunner(GPUModelRunner):
             for req_index, req_id in enumerate(self.input_batch.req_ids):
                 req_infos = self.model_intermediate_buffer.get(req_id, {})
                 req_infos = dict(req_infos) if isinstance(req_infos, dict) else {}
-                req_infos.setdefault("req_id", req_id)
 
                 # mimo-audio check
                 req_state = self.requests.get(req_id)
