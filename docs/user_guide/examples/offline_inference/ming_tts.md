@@ -1,6 +1,6 @@
 # Ming-omni-tts
 
-Source <https://github.com/vllm-project/vllm-omni/tree/main/examples/offline_inference/ming_tts>.
+Source <https://github.com/vllm-project/vllm-omni/tree/main/examples/offline_inference/text_to_speech/ming_tts>.
 
 This directory contains an offline Ming example that uses the in-repo Ming prompt builder directly. It covers the broader upstream dense 0.5B surface: style, IP, music-only generation, TTA, emotion, dialect, zero-shot clone, podcast, speech+bgm, and speech+sound.
 
@@ -9,7 +9,7 @@ This directory contains an offline Ming example that uses the in-repo Ming promp
 Run a zero-speaker style case:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case style \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
@@ -18,7 +18,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Run emotion-controlled speech:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case emotion \
     --ref-audio /path/to/emotion_prompt.wav \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
@@ -28,7 +28,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Run zero-shot cloning with a transcript:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case zero_shot \
     --ref-audio /path/to/reference.wav \
     --ref-text "在此奉劝大家别乱打美白针。" \
@@ -39,7 +39,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Run podcast generation:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case podcast \
     --ref-audio-paths /path/to/CTS-CN-F2F-2019-11-11-423-012-A.wav /path/to/CTS-CN-F2F-2019-11-11-423-012-B.wav \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
@@ -49,7 +49,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Run text-to-audio event generation:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case tta \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
@@ -58,7 +58,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Run with stats and a manifest:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case style \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager \
@@ -86,7 +86,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Use async_chunk streaming with `AsyncOmni`:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case basic \
     --ref-audio /path/to/10002287-00000095.wav \
     --streaming \
@@ -132,9 +132,9 @@ The offline example also exposes vLLM-Omni runtime/reporting controls such as:
 
 ??? abstract "README.md"
     ``````md
-    --8<-- "examples/offline_inference/ming_tts/README.md"
+    --8<-- "examples/offline_inference/text_to_speech/ming_tts/README.md"
     ``````
 ??? abstract "end2end.py"
     ``````py
-    --8<-- "examples/offline_inference/ming_tts/end2end.py"
+    --8<-- "examples/offline_inference/text_to_speech/ming_tts/end2end.py"
     ``````

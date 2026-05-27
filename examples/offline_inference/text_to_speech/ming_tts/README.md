@@ -56,7 +56,7 @@ These cases cover the upstream dense 0.5B cookbook surface that maps cleanly ont
 Run the zero-speaker style example:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case style \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
@@ -65,7 +65,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Run zero-shot cloning with a transcript:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case zero_shot \
     --ref-audio /path/to/10002287-00000094.wav \
     --ref-text "在此奉劝大家别乱打美白针。" \
@@ -76,7 +76,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Run emotion-controlled speech:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case emotion \
     --ref-audio /path/to/emotion_prompt.wav \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
@@ -86,7 +86,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Run podcast generation with two reference clips:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case podcast \
     --ref-audio-paths /path/to/CTS-CN-F2F-2019-11-11-423-012-A.wav /path/to/CTS-CN-F2F-2019-11-11-423-012-B.wav \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
@@ -106,7 +106,7 @@ where the JSON is a list of speaker embeddings, one 192-d vector per speaker.
 Run text-to-audio event generation:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case tta \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager
@@ -115,7 +115,7 @@ python examples/offline_inference/ming_tts/end2end.py \
 Use async_chunk streaming:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case basic \
     --ref-audio /path/to/10002287-00000095.wav \
     --streaming \
@@ -130,7 +130,7 @@ supports one prompt per process invocation; use blocking mode for
 Collect runtime stats and a manifest:
 
 ```bash
-python examples/offline_inference/ming_tts/end2end.py \
+python examples/offline_inference/text_to_speech/ming_tts/end2end.py \
     --case style \
     --deploy-config vllm_omni/deploy/ming_tts.yaml \
     --enforce-eager \

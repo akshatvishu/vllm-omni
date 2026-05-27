@@ -1,6 +1,6 @@
 # Ming-omni-tts
 
-Source <https://github.com/vllm-project/vllm-omni/tree/main/examples/online_serving/ming_tts>.
+Source <https://github.com/vllm-project/vllm-omni/tree/main/examples/online_serving/text_to_speech/ming_tts>.
 
 This example shows how to serve Ming through the OpenAI-compatible `/v1/audio/speech` endpoint. The server builds Ming prompts directly with the in-repo prompt builder, so online requests support Ming-specific structured controls instead of the Qwen placeholder path.
 
@@ -21,7 +21,7 @@ vllm-omni serve inclusionAI/Ming-omni-tts-0.5B \
 Or:
 
 ```bash
-cd examples/online_serving/ming_tts
+cd examples/online_serving/text_to_speech/ming_tts
 ./run_server.sh
 ```
 
@@ -170,17 +170,17 @@ For Ming, the generic OpenAI request fields map to Ming controls like this:
 
 ??? abstract "README.md"
     ``````md
-    --8<-- "examples/online_serving/ming_tts/README.md"
+    --8<-- "examples/online_serving/text_to_speech/ming_tts/README.md"
     ``````
 ??? abstract "run_server.sh"
     ``````sh
-    --8<-- "examples/online_serving/ming_tts/run_server.sh"
+    --8<-- "examples/online_serving/text_to_speech/ming_tts/run_server.sh"
     ``````
 ??? abstract "openai_speech_client.py"
     ``````py
-    --8<-- "examples/online_serving/ming_tts/openai_speech_client.py"
+    --8<-- "examples/online_serving/text_to_speech/ming_tts/openai_speech_client.py"
     ``````
 ??? abstract "run_curl.sh"
     ``````sh
-    --8<-- "examples/online_serving/ming_tts/run_curl.sh"
+    --8<-- "examples/online_serving/text_to_speech/ming_tts/run_curl.sh"
     ``````

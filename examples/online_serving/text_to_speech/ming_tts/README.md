@@ -23,7 +23,7 @@ vllm-omni serve inclusionAI/Ming-omni-tts-0.5B \
 Or use the convenience script:
 
 ```bash
-cd examples/online_serving/ming_tts
+cd examples/online_serving/text_to_speech/ming_tts
 ./run_server.sh
 ```
 
@@ -39,7 +39,7 @@ The recommended online-serving path is eager async-chunk mode through
 The canonical Ming online client is:
 
 ```bash
-cd examples/online_serving/ming_tts
+cd examples/online_serving/text_to_speech/ming_tts
 python openai_speech_client.py --text "你好，世界"
 ```
 
