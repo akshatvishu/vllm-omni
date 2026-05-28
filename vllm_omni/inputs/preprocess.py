@@ -25,30 +25,6 @@ class OmniInputPreprocessor(InputPreprocessor):
     Supports processing tokens, embeddings, text, and multimodal inputs.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.initial_prompt_processor = None
-        self._last_processed_prompt = None
-
-    def set_initial_prompt_processor(self, processor: Any) -> None:
-        self.initial_prompt_processor = processor
-
-    def consume_last_processed_prompt(self) -> Any:
-        prompt = self._last_processed_prompt
-        self._last_processed_prompt = None
-        return prompt
-
-    def _apply_initial_prompt_processor(self, prompt: SingletonDictPrompt) -> SingletonDictPrompt:
-        self._last_processed_prompt = prompt
-        processor = self.initial_prompt_processor
-        if processor is None or not isinstance(prompt, dict):
-            return prompt
-        processed = processor(prompt)
-        if not isinstance(processed, dict):
-            raise TypeError(f"Initial prompt processor must return a prompt dict, got {type(processed).__name__}")
-        self._last_processed_prompt = processed
-        return processed
-
     def _process_text(
         self,
         parsed_content: OmniTextPrompt,
@@ -192,8 +168,6 @@ class OmniInputPreprocessor(InputPreprocessor):
 
         * [`SingletonInput`][vllm.inputs.engine.SingletonInput] instance
         """
-        prompt = self._apply_initial_prompt_processor(prompt)
-
         if "prompt_embeds" in prompt:
             return self._process_embeds(prompt)  # type: ignore[arg-type]
 

@@ -217,27 +217,6 @@ def _apply_omni_final_stage_metadata(
     )
 
 
-def _consume_processed_prompt(
-    input_processor: InputProcessor | None,
-    fallback_prompt: Any,
-) -> Any:
-    """Return the prompt dict actually seen by the stage-0 preprocessor."""
-    if input_processor is None:
-        return fallback_prompt
-    preprocessor = getattr(input_processor, "input_preprocessor", None)
-    if preprocessor is None:
-        return fallback_prompt
-    consume = getattr(preprocessor, "consume_last_processed_prompt", None)
-    if consume is None:
-        return fallback_prompt
-    processed_prompt = consume()
-    if processed_prompt is None:
-        return fallback_prompt
-    if fallback_prompt is not None and not isinstance(processed_prompt, type(fallback_prompt)):
-        return fallback_prompt
-    return processed_prompt
-
-
 def _weak_shutdown_async_omni_engine(
     orchestrator_thread: threading.Thread | None,
     request_queue: janus.Queue[EngineQueueMessage] | None,
@@ -1683,7 +1662,6 @@ class AsyncOmniEngine:
                     data_parallel_rank=data_parallel_rank,
                     resumable=resumable,
                 )
-                processed_prompt = _consume_processed_prompt(self.input_processor, prompt)
             except Exception:
                 if preselected_stage0_replica is not None and self.stage_pools:
                     self.stage_pools[0].release_binding(request_id)
@@ -1691,7 +1669,7 @@ class AsyncOmniEngine:
             _preprocess_ms = (time.perf_counter() - _t_preprocess) * 1000.0
             # TODO (Peiqi): add this for Qwen3-TTS only. Other models don't have
             # additional_information field in the prompt.
-            request = _upgrade_to_omni_request(request, processed_prompt)
+            request = _upgrade_to_omni_request(request, prompt)
 
             if reasoning_ended is not None:
                 request.reasoning_ended = reasoning_ended
@@ -1757,8 +1735,7 @@ class AsyncOmniEngine:
                 params=companion_params,
                 supported_tasks=self.supported_tasks,
             )
-            processed_prompt = _consume_processed_prompt(self.input_processor, companion_prompt)
-            request = _upgrade_to_omni_request(request, processed_prompt)
+            request = _upgrade_to_omni_request(request, companion_prompt)
             request.external_req_id = cid
 
             # Registration of this companion on stage-0's output processor is
