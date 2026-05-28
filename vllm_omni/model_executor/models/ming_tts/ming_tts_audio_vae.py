@@ -2,7 +2,9 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from __future__ import annotations
 
+import time
 import warnings
+from collections import OrderedDict
 from collections.abc import Iterable
 from typing import Any
 
@@ -21,6 +23,8 @@ from .patch_emission import MING_STOP_REASON_KEY
 logger = init_logger(__name__)
 
 MING_FINAL_DECODE_STEP_KEY = "ming_final_decode_step"
+_STREAM_STATE_TTL_SECONDS = 15 * 60
+_MAX_STREAM_STATES = 1024
 
 
 class MingAudioVAEModel(nn.Module):
@@ -46,6 +50,7 @@ class MingAudioVAEModel(nn.Module):
         self._stream_state: dict[str, tuple[Any, Any, Any]] = {}
         self._patch_totals: dict[str, int] = {}
         self._sample_totals: dict[str, int] = {}
+        self._state_access_times: OrderedDict[str, float] = OrderedDict()
 
     def embed_input_ids(self, input_ids: torch.Tensor, **_: Any) -> torch.Tensor:
         hidden_size = int(self.ming_config.llm_hidden_size)
@@ -123,6 +128,7 @@ class MingAudioVAEModel(nn.Module):
                     f"Ming Stage-2 received a payload without {KEY_REQUEST_ID}. keys={sorted(info.keys())}"
                 )
             request_id = _resolve_request_id(info, idx)
+            self._touch_request_state(request_id)
             chunk_id = _coerce_optional_int(info.get(KEY_CHUNK_ID))
             finished = _coerce_finished(info.get("stream_finished", torch.tensor(True)))
             latent = info.get("ming_latent_patches")
@@ -245,6 +251,24 @@ class MingAudioVAEModel(nn.Module):
         self._stream_state.pop(request_id, None)
         self._patch_totals.pop(request_id, None)
         self._sample_totals.pop(request_id, None)
+        self._state_access_times.pop(request_id, None)
+
+    def _touch_request_state(self, request_id: str) -> None:
+        now = time.monotonic()
+        self._evict_expired_request_states(now)
+        self._state_access_times[request_id] = now
+        self._state_access_times.move_to_end(request_id)
+        while len(self._state_access_times) > _MAX_STREAM_STATES:
+            evicted_request_id, _ = self._state_access_times.popitem(last=False)
+            self._clear_request_state(evicted_request_id)
+
+    def _evict_expired_request_states(self, now: float) -> None:
+        cutoff = now - _STREAM_STATE_TTL_SECONDS
+        while self._state_access_times:
+            request_id, last_access = next(iter(self._state_access_times.items()))
+            if last_access >= cutoff:
+                break
+            self._clear_request_state(request_id)
 
 
 def _coerce_finished(value: Any) -> bool:
