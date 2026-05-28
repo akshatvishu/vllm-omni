@@ -7,9 +7,12 @@
 
 set -e
 
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/../../../.." && pwd)"
+
 MODEL="${MODEL:-inclusionAI/Ming-omni-tts-0.5B}"
 PORT="${PORT:-8091}"
-DEPLOY_CONFIG="${DEPLOY_CONFIG:-vllm_omni/deploy/ming_tts.yaml}"
+DEPLOY_CONFIG="${DEPLOY_CONFIG:-$ROOT/vllm_omni/deploy/ming_tts.yaml}"
 
 echo "Starting Ming-omni-tts server with model: $MODEL"
 echo "Deploy config: $DEPLOY_CONFIG"

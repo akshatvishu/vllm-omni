@@ -62,6 +62,7 @@ def _coerce_qwen2_config(value: Any) -> Qwen2Config:
 
 
 class MingDenseConfig(PretrainedConfig):
+    # Keep this aligned with the upstream inclusionAI HF config; the repo declares model_type="dense".
     model_type = "dense"
 
     def __init__(

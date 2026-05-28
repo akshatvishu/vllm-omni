@@ -41,7 +41,8 @@ except ImportError:
     )
 
 _DEFAULT_MODEL = "inclusionAI/Ming-omni-tts-0.5B"
-_DEFAULT_DEPLOY_CONFIG = "vllm_omni/deploy/ming_tts.yaml"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_DEFAULT_DEPLOY_CONFIG = str(_REPO_ROOT / "vllm_omni/deploy/ming_tts.yaml")
 _CASES_FILE = Path(__file__).with_name("cases.yaml")
 
 CASE_DEFAULTS = yaml.safe_load(_CASES_FILE.read_text(encoding="utf-8")) or {}

@@ -171,7 +171,7 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
                 speaker_embedding,
                 use_zero_spk_emb=bool(info_dict.get("use_zero_spk_emb", False)),
             )
-        if speaker_embeddings:
+        if speaker_embeddings is not None and len(speaker_embeddings) > 0:
             speaker_slots = _find_speaker_placeholder_positions(input_ids, self.vllm_config.model_config.hf_config)
             if len(speaker_slots) < len(speaker_embeddings):
                 raise RuntimeError(
