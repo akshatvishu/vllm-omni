@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from __future__ import annotations
 
+import os
 import time
 import warnings
 from collections import OrderedDict
@@ -189,19 +190,20 @@ class MingAudioVAEModel(nn.Module):
                 )
 
             if finished:
-                logger.info(
-                    "MING_STAGE1_FINAL %s",
-                    {
-                        "request_id": request_id,
-                        "chunk_id": chunk_id,
-                        "stop_reason": info.get(MING_STOP_REASON_KEY),
-                        "final_decode_step": _coerce_optional_int(info.get(MING_FINAL_DECODE_STEP_KEY)),
-                        "final_chunk_patch_count": patch_count,
-                        "total_patch_count": total_patch_count,
-                        "final_chunk_waveform_numel": int(waveform_flat.numel()),
-                        "total_waveform_numel": total_waveform_numel,
-                    },
-                )
+                if os.environ.get("MING_TTS_STAGE1_FINAL_LOG") == "1":
+                    logger.info(
+                        "MING_STAGE1_FINAL %s",
+                        {
+                            "request_id": request_id,
+                            "chunk_id": chunk_id,
+                            "stop_reason": info.get(MING_STOP_REASON_KEY),
+                            "final_decode_step": _coerce_optional_int(info.get(MING_FINAL_DECODE_STEP_KEY)),
+                            "final_chunk_patch_count": patch_count,
+                            "total_patch_count": total_patch_count,
+                            "final_chunk_waveform_numel": int(waveform_flat.numel()),
+                            "total_waveform_numel": total_waveform_numel,
+                        },
+                    )
                 self._clear_request_state(request_id)
             else:
                 self._past_key_values[request_id] = past_key_values
