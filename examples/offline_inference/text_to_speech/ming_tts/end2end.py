@@ -20,7 +20,7 @@ from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
     KEY_TEMPERATURE,
     SAMPLE_RATE,
 )
-from vllm_omni.model_executor.models.ming_tts.prompt_utils import build_ming_dense_prompt
+from vllm_omni.model_executor.models.ming_tts.prompt_assembly import build_ming_dense_prompt
 from vllm_omni.model_executor.models.ming_tts.speaker_extractor import MingSpeakerEmbeddingExtractor
 
 try:

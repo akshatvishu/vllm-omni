@@ -14,6 +14,14 @@ from vllm.v1.sample.sampler import Sampler
 
 from vllm_omni.model_executor.custom_process_mixin import CustomProcessMixin
 
+from .audio_prep import (
+    _coerce_prompt_latents,
+    _find_audio_placeholder_positions,
+    _find_speaker_placeholder_positions,
+    _initial_history,
+    _take_scalar,
+    coerce_speaker_embeddings,
+)
 from .config_ming_tts import (
     AUDIO_START_TOKEN_ID,
     KEY_CFG,
@@ -35,15 +43,7 @@ from .loader import (
     load_weights,
 )
 from .patch_emission import MING_STOP_REASON_KEY
-from .prompt_utils import (
-    _coerce_prompt_latents,
-    _find_audio_placeholder_positions,
-    _find_speaker_placeholder_positions,
-    _initial_history,
-    _resolve_prompt_latents,
-    _take_scalar,
-    coerce_speaker_embeddings,
-)
+from .prompt_encoder import _resolve_prompt_latents
 
 
 class _ModelSampleAdapter(nn.Module):

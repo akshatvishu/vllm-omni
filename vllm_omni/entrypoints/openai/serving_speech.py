@@ -1930,7 +1930,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         from transformers import AutoTokenizer
 
         from vllm_omni.model_executor.models.ming_tts.config_ming_tts import KEY_MAX_DECODE_STEPS
-        from vllm_omni.model_executor.models.ming_tts.prompt_utils import build_ming_dense_prompt
+        from vllm_omni.model_executor.models.ming_tts.prompt_assembly import build_ming_dense_prompt
 
         if self._tts_tokenizer is None:
             model_name = self.engine_client.model_config.model
