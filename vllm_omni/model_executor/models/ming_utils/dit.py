@@ -11,19 +11,12 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
-        self.native_rms_norm = float(torch.__version__[:3]) >= 2.4
 
     def forward(self, x):
-        if self.native_rms_norm:
-            if self.weight.dtype in [torch.float16, torch.bfloat16]:
-                x = x.to(self.weight.dtype)
-            return F.rms_norm(x, normalized_shape=(x.shape[-1],), weight=self.weight, eps=self.eps)
-
-        variance = x.to(torch.float32).pow(2).mean(-1, keepdim=True)
-        x = x * torch.rsqrt(variance + self.eps)
         if self.weight.dtype in [torch.float16, torch.bfloat16]:
             x = x.to(self.weight.dtype)
-        return x * self.weight
+        x = F.rms_norm(x, normalized_shape=(x.shape[-1],), weight=self.weight, eps=self.eps)
+        return x
 
 
 class FeedForward(nn.Module):
@@ -52,9 +45,6 @@ class Attention(nn.Module):
         attn_mask_enabled=True,
     ):
         super().__init__()
-        if not hasattr(F, "scaled_dot_product_attention"):
-            raise ImportError("SDPA requires PyTorch 2.0, to use it, please upgrade PyTorch to 2.0.")
-
         self.dim = dim
         self.heads = heads
         self.inner_dim = dim_head * heads
@@ -78,16 +68,6 @@ class Attention(nn.Module):
         self.attn_mask_enabled = attn_mask_enabled
 
     def forward(self, x, mask=None, rope=None):
-        if x.ndim != 3:
-            raise ValueError(f"Expected x rank-3 [Batch, Time, Dimension], got {tuple(x.shape)}")
-        if x.shape[-1] != self.dim:
-            raise ValueError(f"x feature dim mismatch: got {x.shape[-1]}, expected {self.dim}")
-        if mask is not None:
-            if mask.ndim != 2:
-                raise ValueError(f"Expected mask rank-2 [Batch, Time], got {tuple(mask.shape)}")
-            if mask.shape[0] != x.shape[0] or mask.shape[1] != x.shape[1]:
-                raise ValueError(f"Mask shape mismatch: got {tuple(mask.shape)}, expected {tuple(x.shape[:2])}")
-
         batch_size = x.shape[0]
         query = self.to_q(x)
         key = self.to_k(x)
@@ -95,11 +75,8 @@ class Attention(nn.Module):
 
         inner_dim = key.shape[-1]
         head_dim = inner_dim // self.heads
-        # [Batch, Time, Dimension] -> [Batch, Heads, Time, HeadDimension].
         query = query.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
-        # [Batch, Time, Dimension] -> [Batch, Heads, Time, HeadDimension].
         key = key.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
-        # [Batch, Time, Dimension] -> [Batch, Heads, Time, HeadDimension].
         value = value.view(batch_size, -1, self.heads, head_dim).transpose(1, 2)
 
         if self.q_norm is not None:
@@ -135,7 +112,6 @@ class Attention(nn.Module):
             final_output[valid_sample_indices] = x
             x = final_output
 
-        # [Batch, Heads, Time, HeadDimension] -> [Batch, Time, Dimension].
         x = x.transpose(1, 2).reshape(batch_size, -1, self.heads * head_dim)
         x = x.to(query.dtype)
         x = self.to_out[0](x)
@@ -198,8 +174,6 @@ class CondEmbedder(nn.Module):
         self.cond_embedder = nn.Linear(input_feature_size, hidden_size)
 
     def forward(self, llm_cond):
-        if llm_cond.ndim != 3:
-            raise ValueError(f"Expected conditioning rank-3 [Batch, Time, Dimension], got {tuple(llm_cond.shape)}")
         return self.cond_embedder(llm_cond)
 
 
