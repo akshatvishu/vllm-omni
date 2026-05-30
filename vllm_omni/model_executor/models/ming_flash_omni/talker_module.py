@@ -33,9 +33,9 @@ from vllm.platforms import current_platform
 from x_transformers.x_transformers import RotaryEmbedding
 
 from vllm_omni.model_executor.layers.timestep_embedding import DiTTimestepEmbedding
+from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAE
 from vllm_omni.model_executor.models.ming_utils.dit import CondEmbedder, DiTBlock, FinalLayer, get_epss_timesteps
-
-from .audio_vae import AudioVAE
+from vllm_omni.model_executor.models.ming_utils.fm import apply_sway_sampling, integrate_cfm_steps
 
 logger = init_logger(__name__)
 
@@ -164,15 +164,8 @@ class CFM(nn.Module):
             pred, null_pred = torch.chunk(pred_cfg, 2, dim=0)
             return pred + (pred - null_pred) * sde_args[0]
 
-        if self.sway_sampling_coef is not None:
-            t = t + self.sway_sampling_coef * (torch.cos(torch.pi / 2 * t) - 1 + t)
-
-        for step in range(self.steps):
-            dt = t[step + 1] - t[step]
-            y0 = y0 + fn(t[step], y0) * dt
-            y0 = y0 + sde_args[1] * (sde_args[2] ** 0.5) * (dt.abs() ** 0.5) * sde_rnd[step]
-
-        return y0
+        t = apply_sway_sampling(t, self.sway_sampling_coef)
+        return integrate_cfm_steps(fn, y0, t, sde_args, sde_rnd, self.steps)
 
 
 class CFMGraphExecutor:

@@ -13,6 +13,7 @@ from safetensors import safe_open
 from vllm.logger import init_logger
 
 from vllm_omni.engine.stage_init_utils import _resolve_model_to_local_path
+from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAE
 
 from .audio_prep import (
     _coerce_prompt_latents,
@@ -20,7 +21,6 @@ from .audio_prep import (
     count_prompt_latent_patches,
     pad_prompt_waveform,
 )
-from .audio_tokenizer.modeling_audio_vae import AudioVAE
 from .config_ming_tts import KEY_PROMPT_LATENTS
 
 logger = init_logger(__name__)

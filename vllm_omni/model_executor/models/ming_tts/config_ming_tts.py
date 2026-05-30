@@ -7,7 +7,8 @@ from typing import Any
 
 from transformers import PretrainedConfig, Qwen2Config
 
-from .audio_tokenizer.configuration_audio_vae import AudioVAEconfig
+from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAEConfig
+
 from .constants import (
     AGGREGATOR_HIDDEN_SIZE,
     AUDIO_DUMMY_TOKEN_ID,
@@ -70,7 +71,7 @@ class MingDenseConfig(PretrainedConfig):
         llm_config: Qwen2Config | dict[str, Any] | None = None,
         ditar_config: dict[str, Any] | None = None,
         aggregator_config: dict[str, Any] | None = None,
-        audio_tokenizer_config: AudioVAEconfig | dict[str, Any] | None = None,
+        audio_tokenizer_config: AudioVAEConfig | dict[str, Any] | None = None,
         architectures: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -100,7 +101,7 @@ class MingTTSConfig:
     ditar_config: dict[str, Any] = field(default_factory=dict)
     aggregator_config: dict[str, Any] = field(default_factory=dict)
 
-    audio_tokenizer_config: AudioVAEconfig | None = None
+    audio_tokenizer_config: AudioVAEConfig | None = None
     vae_patch_size: int = VAE_PATCH_SIZE
     sample_rate: int = SAMPLE_RATE
     audio_frame_hop: int = AUDIO_FRAME_HOP

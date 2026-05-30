@@ -2,45 +2,12 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 # Adopted from https://github.com/inclusionAI/Ming-omni-tts/blob/main/fm/dit.py
 
-import math
-
 import torch
 import torch.nn as nn
 from x_transformers.x_transformers import RotaryEmbedding
 
+from vllm_omni.model_executor.layers.timestep_embedding import DiTTimestepEmbedding
 from vllm_omni.model_executor.models.ming_utils.dit import CondEmbedder, DiTBlock, FinalLayer
-
-
-class SinusPositionEmbedding(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x, scale=1000):
-        if x.ndim == 0:
-            x = x.reshape(1)
-        if x.ndim != 1:
-            raise ValueError(f"Expected timestep rank-1 [Batch], got {tuple(x.shape)}")
-        device = x.device
-        half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device).float() * -emb)
-        emb = scale * x.unsqueeze(1) * emb.unsqueeze(0)
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-        return emb
-
-
-class TimestepEmbedder(nn.Module):
-    def __init__(self, dim, freq_embed_dim=256):
-        super().__init__()
-        self.time_embed = SinusPositionEmbedding(freq_embed_dim)
-        self.time_mlp = nn.Sequential(nn.Linear(freq_embed_dim, dim), nn.SiLU(), nn.Linear(dim, dim))
-
-    def forward(self, timestep):
-        time_hidden = self.time_embed(timestep)
-        time_hidden = time_hidden.to(timestep.dtype)
-        time = self.time_mlp(time_hidden)  # b d
-        return time
 
 
 class DiT(nn.Module):
@@ -59,7 +26,7 @@ class DiT(nn.Module):
         self.in_channels = in_channels
         self.out_channels = in_channels
         self.num_heads = num_heads
-        self.t_embedder = TimestepEmbedder(hidden_size)
+        self.t_embedder = DiTTimestepEmbedding(hidden_size)
         self.x_embedder = nn.Linear(in_channels, hidden_size)
         self.c_embedder = CondEmbedder(llm_cond_dim, hidden_size)
         self.hidden_size = hidden_size

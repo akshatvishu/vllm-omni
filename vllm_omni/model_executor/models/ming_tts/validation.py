@@ -6,7 +6,8 @@ from typing import Any
 
 from transformers import PretrainedConfig
 
-from .audio_tokenizer.configuration_audio_vae import AudioVAEconfig
+from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAEConfig
+
 from .constants import (
     AGGREGATOR_HIDDEN_SIZE,
     HISTORY_PATCH_SIZE,
@@ -37,10 +38,10 @@ def _to_plain_dict(obj: Any) -> dict[str, Any]:
         return {}
 
 
-def _coerce_audio_vae_config(atc_raw: Any) -> AudioVAEconfig | None:
+def _coerce_audio_vae_config(atc_raw: Any) -> AudioVAEConfig | None:
     if atc_raw is None:
         return None
-    if isinstance(atc_raw, AudioVAEconfig):
+    if isinstance(atc_raw, AudioVAEConfig):
         return atc_raw
     if isinstance(atc_raw, PretrainedConfig):
         atc_dict = atc_raw.to_dict()
@@ -51,7 +52,7 @@ def _coerce_audio_vae_config(atc_raw: Any) -> AudioVAEconfig | None:
     else:
         raise TypeError(f"Unsupported audio_tokenizer_config type for Ming dense config: {type(atc_raw)!r}")
 
-    return AudioVAEconfig(**atc_dict)
+    return AudioVAEConfig(**atc_dict)
 
 
 def _nested_get(obj: Any, *keys: str, default: Any = None) -> Any:
@@ -128,6 +129,10 @@ def validate_ming_tts_config(cfg: Any) -> None:
         raise ValueError(f"ditar hidden_size mismatch: got {dit_h}, expected {AGGREGATOR_HIDDEN_SIZE}.")
 
     atc = cfg.audio_tokenizer_config
+    semantic_module_kwargs = _nested_get(atc, "semantic_module_kwargs", default=None)
+    if semantic_module_kwargs is not None:
+        raise ValueError("Ming dense 0.5B expects audio_tokenizer_config.semantic_module_kwargs to be null.")
+
     enc_latent = _nested_get(atc, "enc_kwargs", "latent_dim", default=None)
     dec_latent = _nested_get(atc, "dec_kwargs", "latent_dim", default=None)
     if enc_latent is not None and enc_latent != cfg.latent_dim:
