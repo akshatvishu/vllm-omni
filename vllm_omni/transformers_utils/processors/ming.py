@@ -23,13 +23,6 @@ from transformers.feature_extraction_utils import BatchFeature, FeatureExtractio
 from transformers.processing_utils import ProcessorMixin
 from transformers.tokenization_utils_base import PreTokenizedInput, TextInput
 
-try:
-    from transformers import AutoVideoProcessor
-except ImportError:
-    AutoVideoProcessor = None
-
-_HAS_VIDEO_PROCESSOR = AutoVideoProcessor is not None
-
 DEFAULT_IMAGE_PATCH_TOKEN = "<imagePatch>"
 DEFAULT_IM_START_TOKEN = "<image>"
 DEFAULT_IM_END_TOKEN = "</image>"
@@ -162,18 +155,13 @@ class MingFlashOmniProcessor(ProcessorMixin):
     """
 
     attributes = ["image_processor", "audio_processor", "tokenizer"]
-    if _HAS_VIDEO_PROCESSOR:
-        attributes = ["image_processor", "video_processor", "audio_processor", "tokenizer"]
     image_processor_class = "AutoImageProcessor"
-    if _HAS_VIDEO_PROCESSOR:
-        video_processor_class = "AutoVideoProcessor"
     audio_processor_class = "AutoFeatureExtractor"
     tokenizer_class = "AutoTokenizer"
 
     def __init__(
         self,
         image_processor=None,
-        video_processor=None,
         audio_processor=None,
         tokenizer=None,
         merge_size: int = 2,
@@ -192,14 +180,11 @@ class MingFlashOmniProcessor(ProcessorMixin):
         self.image_token = PLACEHOLDER_IMAGE_TOKEN_IN_TEXT
         self.video_token = PLACEHOLDER_VIDEO_TOKEN_IN_TEXT
         self.audio_token = PLACEHOLDER_AUDIO_TOKEN_IN_TEXT
-        processor_kwargs = dict(
+        super().__init__(
             image_processor=image_processor,
             audio_processor=audio_processor,
             tokenizer=tokenizer,
         )
-        if _HAS_VIDEO_PROCESSOR:
-            processor_kwargs["video_processor"] = video_processor
-        super().__init__(**processor_kwargs)
 
         # Fall back to the tokenizer's own chat_template.
         if self.chat_template is None:
@@ -226,6 +211,7 @@ class MingFlashOmniProcessor(ProcessorMixin):
         if images is not None:
             image_outputs = self.image_processor(
                 images=images,
+                videos=None,
                 return_tensors="pt",
                 **kwargs.get("images_kwargs", {}),
             )
@@ -234,20 +220,12 @@ class MingFlashOmniProcessor(ProcessorMixin):
                 text = self._expand_image_tokens(text, image_outputs["image_grid_thw"])
 
         if videos is not None:
-            video_processor = getattr(self, "video_processor", None)
-            if video_processor is not None:
-                video_outputs = video_processor(
-                    videos=videos,
-                    return_tensors="pt",
-                    **kwargs.get("videos_kwargs", {}),
-                )
-            else:
-                video_outputs = self.image_processor(
-                    images=None,
-                    videos=videos,
-                    return_tensors="pt",
-                    **kwargs.get("videos_kwargs", {}),
-                )
+            video_outputs = self.image_processor(
+                images=None,
+                videos=videos,
+                return_tensors="pt",
+                **kwargs.get("videos_kwargs", {}),
+            )
             if "pixel_values" in video_outputs:
                 video_outputs["pixel_values_videos"] = video_outputs.pop("pixel_values")
             if "image_grid_thw" in video_outputs:
@@ -445,9 +423,6 @@ class MingFlashOmniProcessor(ProcessorMixin):
             + self.image_processor.model_input_names
             + self.audio_processor.model_input_names
         )
-        video_processor = getattr(self, "video_processor", None)
-        if video_processor is not None:
-            names += video_processor.model_input_names
         return list(dict.fromkeys(names))
 
 
