@@ -6,41 +6,16 @@ from __future__ import annotations
 
 from typing import Any
 
+import torch
 from vllm.inputs import TextPrompt
 
 from vllm_omni.inputs.data import OmniTokensPrompt
 
 
-def _validate_stage_inputs(stage_list, engine_input_source):
-    """Validate stage inputs and return the source engine outputs."""
-    if not engine_input_source:
-        raise ValueError("engine_input_source cannot be empty")
-
-    stage_id = engine_input_source[0]
-    if stage_id >= len(stage_list):
-        raise IndexError(f"Invalid stage_id: {stage_id}")
-
-    stage = stage_list[stage_id]
-    if stage.engine_outputs is None:
-        raise RuntimeError(f"Stage {stage_id} has no outputs yet")
-
-    return stage.engine_outputs
-
-
-def thinker2talker(
-    stage_list: list[Any],
-    engine_input_source: list[int],
+def _build_talker_inputs(
+    source_outputs: list[Any],
     prompt: OmniTokensPrompt | TextPrompt | None = None,
-    requires_multimodal_data: bool = False,
 ) -> list[OmniTokensPrompt]:
-    """Build talker stage inputs from thinker stage outputs.
-
-    Extracts the generated text from thinker output and constructs
-    a talker input prompt with the text and any speaker/instruction info
-    from the original request.
-    """
-    source_outputs = _validate_stage_inputs(stage_list, engine_input_source)
-
     if not isinstance(prompt, list):
         prompt = [prompt]
 
@@ -61,8 +36,6 @@ def thinker2talker(
         # the talker's spk_head wants a torch tensor.
         spk_emb = additional_info.get("spk_emb", None)
         if isinstance(spk_emb, list) and spk_emb and not hasattr(spk_emb[0], "device"):
-            import torch
-
             spk_emb = torch.tensor(spk_emb, dtype=torch.float32).unsqueeze(0)
 
         # Omni speech path mirrors upstream `omni_audio_generation`:
@@ -102,3 +75,25 @@ def thinker2talker(
         )
 
     return talker_inputs
+
+
+def thinker2talker(
+    source_outputs: list[Any],
+    prompt: OmniTokensPrompt | TextPrompt | None = None,
+    _requires_multimodal_data: bool = False,
+    _streaming_context: Any | None = None,
+) -> list[OmniTokensPrompt]:
+    """Build talker stage inputs from thinker stage outputs."""
+    return _build_talker_inputs(source_outputs, prompt)
+
+
+def thinker2talker_token_only(
+    source_outputs: list[Any],
+    prompt: OmniTokensPrompt | TextPrompt | None = None,
+    _requires_multimodal_data: bool = False,
+) -> list[OmniTokensPrompt]:
+    """Sync-side builder for the non-async-chunk thinker→talker path."""
+    return _build_talker_inputs(source_outputs, prompt)
+
+
+thinker2talker_token_only._is_sync_input = True

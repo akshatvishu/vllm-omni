@@ -187,3 +187,34 @@ def test_thinker2talker_full_payload_packs_complete_tensors() -> None:
     assert payload["embed"]["prefill"].device.type == "cpu"
     assert payload["hidden_states"]["output"].device.type == "cpu"
     assert payload["next_stage_prompt_len"] > 0
+
+
+def test_ming_flash_omni_thinker2talker_smoke() -> None:
+    from vllm_omni.model_executor.stage_input_processors.ming_flash_omni import (
+        thinker2talker,
+        thinker2talker_token_only,
+    )
+
+    class _Out:
+        def __init__(self, text):
+            self.text = text
+
+    class _Wrap:
+        def __init__(self, text):
+            self.outputs = [_Out(text)]
+
+    class _Prompt:
+        def __init__(self, info):
+            self.additional_information = info
+
+    src = [_Wrap("hello world")]
+    prompt = _Prompt({"voice_name": "ZH_FEMALE", "prompt_text": "ref text"})
+    for func in (thinker2talker, thinker2talker_token_only):
+        out = func(src, prompt=prompt)
+        assert len(out) == 1
+        assert out[0]["prompt_token_ids"] == [0]
+        info = out[0]["additional_information"]
+        assert info["text"] == "hello world"
+        assert info["voice_name"] == "ZH_FEMALE"
+        assert info["prompt_text"] == "ref text"
+        assert info["ming_task"] == "omni"
