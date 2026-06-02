@@ -8,6 +8,7 @@ import torch
 from vllm.inputs import TextPrompt
 from vllm.logger import init_logger
 
+from vllm_omni.data_entry_keys import CodesStruct, MetaStruct, OmniPayloadStruct
 from vllm_omni.inputs.data import OmniTokensPrompt
 from vllm_omni.model_executor.models.ming_tts.config_ming_tts import (
     KEY_CHUNK_ID,
@@ -172,7 +173,7 @@ def llm2audio_vae_async_chunk(
     pooling_output: dict[str, Any] | None,
     request: Any,
     is_finished: bool = False,
-) -> dict[str, Any] | None:
+) -> OmniPayloadStruct | None:
     request_id = request.external_req_id
     chunk_id = int(transfer_manager.put_req_chunk[request_id])
     finished = bool(is_finished or request.is_finished())
@@ -205,22 +206,24 @@ def llm2audio_vae_async_chunk(
     if length <= 0:
         if finished and not bool(state.get("terminal_sent", False)):
             observability = _build_chunk_observability(None, final_flush=True)
-            payload = {
-                "codes": {"audio": []},
-                "meta": {"finished": torch.tensor(True, dtype=torch.bool)},
-                "code_predictor_codes": [],
-                "finished": torch.tensor(True, dtype=torch.bool),
-                "stream_finished": torch.tensor(True, dtype=torch.bool),
+            kv_meta = {
                 KEY_CHUNK_ID: chunk_id,
                 KEY_REQUEST_ID: request_id,
                 **observability,
             }
             if final_decode_step is not None:
-                payload[MING_FINAL_DECODE_STEP_KEY] = int(final_decode_step)
+                kv_meta[MING_FINAL_DECODE_STEP_KEY] = int(final_decode_step)
             if stop_reason is not None:
-                payload[MING_STOP_REASON_KEY] = stop_reason
+                kv_meta[MING_STOP_REASON_KEY] = stop_reason
             state["terminal_sent"] = True
-            return payload
+            return OmniPayloadStruct(
+                codes=CodesStruct(audio=torch.empty(0, dtype=torch.long)),
+                meta=MetaStruct(
+                    finished=torch.tensor(True, dtype=torch.bool),
+                    stream_finished=torch.tensor(True, dtype=torch.bool),
+                ),
+                kv_metadata=kv_meta,
+            )
         return None
 
     chunk_length = length % chunk_size
@@ -233,24 +236,26 @@ def llm2audio_vae_async_chunk(
     latent_patches = torch.stack(emit_patches, dim=0)
     observability = _build_chunk_observability(latent_patches, final_flush=finished)
 
-    payload = {
-        "codes": {"audio": [0]},
-        "meta": {"finished": torch.tensor(finished, dtype=torch.bool)},
-        "code_predictor_codes": [0],
-        "ming_latent_patches": latent_patches,
-        "finished": torch.tensor(finished, dtype=torch.bool),
-        "stream_finished": torch.tensor(finished, dtype=torch.bool),
+    kv_meta = {
         KEY_CHUNK_ID: chunk_id,
         KEY_REQUEST_ID: request_id,
         **observability,
     }
     if final_decode_step is not None:
-        payload[MING_FINAL_DECODE_STEP_KEY] = int(final_decode_step)
+        kv_meta[MING_FINAL_DECODE_STEP_KEY] = int(final_decode_step)
     if stop_reason is not None:
-        payload[MING_STOP_REASON_KEY] = stop_reason
+        kv_meta[MING_STOP_REASON_KEY] = stop_reason
     if finished:
         state["terminal_sent"] = True
-    return payload
+    return OmniPayloadStruct(
+        codes=CodesStruct(audio=torch.tensor([0], dtype=torch.long)),
+        meta=MetaStruct(
+            finished=torch.tensor(finished, dtype=torch.bool),
+            stream_finished=torch.tensor(finished, dtype=torch.bool),
+        ),
+        latent=latent_patches,
+        kv_metadata=kv_meta,
+    )
 
 
 def llm2audio_vae(

@@ -123,17 +123,38 @@ class MingAudioVAEModel(nn.Module):
 
         for idx in range(num_reqs):
             info = info_list[idx] if idx < len(info_list) and isinstance(info_list[idx], dict) else {}
+            meta = info.get("meta") or {}
+            kv_meta = info.get("kv_metadata") or {}
             has_ming_context = _has_ming_context(info)
-            if has_ming_context and KEY_REQUEST_ID not in info:
+            if has_ming_context and KEY_REQUEST_ID not in info and KEY_REQUEST_ID not in kv_meta:
                 raise RuntimeError(
                     f"Ming Stage-2 received a payload without {KEY_REQUEST_ID}. keys={sorted(info.keys())}"
                 )
             request_id = _resolve_request_id(info, idx)
             self._touch_request_state(request_id)
-            chunk_id = _coerce_optional_int(info.get(KEY_CHUNK_ID))
-            finished = _coerce_finished(info.get("stream_finished", torch.tensor(True)))
-            latent = info.get("ming_latent_patches")
-            stripped = bool(info.get("_ming_payload_stripped", False))
+            chunk_id = _coerce_optional_int(_first_present(info.get(KEY_CHUNK_ID), kv_meta.get(KEY_CHUNK_ID)))
+            finished = _coerce_finished(
+                _first_present(
+                    meta.get("stream_finished"),
+                    meta.get("finished"),
+                    info.get("stream_finished"),
+                    kv_meta.get("stream_finished"),
+                    torch.tensor(True),
+                )
+            )
+            latent = _first_present(
+                info.get("latent"),
+                info.get("ming_latent_patches"),
+                kv_meta.get("ming_latent_patches"),
+            )
+            stripped = bool(
+                _first_present(
+                    meta.get("_ming_payload_stripped"),
+                    info.get("_ming_payload_stripped"),
+                    kv_meta.get("_ming_payload_stripped"),
+                    False,
+                )
+            )
             if stripped:
                 raise RuntimeError(
                     "Ming Stage-2 payload was stripped before model entry. "
@@ -196,8 +217,16 @@ class MingAudioVAEModel(nn.Module):
                         {
                             "request_id": request_id,
                             "chunk_id": chunk_id,
-                            "stop_reason": info.get(MING_STOP_REASON_KEY),
-                            "final_decode_step": _coerce_optional_int(info.get(MING_FINAL_DECODE_STEP_KEY)),
+                            "stop_reason": _first_present(
+                                info.get(MING_STOP_REASON_KEY),
+                                kv_meta.get(MING_STOP_REASON_KEY),
+                            ),
+                            "final_decode_step": _coerce_optional_int(
+                                _first_present(
+                                    info.get(MING_FINAL_DECODE_STEP_KEY),
+                                    kv_meta.get(MING_FINAL_DECODE_STEP_KEY),
+                                )
+                            ),
                             "final_chunk_patch_count": patch_count,
                             "total_patch_count": total_patch_count,
                             "final_chunk_waveform_numel": int(waveform_flat.numel()),
@@ -281,6 +310,13 @@ def _coerce_finished(value: Any) -> bool:
     return bool(value)
 
 
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _coerce_optional_int(value: Any, default: int | None = None) -> int | None:
     if value is None:
         return default
@@ -297,7 +333,8 @@ def _coerce_optional_int(value: Any, default: int | None = None) -> int | None:
 
 
 def _resolve_request_id(info: dict[str, Any], idx: int) -> str:
-    request_id = info.get(KEY_REQUEST_ID)
+    kv_meta = info.get("kv_metadata") or {}
+    request_id = info.get(KEY_REQUEST_ID) or kv_meta.get(KEY_REQUEST_ID)
     if request_id is None:
         return str(idx)
     if not isinstance(request_id, str) or not request_id:
@@ -306,7 +343,14 @@ def _resolve_request_id(info: dict[str, Any], idx: int) -> str:
 
 
 def _has_ming_context(info: dict[str, Any]) -> bool:
-    return any(key in info for key in (KEY_REQUEST_ID, KEY_CHUNK_ID, "ming_latent_patches", "_ming_payload_stripped"))
+    kv_meta = info.get("kv_metadata") or {}
+    keys = (
+        KEY_REQUEST_ID,
+        KEY_CHUNK_ID,
+        "ming_latent_patches",
+        "_ming_payload_stripped",
+    )
+    return any(key in info or key in kv_meta for key in keys) or "latent" in info
 
 
 def _shape_of(value: Any) -> tuple[int, ...] | None:
