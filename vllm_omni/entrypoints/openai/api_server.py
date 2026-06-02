@@ -578,6 +578,31 @@ async def build_async_omni_from_stage_config(
 
     async_omni: EngineClient | None = None
 
+    # Pre-load the model config so HuggingFace registers `transformers_modules`
+    # in this process — only when the user has explicitly opted in via
+    # `--trust-remote-code`. Stage workers consume the same flag through their
+    # deploy config, but the API server process also needs the dynamic modules
+    # for ZMQ pickle deserialization of stage outputs that reference them
+    # (e.g. trust_remote_code models like MiniCPM-o).
+    if getattr(args, "trust_remote_code", False) and getattr(args, "model", None):
+        try:
+            import os
+
+            from transformers import AutoConfig
+
+            # Hide GPUs so the custom config code doesn't allocate CUDA memory.
+            saved = os.environ.get("CUDA_VISIBLE_DEVICES")
+            os.environ["CUDA_VISIBLE_DEVICES"] = ""
+            try:
+                AutoConfig.from_pretrained(args.model, trust_remote_code=True)
+            finally:
+                if saved is not None:
+                    os.environ["CUDA_VISIBLE_DEVICES"] = saved
+                else:
+                    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        except Exception as e:
+            logger.debug("Pre-loading transformers_modules failed: %s", e)
+
     try:
         kwargs = vars(args).copy()
         kwargs.pop("model", None)
@@ -1606,6 +1631,10 @@ async def generate_images(request: ImageGenerationRequest, raw_request: Request)
                 extra_body["guidance_scale"] = request.guidance_scale
             if request.true_cfg_scale is not None:
                 extra_body["true_cfg_scale"] = request.true_cfg_scale
+            if request.flow_shift is not None:
+                extra_body["flow_shift"] = request.flow_shift
+            if request.extra_params is not None:
+                extra_body["extra_params"] = request.extra_params
             if request.generator_device is not None:
                 extra_body["generator_device"] = request.generator_device
             if request.lora is not None:
@@ -1636,17 +1665,19 @@ async def generate_images(request: ImageGenerationRequest, raw_request: Request)
             return ImageGenerationResponse(created=int(time.time()), data=image_data)
 
         # Build params - pass through user values directly
-        prompt: OmniTextPrompt = {"prompt": request.prompt}
+        prompt: OmniTextPrompt = {"prompt": request.prompt, "modalities": ["image"]}
         if request.negative_prompt is not None:
             prompt["negative_prompt"] = request.negative_prompt
         gen_params = OmniDiffusionSamplingParams(num_outputs_per_prompt=request.n)
-        extra_args = {}
+        extra_args = dict(request.extra_params or {})
         if request.use_system_prompt is not None:
             extra_args["use_system_prompt"] = request.use_system_prompt
         if request.system_prompt is not None:
             extra_args["system_prompt"] = request.system_prompt
         if request.bot_task is not None:
             extra_args["bot_task"] = request.bot_task
+        if request.flow_shift is not None:
+            extra_args["flow_shift"] = request.flow_shift
         if extra_args:
             gen_params.extra_args = extra_args
         # Parse per-request LoRA (compatible with chat's extra_body.lora shape).
@@ -1821,7 +1852,7 @@ async def edit_images(
     try:
         # 2. Build prompt & images params
         cot_output = None
-        prompt: OmniTextPrompt = {"prompt": prompt}
+        prompt: OmniTextPrompt = {"prompt": prompt, "modalities": ["image"]}
         if negative_prompt is not None:
             prompt["negative_prompt"] = negative_prompt
         input_images_list = []
