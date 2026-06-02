@@ -807,7 +807,7 @@ class MingAudioGenerator:
                 use_cache=True,
             )
         else:
-            past_seen_tokens = past_key_values.get_seq_length()
+            past_seen_tokens = int(past_key_values.get_seq_length())
             cache_position = torch.arange(
                 past_seen_tokens,
                 past_seen_tokens + inputs_embeds.shape[1],
