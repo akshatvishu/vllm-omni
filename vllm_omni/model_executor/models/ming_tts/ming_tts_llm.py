@@ -268,7 +268,11 @@ class MingLLMModel(nn.Module):
         next_token_ids = self._last_ming_next_token_ids
         self._last_ming_next_token_ids = None
         if next_token_ids is None:
-            raise RuntimeError("Missing Ming forced next-token ids before compute_logits.")
+            logger.debug(
+                "Missing Ming forced next-token ids before compute_logits. "
+                "Using dummy next-token IDs (likely during a profiling or dummy run)."
+            )
+            next_token_ids = [int(self.ming_config.text_eos_token_id)] * batch_size
         if len(next_token_ids) != batch_size:
             raise RuntimeError(
                 "Ming forced next-token batch mismatch: "
