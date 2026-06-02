@@ -4,6 +4,7 @@
 from types import SimpleNamespace
 
 import pytest
+import torch
 
 from vllm_omni.entrypoints.openai.serving_speech import OmniOpenAIServingSpeech
 from vllm_omni.model_executor.models.ming_tts.constants import (
@@ -17,9 +18,11 @@ from vllm_omni.model_executor.models.ming_tts.constants import (
     VAE_PATCH_SIZE,
 )
 from vllm_omni.model_executor.models.ming_tts.fm.cfm import Solver as MingTTSSolver
+from vllm_omni.model_executor.models.ming_tts.ming_tts_llm import MingLLMModel
 from vllm_omni.model_executor.models.ming_tts.validation import validate_ming_tts_config
 from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAEConfig
 from vllm_omni.model_executor.models.ming_utils.fm import Solver
+from vllm_omni.model_executor.models.output_templates import OmniOutput
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu, pytest.mark.tts]
 
@@ -88,3 +91,86 @@ def test_ming_instruction_parser_preserves_dense_and_flash_defaults():
         SimpleNamespace(instructions="calm", language="粤语", voice="灵小甄")
     )
     assert flash_fields == {"风格": "calm"}
+
+
+def _make_ming_logits_model(vocab_size=8):
+    model = object.__new__(MingLLMModel)
+    model.ming_config = SimpleNamespace(
+        llm_vocab_size=vocab_size,
+        max_decode_steps=1,
+        stop_head_min_steps=0,
+    )
+    model._last_text_mode = False
+    model._last_ming_next_token_ids = None
+    return model
+
+
+def test_ming_compute_logits_uses_cached_forced_next_token_ids():
+    model = _make_ming_logits_model()
+    model._last_ming_next_token_ids = [2, 5]
+
+    logits = MingLLMModel.compute_logits(model, torch.zeros((2, 4)), SimpleNamespace())
+
+    assert logits.shape == (2, 8)
+    assert logits[0, 2].item() == 0.0
+    assert logits[1, 5].item() == 0.0
+    assert torch.isneginf(logits[0, [0, 1, 3, 4, 5, 6, 7]]).all()
+    assert torch.isneginf(logits[1, [0, 1, 2, 3, 4, 6, 7]]).all()
+    assert model._last_ming_next_token_ids is None
+
+
+def test_ming_compute_logits_requires_cached_forced_next_token_ids():
+    model = _make_ming_logits_model()
+
+    with pytest.raises(RuntimeError, match="Missing Ming forced next-token ids"):
+        MingLLMModel.compute_logits(model, torch.zeros((1, 4)), SimpleNamespace())
+
+
+def test_ming_forward_non_decode_return_clears_cached_forced_next_token_ids():
+    class FakeBackbone:
+        def __call__(self, **kwargs):
+            return kwargs["inputs_embeds"]
+
+    model = _make_ming_logits_model()
+    model.model = FakeBackbone()
+    model._last_ming_next_token_ids = [2]
+
+    output = MingLLMModel.forward(
+        model,
+        input_ids=torch.tensor([1]),
+        positions=torch.tensor([0]),
+        inputs_embeds=torch.zeros((1, 4)),
+        model_intermediate_buffer=[],
+    )
+
+    assert isinstance(output, OmniOutput)
+    assert output.multimodal_outputs is None
+    assert model._last_ming_next_token_ids is None
+
+
+def test_ming_compute_logits_rejects_forced_token_batch_mismatch():
+    model = _make_ming_logits_model()
+    model._last_ming_next_token_ids = [2]
+
+    with pytest.raises(RuntimeError, match="batch mismatch"):
+        MingLLMModel.compute_logits(model, torch.zeros((2, 4)), SimpleNamespace())
+
+
+def test_ming_compute_logits_text_mode_delegates_to_backbone():
+    class FakeBackbone:
+        def __init__(self):
+            self.hidden_states = None
+
+        def compute_logits(self, hidden_states):
+            self.hidden_states = hidden_states
+            return torch.ones((hidden_states.shape[0], 3))
+
+    model = _make_ming_logits_model(vocab_size=3)
+    model._last_text_mode = True
+    model.model = FakeBackbone()
+    hidden_states = torch.zeros((2, 4))
+
+    logits = MingLLMModel.compute_logits(model, hidden_states, SimpleNamespace())
+
+    assert torch.equal(model.model.hidden_states, hidden_states)
+    assert torch.equal(logits, torch.ones((2, 3)))

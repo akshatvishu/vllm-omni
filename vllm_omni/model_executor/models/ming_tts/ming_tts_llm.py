@@ -42,13 +42,10 @@ from .patch_emission import (
     _coerce_latent_history,
     _get_request_token_counts,
     _normalize_request_infos,
-    _resolve_max_decode_steps_batch,
-    _resolve_min_decode_steps_batch,
     _resolve_ming_stop_decision,
     _resolve_optional_runtime_int,
     _resolve_runtime_float,
     _resolve_runtime_int,
-    _resolve_stop_probs_batch,
     _validate_ming_decode_window,
 )
 
@@ -87,6 +84,7 @@ class MingLLMModel(nn.Module):
         self.stop_head.to(dtype=self.fm_dtype)
         self.spk_head.to(dtype=self.fm_dtype)
         self._pending_postprocess_updates: dict[str, dict[str, Any]] = {}
+        self._last_ming_next_token_ids = None
         self._last_text_mode = False
 
     def embed_input_ids(
@@ -132,6 +130,7 @@ class MingLLMModel(nn.Module):
             inputs_embeds=inputs_embeds,
         )
         if isinstance(backbone_out, IntermediateTensors):
+            self._last_ming_next_token_ids = None
             return backbone_out
         hidden_states = _extract_hidden_states(backbone_out)
         token_counts = _get_request_token_counts(hidden_states, request_infos, seq_token_counts)
@@ -139,6 +138,7 @@ class MingLLMModel(nn.Module):
         if request_infos and any(bool(info.get(KEY_TEXT_MODE, False)) for info in request_infos) and not text_mode:
             raise RuntimeError("Mixed Ming text/audio modes in one Stage-0 batch are unsupported.")
         if text_mode:
+            self._last_ming_next_token_ids = None
             self._last_text_mode = True
             return OmniOutput(
                 text_hidden_states=hidden_states,
@@ -147,6 +147,7 @@ class MingLLMModel(nn.Module):
             )
         self._last_text_mode = False
         if latent_history is None and not token_counts:
+            self._last_ming_next_token_ids = None
             return OmniOutput(
                 text_hidden_states=hidden_states, multimodal_outputs=None, intermediate_tensors=intermediate_tensors
             )
@@ -155,9 +156,8 @@ class MingLLMModel(nn.Module):
 
         total_tokens = hidden_states.shape[0]
         latent_patch_tokens = next_embed_tokens = new_history_tokens = None
-        stop_prob_tokens = decode_step_tokens = has_patch = max_decode_step_tokens = min_decode_step_tokens = (
-            stop_reason_code_tokens
-        ) = None
+        decode_step_tokens = has_patch = stop_reason_code_tokens = None
+        next_token_ids = []
         pending_updates: dict[str, dict[str, Any]] = {}
         cursor = 0
         any_decode = False
@@ -196,21 +196,15 @@ class MingLLMModel(nn.Module):
                 new_history_tokens = new_history.new_zeros(
                     (total_tokens, self.ming_config.history_patch_size, self.ming_config.latent_dim)
                 )
-                stop_prob_tokens = stop_probs.new_zeros((total_tokens,))
                 decode_step_tokens = torch.zeros((total_tokens,), dtype=torch.int32, device=hidden_states.device)
-                max_decode_step_tokens = torch.zeros((total_tokens,), dtype=torch.int32, device=hidden_states.device)
-                min_decode_step_tokens = torch.zeros((total_tokens,), dtype=torch.int32, device=hidden_states.device)
                 has_patch = torch.zeros((total_tokens,), dtype=torch.bool, device=hidden_states.device)
                 stop_reason_code_tokens = torch.zeros((total_tokens,), dtype=torch.int32, device=hidden_states.device)
             latent_patch_tokens[output_index : output_index + 1] = sampled_token_latent
             next_embed_tokens[output_index : output_index + 1] = next_embeds
             new_history_tokens[output_index : output_index + 1] = new_history
-            stop_prob_tokens[output_index : output_index + 1] = stop_probs
             decode_step_tokens[output_index : output_index + 1] = decode_step
-            max_decode_step_tokens[output_index : output_index + 1] = req_max_decode_steps
-            min_decode_step_tokens[output_index : output_index + 1] = req_min_decode_steps
             has_patch[output_index : output_index + 1] = True
-            stop_reason, _, _, _, _ = _resolve_ming_stop_decision(
+            stop_reason, _, _, _, next_token_id = _resolve_ming_stop_decision(
                 step=decode_step,
                 stop_prob=float(stop_probs.reshape(-1)[0].item()),
                 stop_threshold=float(self.ming_config.stop_head_threshold),
@@ -221,6 +215,7 @@ class MingLLMModel(nn.Module):
                 text_eos_token_id=int(self.ming_config.text_eos_token_id),
             )
             stop_reason_code_tokens[output_index : output_index + 1] = MING_STOP_REASON_CODES[stop_reason]
+            next_token_ids.append(int(next_token_id))
             if isinstance(req_id, str):
                 pending_updates[req_id] = {
                     KEY_LATENT_HISTORY: new_history,
@@ -234,19 +229,18 @@ class MingLLMModel(nn.Module):
 
         self._pending_postprocess_updates = pending_updates
         if not any_decode:
+            self._last_ming_next_token_ids = None
             return OmniOutput(
                 text_hidden_states=hidden_states, multimodal_outputs=None, intermediate_tensors=intermediate_tensors
             )
+        self._last_ming_next_token_ids = next_token_ids
         return OmniOutput(
             text_hidden_states=hidden_states,
             multimodal_outputs={
                 "ming_latent_patch": latent_patch_tokens,
                 "ming_next_embeds": next_embed_tokens,
                 "ming_new_history": new_history_tokens,
-                "ming_stop_prob": stop_prob_tokens,
                 "ming_decode_step": decode_step_tokens,
-                "ming_max_decode_steps": max_decode_step_tokens,
-                "ming_min_decode_steps": min_decode_step_tokens,
                 "ming_has_patch": has_patch,
                 MING_STOP_REASON_KEY: stop_reason_code_tokens,
             },
@@ -256,20 +250,9 @@ class MingLLMModel(nn.Module):
     def pop_postprocess_update(self, req_id: str) -> dict[str, Any]:
         return self._pending_postprocess_updates.pop(req_id, {}) if isinstance(req_id, str) else {}
 
-    def compute_logits(
-        self, hidden_states: torch.Tensor | OmniOutput, sampling_metadata: SamplingMetadata
-    ) -> torch.Tensor | None:
-        decode_steps = stop_probs_tensor = max_decode_steps_tensor = min_decode_steps_tensor = None
-        text_mode = self._last_text_mode
-        if isinstance(hidden_states, OmniOutput):
-            mm = hidden_states.multimodal_outputs or {}
-            text_mode = bool(mm.get(KEY_TEXT_MODE, text_mode))
-            decode_steps = mm.get("ming_decode_step")
-            stop_probs_tensor = mm.get("ming_stop_prob")
-            max_decode_steps_tensor = mm.get("ming_max_decode_steps")
-            min_decode_steps_tensor = mm.get("ming_min_decode_steps")
-            hidden_states = hidden_states.text_hidden_states
-        if text_mode:
+    def compute_logits(self, hidden_states: torch.Tensor, sampling_metadata: SamplingMetadata) -> torch.Tensor | None:
+        del sampling_metadata
+        if self._last_text_mode:
             return (
                 None
                 if hidden_states is None or hidden_states.numel() == 0
@@ -282,34 +265,22 @@ class MingLLMModel(nn.Module):
                 f"Expected hidden_states rank-2 [B,H] in compute_logits, got {tuple(hidden_states.shape)}"
             )
         batch_size = hidden_states.shape[0]
-        stop_prob_values = _resolve_stop_probs_batch(stop_probs_tensor, batch_size=batch_size)
-        if stop_prob_values is None:
-            stop_probs = self.stop_head(hidden_states.to(dtype=self.fm_dtype)).softmax(dim=-1)[:, 1]
-            if not torch.isfinite(stop_probs).all():
-                raise RuntimeError("Non-finite stop_probs in Ming compute_logits.")
-            stop_prob_values = [float(stop_probs[i].item()) for i in range(batch_size)]
-        steps = self._get_decode_steps(decode_steps, sampling_metadata, batch_size)
-        max_decode_steps = _resolve_max_decode_steps_batch(
-            max_decode_steps_tensor, batch_size=batch_size, default_value=self.ming_config.max_decode_steps
-        )
-        min_decode_steps = _resolve_min_decode_steps_batch(min_decode_steps_tensor, batch_size=batch_size)
+        next_token_ids = self._last_ming_next_token_ids
+        self._last_ming_next_token_ids = None
+        if next_token_ids is None:
+            raise RuntimeError("Missing Ming forced next-token ids before compute_logits.")
+        if len(next_token_ids) != batch_size:
+            raise RuntimeError(
+                "Ming forced next-token batch mismatch: "
+                f"got {len(next_token_ids)} ids for hidden_states batch {batch_size}."
+            )
         logits = torch.full(
             (batch_size, self.ming_config.llm_vocab_size),
             float("-inf"),
             device=hidden_states.device,
             dtype=torch.float32,
         )
-        for i in range(batch_size):
-            _, _, _, _, next_token_id = _resolve_ming_stop_decision(
-                step=steps[i],
-                stop_prob=stop_prob_values[i],
-                stop_threshold=float(self.ming_config.stop_head_threshold),
-                min_stop_step=int(self.ming_config.stop_head_min_steps),
-                min_decode_steps=min_decode_steps[i],
-                max_decode_steps=max_decode_steps[i],
-                audio_dummy_token_id=int(self.ming_config.audio_dummy_token_id),
-                text_eos_token_id=int(self.ming_config.text_eos_token_id),
-            )
+        for i, next_token_id in enumerate(next_token_ids):
             logits[i, int(next_token_id)] = 0.0
         return logits
 
@@ -371,28 +342,6 @@ class MingLLMModel(nn.Module):
         if not torch.isfinite(stop_probs).all():
             raise RuntimeError("Non-finite stop_probs in Ming decode step.")
         return sampled_token_latent, next_embeds, new_history, stop_probs
-
-    def _get_decode_steps(
-        self, decode_steps: torch.Tensor | None, sampling_metadata: SamplingMetadata, batch_size: int
-    ) -> list[int]:
-        if isinstance(decode_steps, torch.Tensor) and decode_steps.numel() > 0:
-            flat_steps = decode_steps.reshape(-1)
-            return [int(flat_steps[min(i, flat_steps.numel() - 1)].item()) for i in range(batch_size)]
-        steps: list[int] = []
-        output_token_ids = getattr(sampling_metadata, "output_token_ids", None)
-        if isinstance(output_token_ids, list):
-            for token_ids in output_token_ids[:batch_size]:
-                if isinstance(token_ids, torch.Tensor):
-                    steps.append(int(token_ids.numel()))
-                elif isinstance(token_ids, (list, tuple)):
-                    steps.append(len(token_ids))
-                else:
-                    raise RuntimeError(
-                        f"Expected output_token_ids entries to be list/tuple/Tensor, got {type(token_ids)!r}"
-                    )
-        while len(steps) < batch_size:
-            steps.append(0)
-        return steps[:batch_size]
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         params_dict = dict(self.named_parameters(remove_duplicate=False))

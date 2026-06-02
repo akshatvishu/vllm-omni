@@ -136,42 +136,6 @@ def _validate_ming_decode_window(
             )
 
 
-def _resolve_max_decode_steps_batch(
-    value: torch.Tensor | None,
-    *,
-    batch_size: int,
-    default_value: int,
-) -> list[int]:
-    if value is None:
-        return [int(default_value)] * batch_size
-    flat = value.reshape(-1).tolist()
-    if not flat:
-        return [int(default_value)] * batch_size
-    resolved = [int(item) for item in flat]
-    for item in resolved:
-        if item <= 0:
-            raise RuntimeError(f"Invalid ming_max_decode_steps in runtime batch: got {item}")
-    if len(resolved) < batch_size:
-        resolved.extend([resolved[-1]] * (batch_size - len(resolved)))
-    return resolved[:batch_size]
-
-
-def _resolve_min_decode_steps_batch(
-    value: torch.Tensor | None,
-    *,
-    batch_size: int,
-) -> list[int]:
-    if value is None:
-        return [0] * batch_size
-    flat = value.reshape(-1).tolist()
-    if not flat:
-        return [0] * batch_size
-    resolved = [max(0, int(item)) for item in flat]
-    if len(resolved) < batch_size:
-        resolved.extend([resolved[-1]] * (batch_size - len(resolved)))
-    return resolved[:batch_size]
-
-
 def _resolve_ming_stop_decision(
     *,
     step: int,
@@ -216,16 +180,3 @@ def _resolve_ming_stop_decision(
         min_required_decode_steps,
         audio_dummy_token_id,
     )
-
-
-def _resolve_stop_probs_batch(
-    value: torch.Tensor | None,
-    *,
-    batch_size: int,
-) -> list[float] | None:
-    if value is None:
-        return None
-    flat = value.reshape(-1)
-    if flat.numel() == 0:
-        return None
-    return [float(flat[min(i, flat.numel() - 1)].item()) for i in range(batch_size)]
