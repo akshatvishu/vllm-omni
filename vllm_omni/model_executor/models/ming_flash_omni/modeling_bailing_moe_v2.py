@@ -794,6 +794,9 @@ class BailingMoeV2ForCausalLM(nn.Module, CustomProcessMixin):
         self.sampler = Sampler()
         self.make_empty_intermediate_tensors = self.model.make_empty_intermediate_tensors
 
+    def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
+        return self.model.word_embeddings(input_ids)
+
     def forward(
         self,
         input_ids: torch.Tensor,
