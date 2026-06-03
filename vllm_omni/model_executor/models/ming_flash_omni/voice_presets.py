@@ -22,7 +22,7 @@ from .spk_embedding import SpkembExtractor
 from .talker_module import resample
 
 if TYPE_CHECKING:
-    from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAE
+    from vllm_omni.model_executor.models.common.ming.audio_vae import AudioVAE
 
     from .talker_module import Aggregator
 

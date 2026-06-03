@@ -7,7 +7,7 @@ from typing import Any
 
 from transformers import PretrainedConfig, Qwen2Config
 
-from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAEConfig
+from vllm_omni.model_executor.models.common.ming.audio_vae import AudioVAEConfig
 
 from .constants import (
     AGGREGATOR_HIDDEN_SIZE,

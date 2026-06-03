@@ -13,7 +13,7 @@ from safetensors import safe_open
 from vllm.logger import init_logger
 
 from vllm_omni.engine.stage_init_utils import _resolve_model_to_local_path
-from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAE
+from vllm_omni.model_executor.models.common.ming.audio_vae import AudioVAE
 
 from .audio_prep import (
     _coerce_prompt_latents,

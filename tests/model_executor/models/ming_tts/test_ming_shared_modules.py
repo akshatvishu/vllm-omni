@@ -7,6 +7,8 @@ import pytest
 import torch
 
 from vllm_omni.entrypoints.openai.serving_speech import OmniOpenAIServingSpeech
+from vllm_omni.model_executor.models.common.ming.audio_vae import AudioVAEConfig
+from vllm_omni.model_executor.models.common.ming.fm import Solver
 from vllm_omni.model_executor.models.ming_tts.constants import (
     AGGREGATOR_HIDDEN_SIZE,
     HISTORY_PATCH_SIZE,
@@ -20,8 +22,6 @@ from vllm_omni.model_executor.models.ming_tts.constants import (
 from vllm_omni.model_executor.models.ming_tts.fm.cfm import Solver as MingTTSSolver
 from vllm_omni.model_executor.models.ming_tts.ming_tts_llm import MingLLMModel
 from vllm_omni.model_executor.models.ming_tts.validation import validate_ming_tts_config
-from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAEConfig
-from vllm_omni.model_executor.models.ming_utils.fm import Solver
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu, pytest.mark.tts]

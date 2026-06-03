@@ -8,7 +8,7 @@ from transformers import PretrainedConfig, PreTrainedModel, Qwen2Config, Qwen2Mo
 from transformers.utils import is_flash_attn_2_available
 from vllm.logger import init_logger
 
-from vllm_omni.model_executor.models.ming_utils.audio_dsp import ISTFTHead
+from .audio_dsp import ISTFTHead
 
 logger = init_logger(__name__)
 

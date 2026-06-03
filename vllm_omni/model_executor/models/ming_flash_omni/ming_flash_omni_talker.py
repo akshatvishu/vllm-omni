@@ -26,7 +26,7 @@ from vllm.sequence import IntermediateTensors
 
 from vllm_omni.model_executor.custom_process_mixin import CustomProcessMixin
 from vllm_omni.model_executor.model_loader.weight_utils import download_weights_from_hf_specific
-from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAE, AudioVAEConfig
+from vllm_omni.model_executor.models.common.ming.audio_vae import AudioVAE, AudioVAEConfig
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.transformers_utils.configs.ming_flash_omni import MingFlashOmniTalkerConfig
 

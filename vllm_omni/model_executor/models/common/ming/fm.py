@@ -3,7 +3,7 @@
 
 import torch
 
-from vllm_omni.model_executor.models.ming_utils.dit import get_epss_timesteps
+from .dit import get_epss_timesteps
 
 
 def apply_sway_sampling(t, sway_sampling_coef):

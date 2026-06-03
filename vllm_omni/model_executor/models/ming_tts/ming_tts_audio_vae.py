@@ -15,7 +15,7 @@ from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
-from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAE
+from vllm_omni.model_executor.models.common.ming.audio_vae import AudioVAE
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 
 from .config_ming_tts import KEY_CHUNK_ID, KEY_REQUEST_ID, MingTTSConfig

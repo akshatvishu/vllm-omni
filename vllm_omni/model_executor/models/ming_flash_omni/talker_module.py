@@ -33,9 +33,9 @@ from vllm.platforms import current_platform
 from x_transformers.x_transformers import RotaryEmbedding
 
 from vllm_omni.model_executor.layers.timestep_embedding import DiTTimestepEmbedding
-from vllm_omni.model_executor.models.ming_utils.audio_vae import AudioVAE
-from vllm_omni.model_executor.models.ming_utils.dit import CondEmbedder, DiTBlock, FinalLayer, get_epss_timesteps
-from vllm_omni.model_executor.models.ming_utils.fm import apply_sway_sampling, integrate_cfm_steps
+from vllm_omni.model_executor.models.common.ming.audio_vae import AudioVAE
+from vllm_omni.model_executor.models.common.ming.dit import CondEmbedder, DiTBlock, FinalLayer, get_epss_timesteps
+from vllm_omni.model_executor.models.common.ming.fm import apply_sway_sampling, integrate_cfm_steps
 
 logger = init_logger(__name__)
 

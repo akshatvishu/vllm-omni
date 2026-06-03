@@ -6,7 +6,7 @@
 import torch
 from torch import nn
 
-from vllm_omni.model_executor.models.ming_utils.fm import Solver, build_timesteps
+from vllm_omni.model_executor.models.common.ming.fm import Solver, build_timesteps
 
 
 class CFM(nn.Module):
