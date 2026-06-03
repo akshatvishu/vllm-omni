@@ -17,7 +17,11 @@ if "diffusers.models.transformers.transformer_glm_image" not in sys.modules:
         def __init__(self, *args, **kwargs):
             del args, kwargs
 
+    class GlmImageTransformer2DModel:
+        pass
+
     glm_image_module.GlmImageCombinedTimestepSizeEmbeddings = GlmImageCombinedTimestepSizeEmbeddings
+    glm_image_module.GlmImageTransformer2DModel = GlmImageTransformer2DModel
     sys.modules["diffusers.models.transformers.transformer_glm_image"] = glm_image_module
 
 import vllm_omni.diffusion.cache.teacache.coefficient_estimator as coefficient_estimator
