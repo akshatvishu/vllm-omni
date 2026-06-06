@@ -77,6 +77,12 @@ def parse_args():
         default=None,
         help='JSON profiler config for torch/cuda profiling, e.g. \'{"profiler":"torch","torch_profiler_dir":"./perf"}\'.',
     )
+    parser.add_argument(
+        "--log-stats",
+        action="store_true",
+        default=False,
+        help="Enable logging of engine performance statistics.",
+    )
     return parser.parse_args()
 
 
@@ -115,6 +121,7 @@ def main():
         model=args.model,
         deploy_config=args.deploy_config,
         profiler_config=args.profiler_config,
+        log_stats=args.log_stats,
     )
 
     from transformers import AutoTokenizer
