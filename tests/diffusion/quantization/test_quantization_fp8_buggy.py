@@ -455,7 +455,7 @@ def _generate_sensenova_u1_image(
     """
     omni_kwargs: dict[str, Any] = {}
     if quantization_config:
-        omni_kwargs["quantization_config"] = quantization_config
+        omni_kwargs["quantization"] = quantization_config
 
     with OmniRunner(_SENSENOVA_MODEL, **omni_kwargs) as runner:
         torch.accelerator.reset_peak_memory_stats()
