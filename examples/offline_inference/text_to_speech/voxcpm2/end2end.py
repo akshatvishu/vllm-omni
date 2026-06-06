@@ -78,6 +78,12 @@ def parse_args():
         help='JSON profiler config for torch/cuda profiling, e.g. \'{"profiler":"torch","torch_profiler_dir":"./perf"}\'.',
     )
     parser.add_argument(
+        "--num-warmups",
+        type=int,
+        default=0,
+        help="Number of unprofiled warmup requests to run before timing/profiling.",
+    )
+    parser.add_argument(
         "--log-stats",
         action="store_true",
         default=False,
@@ -159,6 +165,14 @@ def main():
     if ref_text_arg:
         print(f"Ref text    : {ref_text_arg}")
     print(f"Output dir  : {output_dir}")
+
+    num_warmups = max(0, args.num_warmups)
+    for warmup_idx in range(num_warmups):
+        print(f"[Warmup] Running request {warmup_idx + 1}/{num_warmups}...")
+        warmup_outputs = engine.generate([prompt])
+        del warmup_outputs
+    if num_warmups:
+        print("[Warmup] Complete.")
 
     if profiler_enabled:
         engine.start_profile()
