@@ -32,10 +32,10 @@ def cuda_marks(*, res: str, num_cards: int):
 
 def rocm_marks(*, res: str, num_cards: int):
     test_platform_detail = pytest.mark.rocm
-    if res == "MI325":
-        test_resource = pytest.mark.MI325
+    if res in ("MI325", "MI300X"):
+        test_resource = getattr(pytest.mark, res)
     else:
-        raise ValueError(f"Invalid ROCm resource type: {res}. Supported: MI325")
+        raise ValueError(f"Invalid ROCm resource type: {res}. Supported: MI325, MI300X")
     marks = [test_resource, test_platform_detail]
     if num_cards == 1:
         return marks
@@ -80,13 +80,13 @@ def gpu_marks(*, res: str, num_cards: int):
     test_platform = pytest.mark.gpu
     if res in ("L4", "H100"):
         return [test_platform] + cuda_marks(res=res, num_cards=num_cards)
-    if res == "MI325":
+    if res in ("MI325", "MI300X"):
         return [test_platform] + rocm_marks(res=res, num_cards=num_cards)
     if res == "B60":
         return [test_platform] + xpu_marks(res=res, num_cards=num_cards)
     if res == "S5000":
         return [test_platform] + musa_marks(res=res, num_cards=num_cards)
-    raise ValueError(f"Invalid resource type: {res}. Supported: L4, H100, MI325, B60, S5000")
+    raise ValueError(f"Invalid resource type: {res}. Supported: L4, H100, MI325, MI300X, B60, S5000")
 
 
 def npu_marks(*, res: str, num_cards: int):
