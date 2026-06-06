@@ -492,7 +492,7 @@ def _generate_sensenova_u1_image(
         return generated_image, peak_mem
 
 
-@hardware_test(res={"cuda": "H100", "rocm": "MI300X"})
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"})
 def test_sensenova_u1_fp8_generates_image():
     """SenseNova-U1 with gen-only FP8 generates a valid image.
 
@@ -503,14 +503,14 @@ def test_sensenova_u1_fp8_generates_image():
     image.save("test_sensenova_u1_fp8.png")
 
 
-@hardware_test(res={"cuda": "H100", "rocm": "MI300X"})
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"})
 def test_sensenova_u1_bf16_generates_image():
     """SenseNova-U1 without quantization generates a valid image (baseline)."""
     image, _ = _generate_sensenova_u1_image(quantization_config=None)
     image.save("test_sensenova_u1_bf16.png")
 
 
-@hardware_test(res={"cuda": "H100", "rocm": "MI300X"})
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"})
 def test_sensenova_u1_fp8_uses_less_memory():
     """Gen-only FP8 should use less peak memory than BF16 for SenseNova-U1."""
     _, mem_bf16 = _generate_sensenova_u1_image(
