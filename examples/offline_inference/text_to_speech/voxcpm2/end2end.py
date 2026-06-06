@@ -127,6 +127,7 @@ def main():
         model=args.model,
         deploy_config=args.deploy_config,
         profiler_config=args.profiler_config,
+        trust_remote_code=True,
         log_stats=args.log_stats,
     )
 
