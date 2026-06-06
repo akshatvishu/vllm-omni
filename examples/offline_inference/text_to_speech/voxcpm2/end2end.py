@@ -13,11 +13,23 @@ from pathlib import Path
 import soundfile as sf
 import torch
 
+import json
+import argparse
 from vllm_omni import Omni
 from vllm_omni.utils.tracking_parser import TrackingArgumentParser
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 SAMPLE_RATE = 48_000
+
+
+def parse_profiler_config(value: str) -> dict:
+    try:
+        config = json.loads(value)
+    except json.JSONDecodeError as e:
+        raise argparse.ArgumentTypeError(f"--profiler-config must be valid JSON: {e}") from e
+    if not isinstance(config, dict):
+        raise argparse.ArgumentTypeError("--profiler-config must be a JSON object")
+    return config
 
 
 def parse_args():
@@ -59,6 +71,12 @@ def parse_args():
         default=None,
         help="Optional transcript of --ref-audio (enables continuation mode).",
     )
+    parser.add_argument(
+        "--profiler-config",
+        type=parse_profiler_config,
+        default=None,
+        help='JSON profiler config for torch/cuda profiling, e.g. \'{"profiler":"torch","torch_profiler_dir":"./perf"}\'.',
+    )
     return parser.parse_args()
 
 
@@ -92,9 +110,11 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    profiler_enabled = args.profiler_config is not None
     engine = Omni(
         model=args.model,
         deploy_config=args.deploy_config,
+        profiler_config=args.profiler_config,
     )
 
     from transformers import AutoTokenizer
@@ -133,9 +153,16 @@ def main():
         print(f"Ref text    : {ref_text_arg}")
     print(f"Output dir  : {output_dir}")
 
+    if profiler_enabled:
+        engine.start_profile()
+
     t_start = time.perf_counter()
     outputs = engine.generate([prompt])
     elapsed = time.perf_counter() - t_start
+
+    if profiler_enabled:
+        print("\n[Profiler] Stopping profiler and collecting results...")
+        engine.stop_profile()
 
     # outputs[0].outputs[0].multimodal_output["audio"] is a list of tensors
     request_output = outputs[0]
