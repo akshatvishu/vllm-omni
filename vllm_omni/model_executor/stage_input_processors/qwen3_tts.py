@@ -145,7 +145,10 @@ def talker2code2wav_async_chunk(
 ) -> OmniPayloadStruct | None:
     request_id = request.external_req_id
     finished = bool(is_finished or request.is_finished())
-    request_payload = transfer_manager.request_payload
+    request_payload = getattr(transfer_manager, "request_payload", None)
+    if request_payload is None:
+        request_payload = {}
+        transfer_manager.request_payload = request_payload
 
     if isinstance(pooling_output, dict):
         frame = _extract_last_frame(pooling_output)
