@@ -22,11 +22,6 @@ from vllm_omni.model_executor.models.ming_tts.patch_emission import (
     MING_STOP_REASON_CODES,
     MING_STOP_REASON_KEY,
 )
-from vllm_omni.model_executor.stage_input_processors._chunk_transfer import (
-    get_chunk_config_int,
-    get_request_payload_store,
-    get_transfer_extra_config,
-)
 
 logger = init_logger(__name__)
 
@@ -121,19 +116,21 @@ def _decode_stop_reason(value: Any) -> str | None:
 
 
 def _get_async_chunk_config(transfer_manager: Any) -> tuple[int, int]:
-    cfg = get_transfer_extra_config(transfer_manager)
-    chunk_size = get_chunk_config_int(
-        cfg,
-        "latent_chunk_size",
-        LATENT_CHUNK_SIZE,
-        warning_prefix="Ming async chunk config",
-    )
-    left_context = get_chunk_config_int(
-        cfg,
-        "latent_left_context",
-        LATENT_LEFT_CONTEXT,
-        warning_prefix="Ming async chunk config",
-    )
+    connector = getattr(transfer_manager, "connector", None)
+    raw_cfg = getattr(connector, "config", {}) or {}
+    cfg = raw_cfg.get("extra", raw_cfg) if isinstance(raw_cfg, dict) else {}
+    if "latent_chunk_size" not in cfg:
+        logger.warning(
+            "Ming async chunk config missing latent_chunk_size, using fallback value %s",
+            LATENT_CHUNK_SIZE,
+        )
+    if "latent_left_context" not in cfg:
+        logger.warning(
+            "Ming async chunk config missing latent_left_context, using fallback value %s",
+            LATENT_LEFT_CONTEXT,
+        )
+    chunk_size = int(cfg.get("latent_chunk_size", LATENT_CHUNK_SIZE))
+    left_context = int(cfg.get("latent_left_context", LATENT_LEFT_CONTEXT))
     if chunk_size <= 0:
         raise ValueError(f"Invalid Ming latent_chunk_size={chunk_size}")
     # Stage-2 VAE caches past_key_values and stream_state by request_id.
@@ -179,7 +176,7 @@ def llm2audio_vae_async_chunk(
     finished = bool(is_finished or request.is_finished())
     final_decode_step = _extract_last_value(pooling_output, "ming_decode_step")
     stop_reason = _decode_stop_reason(_extract_last_value(pooling_output, MING_STOP_REASON_KEY))
-    request_payload = get_request_payload_store(transfer_manager)
+    request_payload = transfer_manager.request_payload
     request_state = request_payload.get(request_id)
     if not isinstance(request_state, dict) or "_ming_async_state" not in request_state:
         request_state = {

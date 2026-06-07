@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from __future__ import annotations
 
+from collections.abc import Iterable
 from functools import cached_property
 from typing import Any
 
@@ -38,9 +39,6 @@ from .config_ming_tts import (
     KEY_TEMPERATURE,
     KEY_TEXT_MODE,
     MingTTSConfig,
-)
-from .loader import (
-    load_weights,
 )
 from .patch_emission import MING_STOP_REASON_KEY
 from .prompt_encoder import _resolve_prompt_latents
@@ -102,8 +100,24 @@ class MingTTSForConditionalGeneration(nn.Module, SupportsPP, CustomProcessMixin)
     def sample(self, logits, sampling_metadata):
         return self.model.sample(logits, sampling_metadata) if hasattr(self.model, "sample") else None
 
-    def load_weights(self, weights):
-        return load_weights(self.model_stage, self.model, list(weights))
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
+        weights = list(weights)
+        if self.model_stage == "llm":
+            allowed = ("model.", "linear_proj_audio.", "flowloss.", "stop_head.", "spk_head.")
+            llm_weights = [(k, v) for k, v in weights if k.startswith(allowed)]
+            if not llm_weights:
+                raise RuntimeError(
+                    "Ming Stage-0 received no loadable checkpoint weights. "
+                    "Expected prefixes: model.*, linear_proj_audio.*, flowloss.*, stop_head.*, spk_head.*"
+                )
+            loaded = self.model.load_weights(llm_weights)
+            return {f"model.{name}" for name in loaded}
+
+        audio_weights = [(k, v) for k, v in weights if k.startswith("audio.")]
+        if not audio_weights:
+            raise RuntimeError("Ming Stage-1 received no loadable checkpoint weights. Expected prefix: audio.*")
+        loaded = self.model.load_weights(audio_weights)
+        return {f"model.{name}" for name in loaded}
 
     def _resolve_prompt_latents(self, info_dict: dict[str, Any]):
         return _resolve_prompt_latents(self, info_dict)

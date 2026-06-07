@@ -12,10 +12,6 @@ from vllm_omni.data_entry_keys import (
     OmniPayloadStruct,
     to_dict,
 )
-from vllm_omni.model_executor.stage_input_processors._chunk_transfer import (
-    get_request_payload_store,
-    get_transfer_extra_config,
-)
 from vllm_omni.model_executor.stage_input_processors.chunk_size_utils import (
     compute_dynamic_initial_chunk_size,
     max_ic_for_chunk_size,
@@ -149,7 +145,7 @@ def talker2code2wav_async_chunk(
 ) -> OmniPayloadStruct | None:
     request_id = request.external_req_id
     finished = bool(is_finished or request.is_finished())
-    request_payload = get_request_payload_store(transfer_manager)
+    request_payload = transfer_manager.request_payload
 
     if isinstance(pooling_output, dict):
         frame = _extract_last_frame(pooling_output)
@@ -162,7 +158,9 @@ def talker2code2wav_async_chunk(
     elif not finished:
         return None
 
-    cfg = get_transfer_extra_config(transfer_manager)
+    connector = getattr(transfer_manager, "connector", None)
+    raw_cfg = getattr(connector, "config", {}) or {}
+    cfg = raw_cfg.get("extra", raw_cfg) if isinstance(raw_cfg, dict) else {}
     chunk_size = int(cfg.get("codec_chunk_frames", 25))
     left_context_size_config = int(cfg.get("codec_left_context_frames", 25))
     configured_initial_chunk_size = int(cfg.get("initial_codec_chunk_frames") or 0)
