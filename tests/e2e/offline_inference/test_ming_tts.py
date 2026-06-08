@@ -11,6 +11,7 @@ import pytest
 import torch
 from transformers import AutoTokenizer
 from vllm import SamplingParams
+from vllm.inputs import tokens_input
 
 from tests.helpers.mark import hardware_test
 from tests.helpers.runtime import OmniRunner
@@ -65,7 +66,7 @@ def _build_prompt(
     instruction=TEST_INSTRUCTION,
     use_zero_spk_emb: bool = True,
 ) -> dict:
-    return build_ming_dense_prompt(
+    prompt_dict = build_ming_dense_prompt(
         tokenizer,
         prompt=DEFAULT_PROMPT,
         text=text,
@@ -73,6 +74,11 @@ def _build_prompt(
         runtime_controls={KEY_MAX_DECODE_STEPS: 200},
         use_zero_spk_emb=use_zero_spk_emb,
     )
+    prompt = tokens_input(prompt_token_ids=prompt_dict["prompt_token_ids"])
+    prompt["prompt"] = prompt_dict["prompt"]
+    prompt["text"] = prompt_dict["text"]
+    prompt["additional_information"] = prompt_dict["additional_information"]
+    return prompt
 
 
 def _sampling_params_list() -> list[SamplingParams]:

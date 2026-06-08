@@ -2413,7 +2413,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         if request.max_new_tokens is not None:
             runtime_controls[KEY_MAX_DECODE_STEPS] = request.max_new_tokens
 
-        return build_ming_dense_prompt(
+        prompt_dict = build_ming_dense_prompt(
             self._tts_tokenizer,
             # bgm / music-prompt mode not supported online;
             # requires prompt_mode API extension (deferred).
@@ -2426,6 +2426,11 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             speaker_embedding=speaker_embedding,
             use_zero_spk_emb=use_zero_spk_emb,
         )
+        prompt = tokens_input(prompt_token_ids=prompt_dict["prompt_token_ids"])
+        prompt["prompt"] = prompt_dict["prompt"]
+        prompt["text"] = prompt_dict["text"]
+        prompt["additional_information"] = prompt_dict["additional_information"]
+        return prompt
 
     async def _generate_audio_chunks(
         self,

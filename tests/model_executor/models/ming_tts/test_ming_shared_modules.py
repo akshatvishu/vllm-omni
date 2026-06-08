@@ -99,6 +99,7 @@ def _make_ming_logits_model(vocab_size=8):
         llm_vocab_size=vocab_size,
         max_decode_steps=1,
         stop_head_min_steps=0,
+        text_eos_token_id=7,
     )
     model._last_text_mode = False
     model._last_ming_next_token_ids = None
@@ -119,11 +120,13 @@ def test_ming_compute_logits_uses_cached_forced_next_token_ids():
     assert model._last_ming_next_token_ids is None
 
 
-def test_ming_compute_logits_requires_cached_forced_next_token_ids():
+def test_ming_compute_logits_falls_back_to_dummy_token_id():
     model = _make_ming_logits_model()
 
-    with pytest.raises(RuntimeError, match="Missing Ming forced next-token ids"):
-        MingLLMModel.compute_logits(model, torch.zeros((1, 4)), SimpleNamespace())
+    logits = MingLLMModel.compute_logits(model, torch.zeros((1, 4)), SimpleNamespace())
+    assert logits.shape == (1, 8)
+    assert logits[0, 7].item() == 0.0
+    assert torch.isneginf(logits[0, [0, 1, 2, 3, 4, 5, 6]]).all()
 
 
 def test_ming_forward_non_decode_return_clears_cached_forced_next_token_ids():
