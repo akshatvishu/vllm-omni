@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""Ming dense checkpoint config adapters."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -63,7 +65,9 @@ def _coerce_qwen2_config(value: Any) -> Qwen2Config:
 
 
 class MingDenseConfig(PretrainedConfig):
-    # Keep this aligned with the upstream inclusionAI HF config; the repo declares model_type="dense".
+    # The upstream checkpoint declares model_type="dense". Keep it for HF
+    # config compatibility; deploy/ming_tts.yaml selects the vLLM-Omni
+    # pipeline via pipeline: ming_tts.
     model_type = "dense"
 
     def __init__(

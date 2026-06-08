@@ -1,6 +1,6 @@
 # Ming-omni-tts Offline Inference
 
-`end2end.py` runs Ming dense 0.5B end to end with vLLM-Omni. It uses the in-repo Ming prompt builder directly, so the example request shape matches the real integration instead of a simplified wrapper.
+`end2end.py` runs Ming dense 0.5B end to end with vLLM-Omni. It uses the in-repo Ming prompt assembly helper directly, so the example request shape matches the real integration instead of a simplified wrapper.
 
 ## Files
 
@@ -8,7 +8,7 @@
 |---|---|
 | `end2end.py` | Driver: CLI, case loading, prompt construction, orchestration (~150 lines) |
 | `cases.yaml` | All 11 built-in case definitions (prompt, text, instruction, ref-audio flags, flow controls) |
-| `_runner.py` | Engine management and audio output (streaming + blocking paths; internal helper) |
+| `runner.py` | Engine management and audio output (streaming + blocking paths) |
 
 ## Model Overview
 
@@ -16,6 +16,11 @@ Ming dense 0.5B is exposed here as a two-stage offline pipeline:
 
 - **Stage 0**: Qwen2-based AR generation with Ming prompt formatting and inline flow controls
 - **Stage 1**: audio VAE decode to mono 44.1 kHz waveform
+
+`config_ming_tts.py` adapts the checkpoint's HuggingFace config fields
+(LLM, DiT, aggregator, AudioVAE, token ids). `vllm_omni/deploy/ming_tts.yaml`
+selects the vLLM-Omni pipeline and stage runtime topology, including
+connectors, async chunking, memory limits, and sampling defaults.
 
 The example supports both:
 

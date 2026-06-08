@@ -24,7 +24,7 @@ from vllm_omni.model_executor.models.ming_tts.prompt_assembly import build_ming_
 from vllm_omni.model_executor.models.ming_tts.speaker_extractor import MingSpeakerEmbeddingExtractor
 
 try:
-    from ._runner import (
+    from .runner import (
         build_manifest,
         build_sampling_params,
         resolve_metadata_json,
@@ -32,7 +32,7 @@ try:
         run_generation,
     )
 except ImportError:
-    from _runner import (
+    from runner import (
         build_manifest,
         build_sampling_params,
         resolve_metadata_json,

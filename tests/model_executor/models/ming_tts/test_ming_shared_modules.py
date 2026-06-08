@@ -19,7 +19,7 @@ from vllm_omni.model_executor.models.ming_tts.constants import (
     SAMPLE_RATE,
     VAE_PATCH_SIZE,
 )
-from vllm_omni.model_executor.models.ming_tts.fm.cfm import Solver as MingTTSSolver
+from vllm_omni.model_executor.models.ming_tts.flowloss_head import FlowLoss
 from vllm_omni.model_executor.models.ming_tts.ming_tts_llm import MingLLMModel
 from vllm_omni.model_executor.models.ming_tts.validation import validate_ming_tts_config
 from vllm_omni.model_executor.models.output_templates import OmniOutput
@@ -36,8 +36,14 @@ def test_ming_tts_audio_vae_uses_common_config():
 
 
 def test_ming_tts_cfm_solver_uses_common_implementation():
-    """Ming dense CFM imports the shared solver implementation."""
-    assert MingTTSSolver is Solver
+    """Ming dense imports the shared solver implementation directly."""
+    assert Solver.__module__ == "vllm_omni.model_executor.models.common.ming.fm"
+
+
+def test_ming_tts_flowloss_preserves_checkpoint_prefix():
+    flowloss = FlowLoss(z_channels=4, llm_cond_dim=8, hidden_size=16, depth=1, num_heads=2)
+
+    assert any(name.startswith("cfm.model.") for name in flowloss.state_dict())
 
 
 def test_ming_dense_validation_rejects_semantic_audio_vae_config():
