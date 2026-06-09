@@ -589,12 +589,14 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
     def _find_tts_stage(self):
         """Find and return the TTS stage config, or None if not found."""
         for stage in self.engine_client.stage_configs:
-            engine_args = getattr(stage, "engine_args", None)
-            model_stage = getattr(engine_args, "model_stage", None)
+            engine_args = stage.engine_args
+            model_stage = engine_args.model_stage
             model_arch = getattr(engine_args, "model_arch", None)
             worker_type = getattr(engine_args, "worker_type", None)
             if model_stage in _TTS_MODEL_STAGES:
                 return stage
+            # Ming dense identifies its AR entry stage by architecture because
+            # it does not use a dedicated TTS model_stage value.
             if model_arch in _MING_TTS_MODEL_ARCHS and worker_type == "ar":
                 return stage
         return None
