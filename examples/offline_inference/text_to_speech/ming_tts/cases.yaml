@@ -17,7 +17,7 @@ ip:
 
 bgm:
   prompt: "Please generate music based on the following description.\n"
-  text: "Genre: 电子舞曲. Mood: 自信 / 坚定. Instrument: 架子鼓. Theme: 节日. Duration: 30s."
+  text: " Genre: 电子舞曲. Mood: 自信 / 坚定. Instrument: 架子鼓. Theme: 节日. Duration: 30s."
   instruction: null
   use_zero_spk_emb: false
   max_decode_steps: 400
@@ -47,7 +47,7 @@ basic:
   instruction:
     语速: "快速"
     基频: "中"
-    音量: "高"
+    音量: "中"
   requires_ref_audio: true
   auto_extract_speaker_embeddings: true
   max_decode_steps: 200

@@ -38,7 +38,10 @@ uv pip install -e .
 The Ming offline example does not require a separate upstream Ming package.
 Reference-audio cases use the repo dependencies for audio loading,
 resampling, and CampPlus speaker extraction, including `soundfile`,
-`torchaudio`, and `onnxruntime`.
+`torchaudio`, and `onnxruntime-rocm` in the documented ROCm environment.
+
+The tested ROCm environment is summarized in the
+[Ming recipe](../../../../recipes/inclusionAI/Ming-omni-tts-0.5B.md).
 
 ## Supported Cases
 
@@ -176,9 +179,9 @@ by the local Ming validation script:
 
 ## Validated Outputs
 
-Validation on an L4 GPU completed the full blocking matrix and the default
-async_chunk matrix. Default async_chunk matched blocking output frame counts
-and Stage-1 patch counts for every case:
+The following measurements are retained from an earlier L4 CUDA validation;
+they are not ROCm benchmark results. Default async_chunk matched blocking
+output frame counts and Stage-1 patch counts for every case:
 
 | Case | Blocking frames / patches / sec | Async chunk frames / patches / sec |
 |---|---:|---:|
@@ -241,5 +244,5 @@ and Stage-1 patch counts for every case:
 - `podcast` automatically extracts one speaker embedding per reference clip
 - `--speaker-embedding` may contain either one 192-d vector or a list of 192-d vectors
 - `--enforce-eager` was used for the validated runs
-- Validation on the L4 GPU used SDPA for the Ming audio VAE instead of
+- The earlier L4 validation used SDPA for the Ming audio VAE instead of
   FlashAttention2, which is the preferred default when available.

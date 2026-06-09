@@ -229,15 +229,15 @@ Structured dialect control:
 ```bash
 python examples/online_serving/text_to_speech/ming_tts/openai_speech_client.py \
     --text "我觉得社会企业同个人都有责任" \
-    --instruction-json '{"方言":"广粤话"}'
+    --instruction-json '{"方言":"广粤话"}' \
+    --ref-audio /path/to/yue_prompt.wav
 ```
 
 Zero-shot cloning:
 ```bash
 python examples/online_serving/text_to_speech/ming_tts/openai_speech_client.py \
-    --task-type Base \
-    --text "我们的愿景是构建未来服务业的数字化基础设施。" \
-    --ref-audio /path/to/reference.wav \
+    --text "我们的愿景是构建未来服务业的数字化基础设施，为世界带来更多微小而美好的改变。" \
+    --ref-audio /path/to/10002287-00000094.wav \
     --ref-text "在此奉劝大家别乱打美白针。"
 ```
 

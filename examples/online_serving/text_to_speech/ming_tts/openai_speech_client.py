@@ -4,10 +4,12 @@
 
 Examples:
     python openai_speech_client.py --text "你好，世界"
-    python openai_speech_client.py --text "我会一直在这里陪着你。" \
-        --instructions "轻柔的ASMR耳语，慢速，贴近麦克风" --max-new-tokens 200
-    python openai_speech_client.py --text "你好，这是零样本克隆测试。" \
-        --ref-audio prompt.wav --ref-text "参考音频的转录文本" --max-new-tokens 200
+    python openai_speech_client.py --text "我觉得社会企业同个人都有责任" \
+        --instruction-json '{"方言":"广粤话"}' --ref-audio yue_prompt.wav --max-new-tokens 200
+    python openai_speech_client.py \
+        --text "我们的愿景是构建未来服务业的数字化基础设施，为世界带来更多微小而美好的改变。" \
+        --ref-audio 10002287-00000094.wav --ref-text "在此奉劝大家别乱打美白针。" \
+        --max-new-tokens 200
     python openai_speech_client.py --text "speaker_1:你好。 speaker_2:你好。" \
         --ref-audio speaker_1.wav --ref-audio speaker_2.wav --ref-text "speaker_1:你好。 speaker_2:你好。"
     python openai_speech_client.py --text "你好，这是流式输出测试。" \
