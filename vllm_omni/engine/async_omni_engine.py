@@ -1755,7 +1755,6 @@ class AsyncOmniEngine:
                 params=companion_params,
                 supported_tasks=self.supported_tasks,
             )
-            request = _upgrade_to_omni_request(request, companion_prompt)
             request.external_req_id = cid
 
             # Registration of this companion on stage-0's output processor is
