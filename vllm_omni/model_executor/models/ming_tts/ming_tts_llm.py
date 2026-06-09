@@ -91,14 +91,9 @@ class MingLLMModel(nn.Module):
     def embed_input_ids(
         self, input_ids: torch.Tensor, inputs_embeds: torch.Tensor | None = None, **_: Any
     ) -> torch.Tensor:
-        if hasattr(self.model, "embed_input_ids"):
-            if inputs_embeds is not None:
-                return self.model.embed_input_ids(input_ids, inputs_embeds=inputs_embeds)
-            try:
-                return self.model.embed_input_ids(input_ids)
-            except TypeError:
-                return self.model.embed_input_ids(input_ids, inputs_embeds=inputs_embeds)
-        return inputs_embeds if inputs_embeds is not None else self.model.embed_input_ids(input_ids)
+        if inputs_embeds is not None:
+            return inputs_embeds
+        return self.model.embed_input_ids(input_ids)
 
     def project_speaker_embedding(self, spk_emb: torch.Tensor) -> torch.Tensor:
         return self.spk_head(spk_emb)
