@@ -41,7 +41,7 @@ resampling, and CampPlus speaker extraction, including `soundfile`,
 `torchaudio`, and `onnxruntime-rocm` in the documented ROCm environment.
 
 The tested ROCm environment is summarized in the
-[Ming recipe](../../../../recipes/inclusionAI/Ming-omni-tts-0.5B.md).
+[Ming recipe](https://github.com/vllm-project/vllm-omni/blob/main/recipes/inclusionAI/Ming-omni-tts-0.5B.md).
 
 ## Supported Cases
 

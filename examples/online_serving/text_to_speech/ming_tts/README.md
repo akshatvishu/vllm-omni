@@ -21,7 +21,7 @@ cd examples/online_serving/text_to_speech/ming_tts
 ```
 
 The tested ROCm environment is summarized in the
-[Ming recipe](../../../../recipes/inclusionAI/Ming-omni-tts-0.5B.md).
+[Ming recipe](https://github.com/vllm-project/vllm-omni/blob/main/recipes/inclusionAI/Ming-omni-tts-0.5B.md).
 
 ## Send Requests
 
