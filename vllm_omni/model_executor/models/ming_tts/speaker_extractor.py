@@ -5,6 +5,7 @@ import os
 
 import torch
 import torchaudio
+from vllm.multimodal.media.audio import load_audio
 
 from vllm_omni.model_executor.models.ming_flash_omni.spk_embedding import SpkembExtractor
 
@@ -16,14 +17,6 @@ def resolve_model_to_local_path(model):
     from huggingface_hub import snapshot_download
 
     return snapshot_download(model)
-
-
-def _load_with_soundfile(audio_path):
-    import soundfile as sf
-
-    data, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
-    waveform = torch.from_numpy(data).T.contiguous()
-    return waveform, sample_rate
 
 
 class MingSpeakerEmbeddingExtractor:
@@ -50,12 +43,8 @@ class MingSpeakerEmbeddingExtractor:
         return embedding.squeeze(0).to(dtype=torch.float32)
 
     def extract_from_file(self, audio_path):
-        try:
-            waveform, sample_rate = torchaudio.load(audio_path)
-        except RuntimeError as e:
-            if not any(tok in str(e) for tok in ("torchcodec", "libavutil", "libtorchcodec")):
-                raise
-            waveform, sample_rate = _load_with_soundfile(audio_path)
+        audio, sample_rate = load_audio(audio_path, sr=None, mono=False)
+        waveform = torch.from_numpy(audio).contiguous()
         return self.extract_from_waveform(waveform, sample_rate)
 
     def extract_many(self, audio_paths):
