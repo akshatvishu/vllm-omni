@@ -144,7 +144,7 @@ def _extract_final_audio_outputs(outputs):
     return final_outputs
 
 
-def _extract_multimodal_output(output) -> dict:
+def _extract_multimodal_output(output) -> Mapping[str, Any]:
     multimodal_output = getattr(output, "multimodal_output", None)
     if isinstance(multimodal_output, Mapping):
         return multimodal_output
