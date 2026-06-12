@@ -156,7 +156,11 @@ class MossTTSNanoForGeneration(nn.Module):
             tts_dtype = torch.float32
 
         logger.info("Loading MOSS-TTS-Nano LM from %s (dtype=%s)", self.model_path, tts_dtype)
-        from transformers import AutoModelForCausalLM
+        from transformers import AutoModelForCausalLM, PreTrainedModel
+
+        # Shim _tp_plan to prevent TypeError in transformers when loading remote-code models
+        if getattr(PreTrainedModel, "_tp_plan", None) is None:
+            PreTrainedModel._tp_plan = {}
 
         lm = AutoModelForCausalLM.from_pretrained(
             self.model_path,
