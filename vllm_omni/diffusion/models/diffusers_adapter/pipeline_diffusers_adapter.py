@@ -15,6 +15,7 @@ It does NOT support:
 
 import inspect
 import logging
+import os
 import re
 from typing import Any, cast
 
@@ -86,13 +87,29 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
         self._pipeline_utils = get_pipeline_utils(pipeline_class_name)
         self._pipeline_utils.update_load_kwargs(self.od_config, load_kwargs)
 
-        self._pipeline = DiffusionPipeline.from_pretrained(model_id, **load_kwargs)
+        is_single_file = self.od_config.diffusion_load_format == "diffusers_single_file" or (
+            isinstance(model_id, str) and os.path.isfile(model_id)
+        )
+
+        if is_single_file:
+            if not isinstance(model_id, str):
+                raise ValueError("diffusers_single_file loading requires `model` to be a checkpoint path or URL.")
+            pipeline_class = self.od_config.diffusers_pipeline_cls or DiffusionPipeline
+            from_single_file = getattr(pipeline_class, "from_single_file", None)
+            if from_single_file is None:
+                raise ValueError(
+                    f"Diffusers pipeline class {pipeline_class.__name__} does not support from_single_file(). "
+                    "Pass a pipeline class that implements single-file loading or use a Diffusers repo layout."
+                )
+            self._pipeline = from_single_file(model_id, **load_kwargs)
+        else:
+            self._pipeline = DiffusionPipeline.from_pretrained(model_id, **load_kwargs)
         self._pipeline_utils.apply_post_load_updates(self._pipeline, self.od_config)
 
         self._pipeline.to(self.device)
 
         # Cache __call__kwargs signature introspection for later input validation
-        self._accept_call_kwargs = set(inspect.signature(self._pipeline.__call__).parameters.keys())
+        self._accept_call_kwargs = self._get_accepted_call_kwargs(self._pipeline.__call__)
 
         # CPU offloading
         if self.od_config.enable_layerwise_offload:
@@ -198,6 +215,16 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
     # ------------------------------------------------------------------
     # Wrap settings, inputs, and outputs
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_accepted_call_kwargs(call):
+        params = inspect.signature(call).parameters.values()
+        accepted = set()
+        for param in params:
+            if param.kind == inspect.Parameter.VAR_KEYWORD:
+                return None
+            accepted.add(param.name)
+        return accepted
 
     def _set_attention_backend(self) -> None:
         """Set the attention backend.
@@ -315,6 +342,8 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
         for key, value in sampling.__dict__.items():
             if value is None:
                 continue
+            if key == "guidance_scale" and not getattr(sampling, "guidance_scale_provided", False):
+                continue
             if self._accept_call_kwargs is None or key in self._accept_call_kwargs:
                 kwargs[key] = value
 
@@ -324,9 +353,12 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
 
         if (num_outputs_per_prompt := sampling.num_outputs_per_prompt) > 0:
             # In diffusers, they are num_images_per_prompt, num_videos_per_prompt, etc.
-            for key in self._accept_call_kwargs or ():
-                if re.match(r"num_[a-z]+_per_prompt", key):
-                    kwargs[key] = num_outputs_per_prompt
+            if self._accept_call_kwargs is None:
+                kwargs["num_images_per_prompt"] = num_outputs_per_prompt
+            else:
+                for key in self._accept_call_kwargs:
+                    if re.match(r"num_[a-z]+_per_prompt", key):
+                        kwargs[key] = num_outputs_per_prompt
 
         if sampling.generator is not None:
             kwargs["generator"] = sampling.generator

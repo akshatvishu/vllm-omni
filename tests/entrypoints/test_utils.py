@@ -328,6 +328,85 @@ class TestLoadAndResolveStageConfigs:
         assert len(stage_configs) == 1
         assert "dtype" in stage_configs[0]["engine_args"]
 
+    @pytest.mark.parametrize(
+        ("filename", "kwargs", "is_local_file"),
+        [
+            (
+                "model.safetensors",
+                {
+                    "diffusion_load_format": "diffusers_single_file",
+                    "model_class_name": "SomeDiffusersPipeline",
+                    "diffusers_load_kwargs": {"local_files_only": True},
+                },
+                True,
+            ),
+            (
+                "anima-base-v1.0.ckpt",
+                {
+                    "model_class_name": "AnimaPipeline",
+                    "diffusers_load_kwargs": {"components_path": "/tmp/anima-components"},
+                },
+                True,
+            ),
+            (
+                "circlestone-labs/Anima",
+                {
+                    "diffusion_load_format": "diffusers_single_file",
+                    "model_class_name": "AnimaPipeline",
+                    "diffusers_load_kwargs": {"components_path": "/tmp/anima-components"},
+                },
+                False,
+            ),
+            (
+                "https://huggingface.co/someone/model/resolve/main/model.safetensors",
+                {
+                    "diffusion_load_format": "diffusers_single_file",
+                    "model_class_name": "SomeDiffusersPipeline",
+                    "diffusers_load_kwargs": {},
+                },
+                False,
+            ),
+        ],
+    )
+    def test_single_file_uses_default_diffusion_stage_without_model_config(
+        self,
+        tmp_path,
+        mocker: MockerFixture,
+        filename: str,
+        kwargs: dict,
+        is_local_file: bool,
+    ):
+        if is_local_file:
+            checkpoint = tmp_path / filename
+            checkpoint.write_text("dummy")
+            model_path = str(checkpoint)
+        else:
+            model_path = filename
+
+        mocker.patch(
+            "vllm_omni.entrypoints.utils.resolve_model_config_path",
+            side_effect=AssertionError("single-file checkpoints should not require model config discovery"),
+        )
+        mocker.patch(
+            "vllm_omni.entrypoints.utils.load_stage_configs_from_model",
+            side_effect=AssertionError("single-file checkpoints should use the default stage factory"),
+        )
+
+        config_path, stage_configs = load_and_resolve_stage_configs(
+            model=model_path,
+            stage_configs_path=None,
+            kwargs=kwargs,
+            default_stage_cfg_factory=lambda: AsyncOmniEngine._create_default_diffusion_stage_cfg(kwargs),
+        )
+
+        engine_args = stage_configs[0]["engine_args"]
+        assert config_path is None
+        assert len(stage_configs) == 1
+        assert engine_args["model_stage"] == "diffusion"
+        assert engine_args["model_class_name"] == kwargs["model_class_name"]
+        assert engine_args["diffusion_load_format"] == kwargs.get("diffusion_load_format", "default")
+        assert engine_args["diffusers_load_kwargs"] == kwargs["diffusers_load_kwargs"]
+
     def test_stage_configs_path_promotes_new_deploy_yaml_without_expanding_replicas(
         self, tmp_path, mocker: MockerFixture
     ):

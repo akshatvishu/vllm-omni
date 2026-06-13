@@ -39,9 +39,63 @@ vllm serve "stable-diffusion-v1-5/stable-diffusion-v1-5" \
     --diffusion-load-format diffusers
 ```
 
-Users turn on the diffusers backend primarily through `--diffusion-load-format diffusers` argument.
-There are two more optional arguments, `--diffusers-load-kwargs` and `--diffusers-call-kwargs`,
-which are only valid together with `--diffusion-load-format diffusers`.
+Users turn on the diffusers backend primarily through the `--diffusion-load-format diffusers` argument.
+
+### Single-File Checkpoints
+
+For single-file checkpoints (such as `.safetensors` or `.ckpt`), users can load them via the `--diffusion-load-format diffusers_single_file` argument (or simply point `--model` to a local single checkpoint file).
+
+If a Diffusers pipeline class is needed, specify it using `--model-class-name`:
+
+```bash
+vllm serve "/path/to/model.safetensors" \
+    --omni \
+    --diffusion-load-format diffusers_single_file \
+    --model-class-name SomeDiffusersPipeline
+```
+
+Using `--diffusion-load-format diffusers_single_file` explicitly bypasses standard directory-based config loading. This allows you to pass a Hugging Face Hub ID (e.g. `repo/model`) or URL as the `--model` argument to fetch single files remotely, provided the specified Diffusers pipeline supports remote loading.
+
+### Native Anima Single-File Checkpoints
+
+Anima single-file checkpoints are served through the native `AnimaPipeline`, not through `AnimaModularPipeline.from_single_file()`. If `--model-class-name AnimaModularPipeline` is passed for a local single-file checkpoint, vLLM-Omni maps it to `AnimaPipeline`.
+
+Use `--model-class-name AnimaPipeline`. The native path reads the Anima transformer single-file checkpoint directly, converts original Cosmos transformer keys when needed, and loads the Cosmos transformer and text conditioner into vLLM-Omni native modules.
+
+The native path also needs the non-denoiser components (`text_encoder`, `tokenizer`, `t5_tokenizer`, `vae`, and optionally `scheduler`). These must be in Diffusers `from_pretrained()` layout. Raw Anima auxiliary files such as `qwen_3_06b_base.safetensors` and `qwen_image_vae.safetensors` are converter inputs; they are not accepted directly as `components_path`.
+
+Use the Anima converter from the Diffusers reference implementation to prepare the component directory:
+
+```bash
+python /path/to/convert_anima_to_diffusers.py \
+    --transformer_ckpt_path /path/to/anima-base-v1.0.safetensors \
+    --text_encoder_ckpt_path /path/to/qwen_3_06b_base.safetensors \
+    --vae_ckpt_path /path/to/qwen_image_vae.safetensors \
+    --qwen_tokenizer_path /path/to/qwen-tokenizer \
+    --t5_tokenizer_path /path/to/t5-tokenizer \
+    --output_path /path/to/anima-components \
+    --save_pipeline
+```
+
+Then point `--model` at the raw Anima transformer checkpoint and `components_path` at the converted directory:
+
+```bash
+vllm serve "/path/to/anima.safetensors" \
+    --omni \
+    --model-class-name AnimaPipeline \
+    --diffusers-load-kwargs '{
+      "components_path": "/path/to/anima-components"
+    }'
+```
+
+No deploy config is required for local Anima single-file checkpoint discovery
+when `--model-class-name AnimaPipeline` is provided.
+
+Native Anima currently supports baseline single-GPU execution. Cache-DiT,
+TeaCache, CPU offload, layer-wise offload, quantization, TP/SP, CFG parallel,
+HSDP, and step execution are not supported by `AnimaPipeline` yet.
+
+There are two more optional arguments, `--diffusers-load-kwargs` and `--diffusers-call-kwargs`, which are valid together with `--diffusion-load-format diffusers` or `diffusers_single_file`. Native Anima also accepts `--diffusers-load-kwargs` for component paths such as `components_path`, but does not delegate denoising to Diffusers.
 
 After launching the model, users send a request as usual. Refer to other documentation pages on how to request a particular input/output modality, such as `examples/online_serving/text_to_image/openai_chat_client.py`.
 

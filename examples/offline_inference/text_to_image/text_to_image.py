@@ -40,6 +40,16 @@ def parse_profiler_config(value: str) -> dict[str, Any]:
     return config
 
 
+def parse_json_dict(value: str) -> dict[str, Any]:
+    try:
+        config = json.loads(value)
+    except json.JSONDecodeError as e:
+        raise argparse.ArgumentTypeError(f"Must be a valid JSON object: {e}") from e
+    if not isinstance(config, dict):
+        raise argparse.ArgumentTypeError("Must be a JSON object (dict)")
+    return config
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate an image with supported diffusion models.")
     parser.add_argument(
@@ -306,6 +316,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Supplementary auxiliary text encoder parameters model name or path (especially for Hidream-l1-full).",
     )
+    parser.add_argument(
+        "--model-class-name",
+        type=str,
+        default=None,
+        help="Override the diffusion pipeline class name (e.g. AnimaPipeline).",
+    )
+    parser.add_argument(
+        "--diffusers-load-kwargs",
+        type=parse_json_dict,
+        default=None,
+        help='JSON object passed to model loader (e.g. \'{"components_path": "/path"}\').',
+    )
     current_omni_platform.pre_register_and_update(parser)
     return parser.parse_args()
 
@@ -401,9 +423,13 @@ def main():
     }
     if args.stage_configs_path:
         omni_kwargs["stage_configs_path"] = args.stage_configs_path
-    if use_nextstep:
+    if args.model_class_name:
+        omni_kwargs["model_class_name"] = args.model_class_name
+    elif use_nextstep:
         # NextStep-1.1 requires explicit pipeline class
         omni_kwargs["model_class_name"] = "NextStep11Pipeline"
+    if args.diffusers_load_kwargs is not None:
+        omni_kwargs["diffusers_load_kwargs"] = args.diffusers_load_kwargs
     omni = Omni(**omni_kwargs)
 
     if profiler_enabled:
@@ -432,6 +458,10 @@ def main():
         print(f"  LoRA: scale={args.lora_scale}")
     if args.stage_configs_path:
         print(f"  stage-configs-path: {args.stage_configs_path}")
+    if args.model_class_name:
+        print(f"  Model class name: {args.model_class_name}")
+    if args.diffusers_load_kwargs is not None:
+        print(f"  Diffusers load kwargs: {args.diffusers_load_kwargs}")
     print(f"{'=' * 60}\n")
 
     # Build LoRA request when --lora-path is set

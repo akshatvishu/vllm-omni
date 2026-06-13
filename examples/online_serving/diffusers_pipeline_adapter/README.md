@@ -38,7 +38,31 @@ vllm serve "stable-diffusion-v1-5/stable-diffusion-v1-5" \
 
 Users turn on the diffusers backend primarily through `--diffusion-load-format diffusers` argument.
 There are two more optional arguments, `--diffusers-load-kwargs` and `--diffusers-call-kwargs`,
-which are only valid together with `--diffusion-load-format diffusers`.
+which are valid together with `--diffusion-load-format diffusers` or `diffusers_single_file`.
+Native Anima also accepts `--diffusers-load-kwargs` for component paths such as `components_path`,
+but does not delegate denoising to Diffusers.
+
+### Native Anima Single-File Checkpoints
+
+Anima single-file checkpoints are served through the native `AnimaPipeline`, not through
+`AnimaModularPipeline.from_single_file()`. If `--model-class-name AnimaModularPipeline`
+is passed for a local single-file checkpoint, vLLM-Omni maps it to `AnimaPipeline`.
+
+```bash
+vllm serve "/path/to/anima-base-v1.0.safetensors" \
+    --omni \
+    --model-class-name AnimaPipeline \
+    --diffusers-load-kwargs '{"components_path": "/path/to/anima-components"}'
+```
+
+No deploy config is required for local Anima single-file checkpoint discovery
+when `--model-class-name AnimaPipeline` is provided.
+
+The native path needs the non-denoiser components (`text_encoder`, `tokenizer`,
+`t5_tokenizer`, `vae`, and optionally `scheduler`) in Diffusers `from_pretrained()`
+layout. Native Anima currently supports baseline single-GPU execution.
+Cache-DiT, TeaCache, CPU offload, layer-wise offload, quantization, TP/SP, CFG
+parallel, HSDP, and step execution are not supported by `AnimaPipeline` yet.
 
 After launching the model, users send a request as usual. Refer to other documentation pages on how to request a particular input/output modality, such as `examples/online_serving/text_to_image/openai_chat_client.py`.
 

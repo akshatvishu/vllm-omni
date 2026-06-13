@@ -27,6 +27,42 @@ logger = init_logger(__name__)
 _DIFFUSERS_CLASS_TO_CONFIG: dict[str, str] = {
     "GlmImagePipeline": "glm_image",
 }
+_DIFFUSION_SINGLE_FILE_EXTENSIONS = frozenset({".ckpt", ".safetensors"})
+
+
+def _looks_like_diffusion_single_file(model: str) -> bool:
+    model_path = model.split("?", 1)[0].split("#", 1)[0]
+    if os.path.isdir(model_path):
+        return False
+    return os.path.isfile(model_path) or Path(model_path).suffix.lower() in _DIFFUSION_SINGLE_FILE_EXTENSIONS
+
+
+def _should_use_default_stage_for_single_file(
+    model: str,
+    kwargs: dict | None,
+    default_stage_cfg_factory: Any,
+) -> bool:
+    if default_stage_cfg_factory is None or not isinstance(model, str):
+        return False
+    if not isinstance(kwargs, dict):
+        return False
+
+    # 1. Explicit override: trust the user blindly (Enables HF Hub / URL strings)
+    if kwargs.get("diffusion_load_format") == "diffusers_single_file":
+        return True
+
+    # 2. Heuristic fallback: if they provided a custom class, only bypass if it looks like a local single file.
+    if kwargs.get("model_class_name") is not None:
+        return _looks_like_diffusion_single_file(model)
+
+    return False
+
+
+def _create_default_stage_configs(default_stage_cfg_factory: Any) -> list:
+    if default_stage_cfg_factory is None:
+        return []
+    default_stage_cfg = default_stage_cfg_factory()
+    return create_config(_convert_dataclasses_to_dict(default_stage_cfg))
 
 
 def inject_omni_kv_config(stage: Any, omni_conn_cfg: dict[str, Any], omni_from: str, omni_to: str) -> None:
@@ -559,24 +595,20 @@ def load_and_resolve_stage_configs(
             stage_overrides=stage_overrides,
         )
         if not stage_configs:
-            if default_stage_cfg_factory is not None:
-                default_stage_cfg = default_stage_cfg_factory()
-                stage_configs = create_config(_convert_dataclasses_to_dict(default_stage_cfg))
-            else:
-                stage_configs = []
+            stage_configs = _create_default_stage_configs(default_stage_cfg_factory)
     elif stage_configs_path is None:
-        config_path = resolve_model_config_path(model)
-        stage_configs = load_stage_configs_from_model(
-            model,
-            base_engine_args=kwargs,
-            stage_overrides=stage_overrides,
-        )
-        if not stage_configs:
-            if default_stage_cfg_factory is not None:
-                default_stage_cfg = default_stage_cfg_factory()
-                stage_configs = create_config(_convert_dataclasses_to_dict(default_stage_cfg))
-            else:
-                stage_configs = []
+        if _should_use_default_stage_for_single_file(model, kwargs, default_stage_cfg_factory):
+            config_path = None
+            stage_configs = _create_default_stage_configs(default_stage_cfg_factory)
+        else:
+            config_path = resolve_model_config_path(model)
+            stage_configs = load_stage_configs_from_model(
+                model,
+                base_engine_args=kwargs,
+                stage_overrides=stage_overrides,
+            )
+            if not stage_configs:
+                stage_configs = _create_default_stage_configs(default_stage_cfg_factory)
     else:
         config_path = stage_configs_path
         stage_configs = load_stage_configs_from_yaml(stage_configs_path, base_engine_args=kwargs)

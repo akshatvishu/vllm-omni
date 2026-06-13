@@ -286,6 +286,11 @@ _DIFFUSION_MODELS = {
         "pipeline_dreamzero",
         "DreamZeroPipeline",
     ),
+    "AnimaPipeline": (
+        "anima",
+        "pipeline_anima",
+        "AnimaPipeline",
+    ),
 }
 
 
@@ -303,6 +308,7 @@ _NO_CACHE_ACCELERATION = {
     # Pipelines that do not support cache acceleration (cache_dit / tea_cache).
     "NextStep11Pipeline",
     "AudioXPipeline",
+    "AnimaPipeline",
 }
 
 
@@ -463,6 +469,7 @@ _DIFFUSION_POST_PROCESS_FUNCS = {
     # `post_process_func` function must be placed in {mod_folder}/{mod_relname}.py,
     # where mod_folder and mod_relname are  defined and mapped using `_DIFFUSION_MODELS` via the `arch` key
     "QwenImagePipeline": "get_qwen_image_post_process_func",
+    "AnimaPipeline": "get_anima_post_process_func",
     "QwenImageEditPipeline": "get_qwen_image_edit_post_process_func",
     "QwenImageEditPlusPipeline": "get_qwen_image_edit_plus_post_process_func",
     "GlmImagePipeline": "get_glm_image_post_process_func",

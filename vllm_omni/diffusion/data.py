@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import copy
+import importlib
 import os
 import random
 from collections.abc import Callable, Mapping
@@ -31,6 +32,44 @@ if TYPE_CHECKING:
 # The actual import is deferred to __post_init__ to avoid import order issues
 
 logger = init_logger(__name__)
+
+_NATIVE_SINGLE_FILE_DIFFUSION_MODELS = {"AnimaPipeline"}
+_ANIMA_SINGLE_FILE_ALIASES = {"AnimaPipeline", "AnimaModularPipeline"}
+
+
+def _diffusers_pipeline_module_name(model_class_name):
+    base_name = model_class_name
+    for suffix in ("ModularPipeline", "Pipeline"):
+        if base_name.endswith(suffix):
+            base_name = base_name[: -len(suffix)]
+            break
+    if not base_name:
+        return None
+
+    chars = []
+    for index, char in enumerate(base_name):
+        if char.isupper() and index > 0:
+            chars.append("_")
+        chars.append(char.lower())
+    return "vllm_omni.diffusion.models." + "".join(chars)
+
+
+def _resolve_diffusers_pipeline_cls(model_class_name):
+    if hasattr(diffusers, model_class_name):
+        return getattr(diffusers, model_class_name)
+
+    module_name = _diffusers_pipeline_module_name(model_class_name)
+    if module_name is not None:
+        try:
+            importlib.import_module(module_name)
+        except ModuleNotFoundError as exc:
+            if exc.name != module_name:
+                raise
+        else:
+            if hasattr(diffusers, model_class_name):
+                return getattr(diffusers, model_class_name)
+
+    raise ValueError(f"Could not find diffusers pipeline class {model_class_name} in diffusers namespace.")
 
 
 def parse_kv_cache_skip_selector(
@@ -534,7 +573,8 @@ class OmniDiffusionConfig:
     custom_pipeline_args: dict[str, Any] | None = None
 
     # Diffusion model loading format
-    # "default", "custom_pipeline", "dummy", "diffusers" (HF diffusers adapter)
+    # "default", "custom_pipeline", "dummy", "diffusers" (HF diffusers adapter),
+    # or "diffusers_single_file" (HF diffusers adapter via from_single_file).
     diffusion_load_format: str = "default"
 
     # Diffusers adapter kwargs
@@ -783,10 +823,24 @@ class OmniDiffusionConfig:
         elif self.max_cpu_loras < 1:
             raise ValueError("max_cpu_loras must be >= 1 for diffusion LoRA")
 
-        if self.diffusion_load_format != "diffusers" and (self.diffusers_load_kwargs or self.diffusers_call_kwargs):
+        is_single_file = self.diffusion_load_format == "diffusers_single_file" or (
+            isinstance(self.model, str) and os.path.isfile(self.model)
+        )
+        if (
+            is_single_file
+            and self.model_class_name not in _NATIVE_SINGLE_FILE_DIFFUSION_MODELS
+            and self.diffusion_load_format in (None, "default", "diffusers")
+        ):
+            self.diffusion_load_format = "diffusers_single_file"
+
+        if (
+            self.diffusion_load_format not in ("diffusers", "diffusers_single_file")
+            and self.model_class_name not in _NATIVE_SINGLE_FILE_DIFFUSION_MODELS
+            and (self.diffusers_load_kwargs or self.diffusers_call_kwargs)
+        ):
             raise ValueError(
                 "diffusers_load_kwargs and diffusers_call_kwargs are only "
-                "valid together with diffusion_load_format=diffusers"
+                "valid together with diffusion_load_format=diffusers or diffusers_single_file"
             )
 
     def _propagate_quantization_from_tf_config(self, tf_config: "TransformerConfig") -> None:
@@ -880,6 +934,36 @@ class OmniDiffusionConfig:
         # Default model_class_name for diffusers adapter
         if self.model_class_name is None and self.diffusion_load_format == "diffusers":
             self.model_class_name = "DiffusersAdapterPipeline"
+
+        if (
+            self.diffusion_load_format == "diffusers_single_file"
+            or (isinstance(self.model, str) and os.path.isfile(self.model))
+        ) and self.diffusion_load_format in (
+            None,
+            "default",
+            "diffusers",
+            "diffusers_single_file",
+        ):
+            if self.model_class_name in _ANIMA_SINGLE_FILE_ALIASES:
+                self.diffusion_load_format = "default"
+                self.model_class_name = "AnimaPipeline"
+                self.diffusers_pipeline_cls = None
+                self.set_tf_model_config(TransformerConfig())
+                return
+
+            if self.model_class_name in _NATIVE_SINGLE_FILE_DIFFUSION_MODELS:
+                self.diffusion_load_format = "default"
+                self.set_tf_model_config(TransformerConfig())
+                return
+
+            if self.diffusion_load_format in (None, "default"):
+                self.diffusion_load_format = "diffusers_single_file"
+
+            if self.model_class_name is not None and self.model_class_name != "DiffusersAdapterPipeline":
+                self.diffusers_pipeline_cls = _resolve_diffusers_pipeline_cls(self.model_class_name)
+            self.model_class_name = "DiffusersAdapterPipeline"
+            self.set_tf_model_config(TransformerConfig())
+            return
 
         try:
             config_dict = get_hf_file_to_dict("model_index.json", self.model)

@@ -149,3 +149,74 @@ batch may still pay compile or CUDA-graph capture cost.
 
 For a Qwen-Image continuous-batching replay example, see
 [`performance_dashboard/qwen_image_serving_performance.md`](./performance_dashboard/qwen_image_serving_performance.md).
+
+## 4. Anima Native Single-File Benchmarking
+
+Native Anima is benchmarked as a text-to-image model through the same serving
+benchmark entrypoint. Unlike standard HuggingFace model IDs, Anima serves the
+raw single-file transformer checkpoint and loads non-denoiser components from a
+Diffusers-layout component directory.
+
+Download the official Anima checkpoint and components first. The commands below
+use `/path/to/models` as a placeholder; replace it with any local directory that
+has enough space for the checkpoint and component files.
+
+```bash
+mkdir -p /path/to/models/anima-official
+mkdir -p /path/to/models/anima-components
+
+hf download circlestone-labs/Anima \
+    split_files/diffusion_models/anima-base-v1.0.safetensors \
+    --local-dir /path/to/models/anima-official
+
+hf download circlestone-labs/Anima-Base-v1.0-Diffusers \
+    --local-dir /path/to/models/anima-components
+
+CHECKPOINT=/path/to/models/anima-official/split_files/diffusion_models/anima-base-v1.0.safetensors
+COMPONENTS=/path/to/models/anima-components
+```
+
+Run these commands from the vLLM-Omni repository in the Python environment or
+container where vLLM-Omni is installed.
+
+Start the server with the checkpoint as `--model` and pass the component
+directory through `--diffusers-load-kwargs`:
+
+```bash
+vllm serve "$CHECKPOINT" \
+    --omni \
+    --port 8099 \
+    --model-class-name AnimaPipeline \
+    --diffusers-load-kwargs "{\"components_path\":\"$COMPONENTS\"}"
+```
+
+Then run the standard diffusion serving benchmark:
+
+```bash
+python3 benchmarks/diffusion/diffusion_benchmark_serving.py \
+    --base-url http://localhost:8099 \
+    --endpoint /v1/chat/completions \
+    --model "$CHECKPOINT" \
+    --task t2i \
+    --dataset random \
+    --num-prompts 10 \
+    --max-concurrency 1 \
+    --warmup-requests 1 \
+    --warmup-concurrency 1 \
+    --width 1024 \
+    --height 1024 \
+    --num-inference-steps 50
+```
+
+This matches the Diffusers baseline defaults for Anima: 1024x1024, 50 denoising
+steps, `max_sequence_length=512`, one image per prompt, empty negative prompt,
+and CFG scale 4.0 from the default guider. Do not pass `guidance_scale` through
+the benchmark unless you are intentionally measuring a non-default CFG setting.
+
+Native Anima currently supports baseline single-GPU execution. Cache-DiT,
+TeaCache, CPU offload, layer-wise offload, quantization, TP/SP, CFG parallel,
+HSDP, and step execution are not supported by `AnimaPipeline` yet.
+
+Anima uses the default single diffusion stage for local single-file checkpoint
+discovery when `--model-class-name AnimaPipeline` is provided; no deploy config
+is required.
