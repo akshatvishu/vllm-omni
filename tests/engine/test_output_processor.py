@@ -9,9 +9,11 @@ import torch
 from vllm.outputs import PoolingRequestOutput
 from vllm.sampling_params import RequestOutputKind
 from vllm.v1.engine import FinishReason
+from vllm.v1.metrics.stats import IterationStats
 
-from vllm_omni.engine.output_modality import OutputModalityNames
-from vllm_omni.engine.output_processor import OmniRequestState
+from vllm_omni.engine import OmniEngineCoreOutput
+from vllm_omni.engine.output_modality import OutputModality, OutputModalityNames
+from vllm_omni.engine.output_processor import MultimodalOutputProcessor, OmniRequestState
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
@@ -270,3 +272,33 @@ def test_no_detokenizer_final_only():
     result = s.make_request_output([], None, FinishReason.STOP, None)
     assert result is not None
     assert AUDIO in result.outputs[0].multimodal_output
+
+
+def test_no_detokenizer_processor_records_finished_request_stats():
+    """Multimodal-only outputs still populate request-level token metrics."""
+    processor = MultimodalOutputProcessor(
+        tokenizer=None,
+        log_stats=True,
+        output_modality=OutputModality.AUDIO,
+    )
+    req_state = _make_no_detok_state(RequestOutputKind.CUMULATIVE)
+    processor.request_states[req_state.request_id] = req_state
+    iteration_stats = IterationStats()
+
+    processor.process_outputs(
+        [
+            OmniEngineCoreOutput(
+                request_id=req_state.request_id,
+                new_token_ids=[10, 11],
+                finish_reason=FinishReason.STOP,
+                multimodal_output={AUDIO: torch.randn(10)},
+            )
+        ],
+        engine_core_timestamp=1.0,
+        iteration_stats=iteration_stats,
+    )
+
+    assert len(iteration_stats.finished_requests) == 1
+    finished_request = iteration_stats.finished_requests[0]
+    assert finished_request.request_id == req_state.external_req_id
+    assert finished_request.num_prompt_tokens == len(req_state.prompt_token_ids)
