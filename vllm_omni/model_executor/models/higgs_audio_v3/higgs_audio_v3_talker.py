@@ -342,6 +342,7 @@ class HiggsAudioV3TalkerForConditionalGeneration(nn.Module):
         positions: torch.Tensor | None = None,
         inputs_embeds: torch.Tensor | None = None,
         omni_query_start_loc: torch.Tensor | None = None,
+        req_ids: list[str] | None = None,
         **_: Any,
     ) -> None:
         """Update per-step metadata before runner forward or CUDA graph replay."""
@@ -352,6 +353,107 @@ class HiggsAudioV3TalkerForConditionalGeneration(nn.Module):
                 self._ensure_decode_state_capacity(int(input_ids.shape[0]), input_ids.device)
         self._set_last_step_query_start_loc(omni_query_start_loc)
         self._decode_step_metadata_from_runner = True
+
+        if req_ids is not None:
+            self._sync_decode_state_with_condensed_batch(req_ids)
+
+    def _ensure_state_pool_capacity(self, num_needed: int, device: torch.device) -> None:
+        if getattr(self, "_state_pool_has_codes", None) is None:
+            self._state_pool_has_codes = torch.empty(0, dtype=torch.bool, device=device)
+            self._state_pool_last_codes = torch.empty((0, self.num_codebooks), dtype=torch.long, device=device)
+            self._state_pool_delay_count = torch.empty(0, dtype=torch.long, device=device)
+            self._state_pool_eoc_countdown = torch.empty(0, dtype=torch.long, device=device)
+            self._state_pool_generation_done = torch.empty(0, dtype=torch.bool, device=device)
+
+        current_capacity = self._state_pool_has_codes.shape[0]
+        if current_capacity >= num_needed:
+            return
+
+        new_capacity = max(current_capacity * 2, num_needed, 64)
+
+        def _resize_1d(tensor: torch.Tensor, val: float | int | bool) -> torch.Tensor:
+            new_t = torch.empty(new_capacity, dtype=tensor.dtype, device=device)
+            new_t[:current_capacity] = tensor
+            new_t[current_capacity:] = val
+            return new_t
+
+        self._state_pool_has_codes = _resize_1d(self._state_pool_has_codes, False)
+        self._state_pool_delay_count = _resize_1d(self._state_pool_delay_count, 0)
+        self._state_pool_eoc_countdown = _resize_1d(self._state_pool_eoc_countdown, -1)
+        self._state_pool_generation_done = _resize_1d(self._state_pool_generation_done, False)
+
+        new_last_codes = torch.empty((new_capacity, self.num_codebooks), dtype=torch.long, device=device)
+        new_last_codes[:current_capacity] = self._state_pool_last_codes
+        new_last_codes[current_capacity:] = 0
+        self._state_pool_last_codes = new_last_codes
+
+    def _sync_decode_state_with_condensed_batch(self, req_ids: list[str]) -> None:
+        if not hasattr(self, "_state_pool_indices"):
+            self._state_pool_indices = {}
+            self._free_pool_indices = set()
+            self._next_pool_idx = 0
+
+        device = self._decode_has_codes.device
+        old_req_ids = getattr(self, "_last_batch_req_ids", [])
+
+        # 1. Save last batch state back to pool
+        if old_req_ids and old_req_ids != req_ids:
+            save_old_indices = []
+            save_pool_slots = []
+            for i, req_id in enumerate(old_req_ids):
+                if req_id in self._state_pool_indices:
+                    save_old_indices.append(i)
+                    save_pool_slots.append(self._state_pool_indices[req_id])
+
+            if save_old_indices:
+                src_tensor = torch.tensor(save_old_indices, dtype=torch.long, device=device)
+                dst_tensor = torch.tensor(save_pool_slots, dtype=torch.long, device=device)
+                self._state_pool_has_codes[dst_tensor] = self._decode_has_codes[src_tensor]
+                self._state_pool_last_codes[dst_tensor] = self._decode_last_codes[src_tensor]
+                self._state_pool_delay_count[dst_tensor] = self._decode_delay_count[src_tensor]
+                self._state_pool_eoc_countdown[dst_tensor] = self._decode_eoc_countdown[src_tensor]
+                self._state_pool_generation_done[dst_tensor] = self._decode_generation_done[src_tensor]
+
+        # 2. Assign slots for new req_ids
+        for req_id in req_ids:
+            if req_id not in self._state_pool_indices:
+                if self._free_pool_indices:
+                    idx = self._free_pool_indices.pop()
+                else:
+                    idx = self._next_pool_idx
+                    self._next_pool_idx += 1
+                self._ensure_state_pool_capacity(self._next_pool_idx, device)
+                self._state_pool_indices[req_id] = idx
+
+                # Initialize newly allocated slot defaults
+                self._state_pool_has_codes[idx] = False
+                self._state_pool_generation_done[idx] = False
+                self._state_pool_delay_count[idx] = 0
+                self._state_pool_eoc_countdown[idx] = -1
+
+        # 3. Load current batch state from pool
+        if req_ids and old_req_ids != req_ids:
+            num_new = len(req_ids)
+            self._ensure_decode_state_capacity(num_new, device)
+
+            load_pool_slots = [self._state_pool_indices[req_id] for req_id in req_ids]
+            src_tensor = torch.tensor(load_pool_slots, dtype=torch.long, device=device)
+
+            self._decode_has_codes[:num_new] = self._state_pool_has_codes[src_tensor]
+            self._decode_last_codes[:num_new] = self._state_pool_last_codes[src_tensor]
+            self._decode_delay_count[:num_new] = self._state_pool_delay_count[src_tensor]
+            self._decode_eoc_countdown[:num_new] = self._state_pool_eoc_countdown[src_tensor]
+            self._decode_generation_done[:num_new] = self._state_pool_generation_done[src_tensor]
+
+        self._last_batch_req_ids = list(req_ids)
+
+    def on_requests_finished(self, finished_req_ids: set[str] | list[str]) -> None:
+        if not hasattr(self, "_state_pool_indices"):
+            return
+        for req_id in finished_req_ids:
+            if req_id in self._state_pool_indices:
+                idx = self._state_pool_indices.pop(req_id)
+                self._free_pool_indices.add(idx)
 
     # ------------------------------------------------------------------ forward
     def forward(

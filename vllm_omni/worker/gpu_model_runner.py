@@ -456,6 +456,8 @@ class OmniGPUModelRunner(GPUModelRunner):
                 cleanup_finished_request(req_id)
 
         self.late_interaction_runner.on_requests_finished(scheduler_output.finished_req_ids)
+        if hasattr(self.model, "on_requests_finished"):
+            self.model.on_requests_finished(scheduler_output.finished_req_ids)
         # Remove the finished requests from the persistent batch.
         # NOTE(woosuk): There could be an edge case where finished_req_ids and
         # scheduled_req_ids overlap. This happens when a request is aborted and
@@ -1847,6 +1849,7 @@ class OmniGPUModelRunner(GPUModelRunner):
                 positions=positions,
                 inputs_embeds=inputs_embeds,
                 omni_query_start_loc=model_kwargs_extra.get("omni_query_start_loc"),
+                req_ids=getattr(self.input_batch, "req_ids", None),
             )
 
         model_output = super()._model_forward(

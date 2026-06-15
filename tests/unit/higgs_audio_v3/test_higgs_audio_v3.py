@@ -264,8 +264,8 @@ class TestSamplerMethods:
             num_rows, t.num_codebooks
         )
         t._decode_has_codes = torch.tensor([True, False, True, True])[:num_rows].clone()
-        t._decode_delay_count = torch.tensor([0, 2, 7, 4], dtype=torch.int32)[:num_rows].clone()
-        t._decode_eoc_countdown = torch.tensor([-1, -1, 3, 1], dtype=torch.int32)[:num_rows].clone()
+        t._decode_delay_count = torch.tensor([0, 2, 7, 4], dtype=torch.long)[:num_rows].clone()
+        t._decode_eoc_countdown = torch.tensor([-1, -1, 3, 1], dtype=torch.long)[:num_rows].clone()
         t._decode_generation_done = torch.tensor([False, False, False, True])[:num_rows].clone()
         t._decode_active_audio_count = 0
         t._codebook_index_cache = {}
@@ -581,10 +581,77 @@ class TestSamplerMethods:
         t._audio_continuation_id = 99999
         t._last_step_query_start_loc = torch.tensor([0, 1, 4, 5])
         t._last_step_input_ids = torch.tensor([99999, 11, 12, 99999, 99999])
-
         mask = t._audio_seed_mask_from_step_input(3, torch.device("cpu"))
 
         assert torch.equal(mask, torch.tensor([True, True, True]))
+
+    def test_decode_state_follows_request_after_batch_condensation(self):
+        from vllm.sampling_params import SamplingParams
+        from vllm.v1.worker.gpu_input_batch import InputBatch
+        from vllm.v1.worker.gpu_model_runner import CachedRequestState
+
+        from vllm_omni.model_executor.models.higgs_audio_v3 import higgs_audio_v3_talker as mod
+
+        input_batch = InputBatch(
+            max_num_reqs=4,
+            max_model_len=8,
+            max_num_batched_tokens=8,
+            device=torch.device("cpu"),
+            pin_memory=False,
+            vocab_size=128,
+            block_sizes=[16],
+            kernel_block_sizes=[16],
+            is_pooling_model=False,
+        )
+
+        def _add(req_id):
+            input_batch.add_request(
+                CachedRequestState(
+                    req_id=req_id,
+                    prompt_token_ids=[1],
+                    mm_features=[],
+                    sampling_params=SamplingParams(temperature=0),
+                    generator=None,
+                    block_ids=([],),
+                    num_computed_tokens=0,
+                    output_token_ids=[],
+                )
+            )
+
+        for r in ("A", "B", "C"):
+            _add(r)
+
+        talker_cls = mod.HiggsAudioV3TalkerForConditionalGeneration
+        talker = talker_cls.__new__(talker_cls)
+        torch.nn.Module.__init__(talker)
+        talker.num_codebooks = 8
+        talker._use_external_decode_cudagraph = False
+        talker._last_step_query_start_loc_buffer = None
+        talker._decode_last_codes = torch.zeros(3, 8, dtype=torch.long)
+        talker._decode_has_codes = torch.zeros(3, dtype=torch.bool)
+        talker._decode_delay_count = torch.zeros(3, dtype=torch.long)
+        talker._decode_eoc_countdown = torch.full((3,), -1, dtype=torch.long)
+        talker._decode_generation_done = torch.zeros(3, dtype=torch.bool)
+
+        talker.update_decode_step_metadata(req_ids=input_batch.req_ids)
+
+        c_codes = torch.arange(300, 308)
+        talker._decode_last_codes[:] = torch.stack((torch.arange(100, 108), torch.zeros(8, dtype=torch.long), c_codes))
+        talker._decode_has_codes[:] = torch.tensor([True, False, True])
+        talker._decode_delay_count[:] = torch.tensor([3, 0, 8])
+
+        # B has completed and its cleared row is removed. InputBatch moves C
+        # from batch row 2 into row 1 during condensation.
+        input_batch.remove_request("B")
+        input_batch.condense()
+        assert input_batch.req_ids == ["A", "C"]
+        assert input_batch.req_id_to_index["C"] == 1
+
+        talker.update_decode_step_metadata(req_ids=input_batch.req_ids)
+
+        assert talker._decode_has_codes[1].item() is True
+        assert talker._decode_delay_count[1].item() == 8
+        assert torch.equal(talker._decode_last_codes[1], c_codes)
 
 
 # ---- AC-6: Feedback Method Tests ----
