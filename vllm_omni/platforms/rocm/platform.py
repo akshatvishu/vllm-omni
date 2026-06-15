@@ -34,18 +34,21 @@ class RocmOmniPlatform(OmniPlatform, RocmPlatform):
 
     ```
     if current_omni_platform.is_rocm():
-        print(f"engine_args: {str(engine_args)}")
-        if engine_args.get("attention_backend") is None:
-            from vllm._aiter_ops import rocm_aiter_ops
+        if stage_type != "diffusion":
+            attn_backend = engine_args.get("attention_backend")
 
-            if rocm_aiter_ops.is_enabled():
-                engine_args["attention_backend"] = "ROCM_AITER_FA"
-            # Before vLLM v0.19.0, the default attention backend is TRITON_ATTN for ROCm.
-            # Since vLLM v0.19.0, the default attention backend is ROCM_ATTN for ROCm.
-            # However, the compatibility of ROCM_ATTN with Omni is not guaranteed.
-            # Therefore, we still use TRITON_ATTN as the default attention backend,
-            # when the selected_backend is not specified.
-            engine_args["attention_backend"] = "TRITON_ATTN"
+            if attn_backend is None or attn_backend == "FLASHINFER":
+                from vllm._aiter_ops import rocm_aiter_ops
+
+                if rocm_aiter_ops.is_mha_enabled():
+                    engine_args["attention_backend"] = "ROCM_AITER_FA"
+                else:
+                    # Before vLLM v0.19.0, the default attention backend is TRITON_ATTN for ROCm.
+                    # Since vLLM v0.19.0, the default attention backend is ROCM_ATTN for ROCm.
+                    # However, the compatibility of ROCM_ATTN with Omni is not guaranteed.
+                    # Therefore, we still use TRITON_ATTN as the default attention backend,
+                    # when the selected_backend is not specified.
+                    engine_args["attention_backend"] = "TRITON_ATTN"
     ```
 
     """
