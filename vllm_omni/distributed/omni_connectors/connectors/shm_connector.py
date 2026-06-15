@@ -103,25 +103,42 @@ class SharedMemoryConnector(OmniConnectorBase):
 
     def _get_by_key(self, get_key: str) -> tuple[Any, int] | None:
         """Read a SHM segment addressed purely by *get_key*."""
+        lock_file = f"/dev/shm/shm_{get_key}_lockfile.lock"
+        if not os.path.exists(lock_file):
+            return None
         shm = None
         try:
-            shm = shm_pkg.SharedMemory(name=get_key)
-            if shm is None or shm.size == 0:
-                return None
-            lock_file = f"/dev/shm/shm_{get_key}_lockfile.lock"
-            shm_handle = {"name": get_key, "size": shm.size}
-            result = self._get_data_with_lock(lock_file, shm_handle)
-            if result is not None:
-                self._pending_keys.discard(get_key)
+            with open(lock_file, "rb+") as lockf:
+                fcntl.flock(lockf, fcntl.LOCK_EX)
+                try:
+                    shm = shm_pkg.SharedMemory(name=get_key)
+                    if shm is None or shm.size == 0:
+                        return None
+                    shm_handle = {"name": get_key, "size": shm.size}
+                    data_bytes = shm_read_bytes(shm_handle)
+                    obj = self.deserialize_obj(data_bytes)
+                    result = obj, int(shm_handle.get("size", 0))
+                    self._pending_keys.discard(get_key)
+                finally:
+                    fcntl.flock(lockf, fcntl.LOCK_UN)
+            if result is not None and os.path.exists(lock_file):
+                try:
+                    os.remove(lock_file)
+                except OSError:
+                    pass
             return result
-        except FileNotFoundError:
+        except (FileNotFoundError, ValueError):
             return None
         except Exception:
             logger.debug("_get_by_key: unexpected error reading SHM segment %s", get_key, exc_info=True)
             return None
         finally:
             if shm:
-                shm.close()
+                try:
+                    shm.close()
+                except Exception:
+                    pass
+
 
     def get(
         self,
