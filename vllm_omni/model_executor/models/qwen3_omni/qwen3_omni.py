@@ -185,6 +185,10 @@ class Qwen3OmniMoeForConditionalGeneration(
                 ("codes", "audio"),
             }
 
+            # Opt out of unnecessary prefix-cached hidden state merging and defer codes.audio cache updates
+            self.requires_full_prefix_cached_hidden_states = False
+            self.deferred_prefix_cache_mm_keys = {"codes.audio"}
+
         elif self.model_stage == "code2wav":
             multimodal_config.skip_mm_profiling = True
             self.enable_update_additional_information = True
