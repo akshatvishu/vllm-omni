@@ -45,8 +45,6 @@ from vllm_omni.worker.omni_connector_model_runner_mixin import OmniConnectorMode
 
 logger = init_logger(__name__)
 
-_STEP_STAGE_DURATIONS_KEY = "_step_stage_durations"
-
 
 class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
     """
@@ -257,7 +255,7 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
         if getattr(self.pipeline, "enable_diffusion_pipeline_profiler", False) and callable(clear_records):
             clear_records()
 
-    def _consume_stepwise_stage_durations(self) -> dict[str, float]:
+    def _consume_and_clear_stepwise_stage_durations(self) -> dict[str, float]:
         if not getattr(self.pipeline, "enable_diffusion_pipeline_profiler", False):
             return {}
         stage_durations = getattr(self.pipeline, "stage_durations", None)
@@ -274,9 +272,8 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
     ) -> None:
         if not stage_durations:
             return
-        merged = state.extra.setdefault(_STEP_STAGE_DURATIONS_KEY, {})
         for stage, duration in stage_durations.items():
-            merged[stage] = float(merged.get(stage, 0.0)) + float(duration)
+            state.stage_durations[stage] = float(state.stage_durations.get(stage, 0.0)) + float(duration)
 
     def _attach_stepwise_metrics(
         self,
@@ -287,11 +284,10 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
     ) -> None:
         self._merge_stepwise_stage_durations(
             state,
-            self._consume_stepwise_stage_durations(),
+            self._consume_and_clear_stepwise_stage_durations(),
         )
-        stage_durations = state.extra.get(_STEP_STAGE_DURATIONS_KEY)
-        if isinstance(stage_durations, dict) and stage_durations:
-            output.stage_durations = dict(stage_durations)
+        if state.stage_durations:
+            output.stage_durations = dict(state.stage_durations)
         if is_primary and current_omni_platform.is_available():
             self._record_peak_memory(output)
 
@@ -460,7 +456,7 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
                 self.pipeline.prepare_encode(state)
                 self._merge_stepwise_stage_durations(
                     state,
-                    self._consume_stepwise_stage_durations(),
+                    self._consume_and_clear_stepwise_stage_durations(),
                 )
 
         input_batch = InputBatch.make_batch(
@@ -532,7 +528,7 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
             ):
                 self._clear_stepwise_profiler_records()
                 noise_pred = self.pipeline.denoise_step(input_batch)
-                denoise_stage_durations = self._consume_stepwise_stage_durations()
+                denoise_stage_durations = self._consume_and_clear_stepwise_stage_durations()
                 for state in states:
                     self._merge_stepwise_stage_durations(
                         state,

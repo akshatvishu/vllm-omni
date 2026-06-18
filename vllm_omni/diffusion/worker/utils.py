@@ -72,6 +72,9 @@ class DiffusionRequestState:
     # For example: Wan condition tensors / masks, or Bagel KV contexts.
     extra: dict[str, Any] = field(default_factory=dict)
 
+    # ── Runner-owned profiling metadata ──
+    stage_durations: dict[str, float] = field(default_factory=dict)
+
     # ── Properties ──
 
     @property
