@@ -1006,6 +1006,7 @@ class OmniGPUModelRunner(GPUModelRunner):
 
                 cum_num_tokens = self._get_cumsum_and_arange(num_scheduled_tokens, self.query_pos.np)
                 self.query_start_loc.np[1 : num_reqs + 1] = cum_num_tokens
+                self.query_start_loc.np[num_reqs + 1 : num_reqs_padded + 1].fill(cum_num_tokens[-1])
                 self.query_start_loc.copy_to_gpu()
 
                 self.input_batch.block_table.commit_block_table(num_reqs_padded)
@@ -1311,6 +1312,20 @@ class OmniGPUModelRunner(GPUModelRunner):
             import traceback
 
             traceback.print_exc()
+
+        # Per-request (start, end) hidden-row spans so make_omni_output can map
+        # flat hidden rows to the right request in mixed prefill+decode steps,
+        # instead of assuming an equal rows-per-request split (which samples the
+        # wrong rows whenever per-request token counts differ).
+        nstp = self._omni_num_scheduled_tokens_np
+        if nstp is not None and len(nstp) == len(self.input_batch.req_ids):
+            try:
+                model_kwargs_extra["request_token_spans"] = self._compute_request_token_spans(nstp)
+            except Exception as e:
+                # Visible on purpose: the fallback is the equal rows-per-request
+                # split, which can re-introduce the cross-request corruption this
+                # plumbing fixes — a silent failure here must not pass unnoticed.
+                logger.warning("[OMNI] Failed to compute request_token_spans: %s", e)
 
         if self._omni_query_start_loc_model_kwarg:
             try:
