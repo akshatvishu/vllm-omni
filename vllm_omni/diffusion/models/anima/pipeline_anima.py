@@ -2,7 +2,6 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import inspect
-import json
 import logging
 import os
 from collections.abc import Iterable
@@ -28,7 +27,6 @@ from vllm_omni.diffusion.models.progress_bar import ProgressBarMixin
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.utils.size_utils import normalize_min_aligned_size
-from vllm_omni.model_executor.model_loader.weight_utils import download_weights_from_hf_specific
 
 logger = logging.getLogger(__name__)
 
@@ -107,72 +105,17 @@ _ANIMA_ORIGINAL_TRANSFORMER_DROP_KEYS = (
 )
 
 
-def _anima_component_path(od_config: OmniDiffusionConfig, name: str, default_model: str | None) -> str | None:
-    load_kwargs = od_config.diffusers_load_kwargs
-    return load_kwargs.get(f"{name}_model", load_kwargs.get(f"{name}_path", default_model))
-
-
-def _anima_components_model(od_config: OmniDiffusionConfig) -> str | None:
-    load_kwargs = od_config.diffusers_load_kwargs
-    components_model = load_kwargs.get("components_model", load_kwargs.get("components_path"))
-    if components_model is not None:
-        return components_model
-
-    if od_config.model is None:
-        return None
-
-    checkpoint_dir = os.path.dirname(os.path.abspath(od_config.model))
-    return checkpoint_dir if os.path.isdir(checkpoint_dir) else od_config.model
-
-
-def _anima_vae_scale_factor_from_config(vae_config: dict) -> int:
-    if vae_config.get("spatial_compression_ratio"):
-        return int(vae_config["spatial_compression_ratio"])
-
-    downsample = vae_config.get("temporal_downsample", vae_config.get("temperal_downsample"))
-    if downsample is not None:
-        return 2 ** len(downsample)
-
-    return ANIMA_VAE_SCALE_FACTOR
-
-
 def _anima_vae_scale_factor_from_vae(vae) -> int:
-    if getattr(vae.config, "spatial_compression_ratio", None):
-        return int(vae.config.spatial_compression_ratio)
+    vae_config = getattr(vae, "config", None)
+    if getattr(vae_config, "spatial_compression_ratio", None):
+        return int(vae_config.spatial_compression_ratio)
     if hasattr(vae, "temperal_downsample"):
         return 2 ** len(vae.temperal_downsample)
     return ANIMA_VAE_SCALE_FACTOR
 
 
-def _resolve_anima_vae_scale_factor(od_config: OmniDiffusionConfig) -> int:
-    components_model = _anima_components_model(od_config)
-    vae_model = _anima_component_path(od_config, "vae", components_model)
-    if vae_model is None:
-        return ANIMA_VAE_SCALE_FACTOR
-
-    if os.path.exists(vae_model):
-        vae_model_path = vae_model
-    else:
-        vae_model_path = download_weights_from_hf_specific(
-            vae_model,
-            None,
-            ["vae/config.json", "config.json"],
-            revision=getattr(od_config, "revision", None),
-        )
-
-    for config_path in (
-        os.path.join(vae_model_path, "vae", "config.json"),
-        os.path.join(vae_model_path, "config.json"),
-    ):
-        if os.path.isfile(config_path):
-            with open(config_path) as f:
-                return _anima_vae_scale_factor_from_config(json.load(f))
-
-    return ANIMA_VAE_SCALE_FACTOR
-
-
 def get_anima_post_process_func(od_config: OmniDiffusionConfig):
-    image_processor = VaeImageProcessor(vae_scale_factor=_resolve_anima_vae_scale_factor(od_config))
+    image_processor = VaeImageProcessor(vae_scale_factor=ANIMA_VAE_SCALE_FACTOR)
 
     def post_process_func(images: torch.Tensor):
         return image_processor.postprocess(images)
@@ -296,7 +239,8 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         return native_transformer, native_text_conditioner
 
     def _component_path(self, name, default_model):
-        return _anima_component_path(self.od_config, name, default_model)
+        load_kwargs = self.od_config.diffusers_load_kwargs
+        return load_kwargs.get(f"{name}_model", load_kwargs.get(f"{name}_path", default_model))
 
     @staticmethod
     def _from_pretrained_kwargs(model, subfolder=None):
@@ -306,7 +250,13 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         return kwargs
 
     def _load_outer_components(self):
-        components_model = _anima_components_model(self.od_config)
+        load_kwargs = self.od_config.diffusers_load_kwargs
+        components_model = load_kwargs.get("components_model", load_kwargs.get("components_path"))
+        if components_model is None:
+            if self.od_config.model is None:
+                raise ValueError("AnimaPipeline requires `model` or `components_model` to load outer components.")
+            checkpoint_dir = os.path.dirname(os.path.abspath(self.od_config.model))
+            components_model = checkpoint_dir if os.path.isdir(checkpoint_dir) else self.od_config.model
 
         text_encoder_model = self._component_path("text_encoder", components_model)
         vae_model = self._component_path("vae", components_model)

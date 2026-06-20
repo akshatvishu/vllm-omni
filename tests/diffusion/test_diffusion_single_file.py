@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -265,43 +264,6 @@ def test_native_anima_converts_original_cosmos_transformer_keys():
         "transformer_blocks.0.ff.net.0.proj.weight": "mlp",
         "proj_out.weight": "out",
     }
-
-
-def test_native_anima_resolves_vae_scale_factor_from_components_config(tmp_path):
-    from vllm_omni.diffusion.models.anima.pipeline_anima import _resolve_anima_vae_scale_factor
-
-    checkpoint = tmp_path / "anima.safetensors"
-    checkpoint.write_text("dummy")
-    components_model = tmp_path / "components"
-    vae_config_dir = components_model / "vae"
-    vae_config_dir.mkdir(parents=True)
-    (vae_config_dir / "config.json").write_text(json.dumps({"spatial_compression_ratio": 16}))
-
-    od_config = SimpleNamespace(
-        model=str(checkpoint),
-        diffusers_load_kwargs={"components_model": str(components_model)},
-        revision=None,
-    )
-
-    assert _resolve_anima_vae_scale_factor(od_config) == 16
-
-
-def test_native_anima_resolves_vae_scale_factor_from_direct_vae_config(tmp_path):
-    from vllm_omni.diffusion.models.anima.pipeline_anima import _resolve_anima_vae_scale_factor
-
-    checkpoint = tmp_path / "anima.safetensors"
-    checkpoint.write_text("dummy")
-    vae_model = tmp_path / "vae"
-    vae_model.mkdir()
-    (vae_model / "config.json").write_text(json.dumps({"temporal_downsample": [False, True, True]}))
-
-    od_config = SimpleNamespace(
-        model=str(checkpoint),
-        diffusers_load_kwargs={"vae_model": str(vae_model)},
-        revision=None,
-    )
-
-    assert _resolve_anima_vae_scale_factor(od_config) == 8
 
 
 def test_native_anima_resolves_vae_scale_factor_from_loaded_vae():
