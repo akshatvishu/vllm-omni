@@ -15,6 +15,22 @@ from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
 
+ANIMA_TRANSFORMER_CONFIG = {
+    "in_channels": 16,
+    "out_channels": 16,
+    "num_attention_heads": 16,
+    "attention_head_dim": 128,
+    "num_layers": 28,
+    "mlp_ratio": 4.0,
+    "text_embed_dim": 1024,
+    "adaln_lora_dim": 256,
+    "max_size": (128, 240, 240),
+    "patch_size": (1, 2, 2),
+    "rope_scale": (1.0, 4.0, 4.0),
+    "concat_padding_mask": True,
+    "extra_pos_embed_type": None,
+}
+
 
 def _apply_rotary_emb(hidden_states, image_rotary_emb):
     cos, sin = image_rotary_emb

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -246,7 +247,7 @@ def test_diffusers_adapter_single_file_requires_supported_pipeline(tmp_path):
 def test_native_anima_converts_original_cosmos_transformer_keys():
     from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
 
-    converted = AnimaPipeline._convert_cosmos_2_transformer_state_dict(
+    converted = AnimaPipeline._convert_original_transformer_state_dict(
         {
             "net.x_embedder.proj.1.weight": "patch",
             "net.blocks.0.self_attn.q_proj.weight": "q",
@@ -264,6 +265,51 @@ def test_native_anima_converts_original_cosmos_transformer_keys():
         "transformer_blocks.0.ff.net.0.proj.weight": "mlp",
         "proj_out.weight": "out",
     }
+
+
+def test_native_anima_resolves_vae_scale_factor_from_components_config(tmp_path):
+    from vllm_omni.diffusion.models.anima.pipeline_anima import _resolve_anima_vae_scale_factor
+
+    checkpoint = tmp_path / "anima.safetensors"
+    checkpoint.write_text("dummy")
+    components_model = tmp_path / "components"
+    vae_config_dir = components_model / "vae"
+    vae_config_dir.mkdir(parents=True)
+    (vae_config_dir / "config.json").write_text(json.dumps({"spatial_compression_ratio": 16}))
+
+    od_config = SimpleNamespace(
+        model=str(checkpoint),
+        diffusers_load_kwargs={"components_model": str(components_model)},
+        revision=None,
+    )
+
+    assert _resolve_anima_vae_scale_factor(od_config) == 16
+
+
+def test_native_anima_resolves_vae_scale_factor_from_direct_vae_config(tmp_path):
+    from vllm_omni.diffusion.models.anima.pipeline_anima import _resolve_anima_vae_scale_factor
+
+    checkpoint = tmp_path / "anima.safetensors"
+    checkpoint.write_text("dummy")
+    vae_model = tmp_path / "vae"
+    vae_model.mkdir()
+    (vae_model / "config.json").write_text(json.dumps({"temporal_downsample": [False, True, True]}))
+
+    od_config = SimpleNamespace(
+        model=str(checkpoint),
+        diffusers_load_kwargs={"vae_model": str(vae_model)},
+        revision=None,
+    )
+
+    assert _resolve_anima_vae_scale_factor(od_config) == 8
+
+
+def test_native_anima_resolves_vae_scale_factor_from_loaded_vae():
+    from vllm_omni.diffusion.models.anima.pipeline_anima import _anima_vae_scale_factor_from_vae
+
+    vae = SimpleNamespace(config=SimpleNamespace(spatial_compression_ratio=16))
+
+    assert _anima_vae_scale_factor_from_vae(vae) == 16
 
 
 def test_native_anima_loads_synthetic_single_file(tmp_path, monkeypatch):
@@ -286,18 +332,20 @@ def test_native_anima_loads_synthetic_single_file(tmp_path, monkeypatch):
         "concat_padding_mask": True,
         "extra_pos_embed_type": None,
     }
-    monkeypatch.setattr(pipeline_anima, "_ANIMA_TRANSFORMER_CONFIG", tiny_transformer_config)
+    tiny_text_conditioner_config = {
+        "source_dim": 4,
+        "target_dim": 4,
+        "model_dim": 4,
+        "num_layers": 1,
+        "num_attention_heads": 1,
+        "target_vocab_size": 8,
+        "min_sequence_length": 4,
+    }
+    monkeypatch.setattr(pipeline_anima, "ANIMA_TRANSFORMER_CONFIG", tiny_transformer_config)
+    monkeypatch.setattr(pipeline_anima, "ANIMA_TEXT_CONDITIONER_CONFIG", tiny_text_conditioner_config)
 
     transformer = AnimaTransformer3DModel(**tiny_transformer_config)
-    text_conditioner = AnimaTextConditioner(
-        source_dim=4,
-        target_dim=4,
-        model_dim=4,
-        num_layers=1,
-        num_attention_heads=1,
-        target_vocab_size=8,
-        min_sequence_length=4,
-    )
+    text_conditioner = AnimaTextConditioner(**tiny_text_conditioner_config)
     transformer_state = {name: tensor.detach().clone() for name, tensor in transformer.state_dict().items()}
     text_conditioner_state = {name: tensor.detach().clone() for name, tensor in text_conditioner.state_dict().items()}
     checkpoint_state = {

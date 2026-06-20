@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import copy
-import importlib
 import os
 import random
 from collections.abc import Callable, Mapping
@@ -37,37 +36,9 @@ _NATIVE_SINGLE_FILE_DIFFUSION_MODELS = {"AnimaPipeline"}
 _ANIMA_SINGLE_FILE_ALIASES = {"AnimaPipeline", "AnimaModularPipeline"}
 
 
-def _diffusers_pipeline_module_name(model_class_name):
-    base_name = model_class_name
-    for suffix in ("ModularPipeline", "Pipeline"):
-        if base_name.endswith(suffix):
-            base_name = base_name[: -len(suffix)]
-            break
-    if not base_name:
-        return None
-
-    chars = []
-    for index, char in enumerate(base_name):
-        if char.isupper() and index > 0:
-            chars.append("_")
-        chars.append(char.lower())
-    return "vllm_omni.diffusion.models." + "".join(chars)
-
-
 def _resolve_diffusers_pipeline_cls(model_class_name):
     if hasattr(diffusers, model_class_name):
         return getattr(diffusers, model_class_name)
-
-    module_name = _diffusers_pipeline_module_name(model_class_name)
-    if module_name is not None:
-        try:
-            importlib.import_module(module_name)
-        except ModuleNotFoundError as exc:
-            if exc.name != module_name:
-                raise
-        else:
-            if hasattr(diffusers, model_class_name):
-                return getattr(diffusers, model_class_name)
 
     raise ValueError(f"Could not find diffusers pipeline class {model_class_name} in diffusers namespace.")
 

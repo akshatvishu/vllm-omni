@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import inspect
+import json
 import logging
 import os
 from collections.abc import Iterable
@@ -18,14 +19,20 @@ from vllm_omni.diffusion.config import set_current_diffusion_config
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.autoencoders.autoencoder_kl_qwenimage import DistributedAutoencoderKLQwenImage
 from vllm_omni.diffusion.distributed.utils import get_local_device
-from vllm_omni.diffusion.models.anima.anima_text_conditioner import AnimaTextConditioner
-from vllm_omni.diffusion.models.anima.anima_transformer import AnimaTransformer3DModel
+from vllm_omni.diffusion.models.anima.anima_text_conditioner import (
+    ANIMA_TEXT_CONDITIONER_CONFIG,
+    AnimaTextConditioner,
+)
+from vllm_omni.diffusion.models.anima.anima_transformer import ANIMA_TRANSFORMER_CONFIG, AnimaTransformer3DModel
 from vllm_omni.diffusion.models.progress_bar import ProgressBarMixin
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.utils.size_utils import normalize_min_aligned_size
+from vllm_omni.model_executor.model_loader.weight_utils import download_weights_from_hf_specific
 
 logger = logging.getLogger(__name__)
+
+ANIMA_VAE_SCALE_FACTOR = 8
 
 
 def retrieve_timesteps(
@@ -62,23 +69,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-_ANIMA_TRANSFORMER_CONFIG = {
-    "in_channels": 16,
-    "out_channels": 16,
-    "num_attention_heads": 16,
-    "attention_head_dim": 128,
-    "num_layers": 28,
-    "mlp_ratio": 4.0,
-    "text_embed_dim": 1024,
-    "adaln_lora_dim": 256,
-    "max_size": (128, 240, 240),
-    "patch_size": (1, 2, 2),
-    "rope_scale": (1.0, 4.0, 4.0),
-    "concat_padding_mask": True,
-    "extra_pos_embed_type": None,
-}
-
-_COSMOS_2_TRANSFORMER_RENAMES = {
+_ANIMA_ORIGINAL_TRANSFORMER_RENAMES = {
     "t_embedder.1": "time_embed.t_embedder",
     "t_embedding_norm": "time_embed.norm",
     "blocks": "transformer_blocks",
@@ -104,7 +95,7 @@ _COSMOS_2_TRANSFORMER_RENAMES = {
     "final_layer.linear": "proj_out",
 }
 
-_COSMOS_2_TRANSFORMER_DROP_KEYS = (
+_ANIMA_ORIGINAL_TRANSFORMER_DROP_KEYS = (
     "accum_video_sample_counter",
     "accum_image_sample_counter",
     "accum_iteration",
@@ -116,8 +107,72 @@ _COSMOS_2_TRANSFORMER_DROP_KEYS = (
 )
 
 
+def _anima_component_path(od_config: OmniDiffusionConfig, name: str, default_model: str | None) -> str | None:
+    load_kwargs = od_config.diffusers_load_kwargs
+    return load_kwargs.get(f"{name}_model", load_kwargs.get(f"{name}_path", default_model))
+
+
+def _anima_components_model(od_config: OmniDiffusionConfig) -> str | None:
+    load_kwargs = od_config.diffusers_load_kwargs
+    components_model = load_kwargs.get("components_model", load_kwargs.get("components_path"))
+    if components_model is not None:
+        return components_model
+
+    if od_config.model is None:
+        return None
+
+    checkpoint_dir = os.path.dirname(os.path.abspath(od_config.model))
+    return checkpoint_dir if os.path.isdir(checkpoint_dir) else od_config.model
+
+
+def _anima_vae_scale_factor_from_config(vae_config: dict) -> int:
+    if vae_config.get("spatial_compression_ratio"):
+        return int(vae_config["spatial_compression_ratio"])
+
+    downsample = vae_config.get("temporal_downsample", vae_config.get("temperal_downsample"))
+    if downsample is not None:
+        return 2 ** len(downsample)
+
+    return ANIMA_VAE_SCALE_FACTOR
+
+
+def _anima_vae_scale_factor_from_vae(vae) -> int:
+    if getattr(vae.config, "spatial_compression_ratio", None):
+        return int(vae.config.spatial_compression_ratio)
+    if hasattr(vae, "temperal_downsample"):
+        return 2 ** len(vae.temperal_downsample)
+    return ANIMA_VAE_SCALE_FACTOR
+
+
+def _resolve_anima_vae_scale_factor(od_config: OmniDiffusionConfig) -> int:
+    components_model = _anima_components_model(od_config)
+    vae_model = _anima_component_path(od_config, "vae", components_model)
+    if vae_model is None:
+        return ANIMA_VAE_SCALE_FACTOR
+
+    if os.path.exists(vae_model):
+        vae_model_path = vae_model
+    else:
+        vae_model_path = download_weights_from_hf_specific(
+            vae_model,
+            None,
+            ["vae/config.json", "config.json"],
+            revision=getattr(od_config, "revision", None),
+        )
+
+    for config_path in (
+        os.path.join(vae_model_path, "vae", "config.json"),
+        os.path.join(vae_model_path, "config.json"),
+    ):
+        if os.path.isfile(config_path):
+            with open(config_path) as f:
+                return _anima_vae_scale_factor_from_config(json.load(f))
+
+    return ANIMA_VAE_SCALE_FACTOR
+
+
 def get_anima_post_process_func(od_config: OmniDiffusionConfig):
-    image_processor = VaeImageProcessor(vae_scale_factor=8)
+    image_processor = VaeImageProcessor(vae_scale_factor=_resolve_anima_vae_scale_factor(od_config))
 
     def post_process_func(images: torch.Tensor):
         return image_processor.postprocess(images)
@@ -177,33 +232,19 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         return {key.removeprefix(prefix): value for key, value in state_dict.items() if key.startswith(prefix)}
 
     @staticmethod
-    def _infer_text_conditioner_config(state_dict):
-        model_dim = state_dict["blocks.0.self_attn.q_proj.weight"].shape[0]
-        source_dim = state_dict["blocks.0.cross_attn.k_proj.weight"].shape[1]
-        target_vocab_size, target_dim = state_dict["embed.weight"].shape
-        attention_head_dim = state_dict["blocks.0.self_attn.q_norm.weight"].shape[0]
-        num_layers = 1 + max(int(key.split(".")[1]) for key in state_dict if key.startswith("blocks."))
-
-        return {
-            "source_dim": source_dim,
-            "target_dim": target_dim,
-            "model_dim": model_dim,
-            "num_layers": num_layers,
-            "num_attention_heads": model_dim // attention_head_dim,
-            "target_vocab_size": target_vocab_size,
-        }
-
-    @staticmethod
-    def _convert_cosmos_2_transformer_state_dict(state_dict):
+    def _convert_original_transformer_state_dict(state_dict):
         if "patch_embed.proj.weight" in state_dict:
             return state_dict
 
+        # The raw Anima checkpoint uses the original training names for a
+        # Cosmos-style denoiser. Convert those keys to the local
+        # AnimaTransformer3DModel module names before strict loading.
         converted_state_dict = {}
         for key, value in state_dict.items():
             new_key = key.removeprefix("net.")
-            if any(drop_key in new_key for drop_key in _COSMOS_2_TRANSFORMER_DROP_KEYS):
+            if any(drop_key in new_key for drop_key in _ANIMA_ORIGINAL_TRANSFORMER_DROP_KEYS):
                 continue
-            for old_key, new_name in _COSMOS_2_TRANSFORMER_RENAMES.items():
+            for old_key, new_name in _ANIMA_ORIGINAL_TRANSFORMER_RENAMES.items():
                 new_key = new_key.replace(old_key, new_name)
             if new_key in converted_state_dict:
                 raise ValueError(f"Duplicate converted Anima transformer key: {new_key}")
@@ -231,8 +272,6 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
 
     def _load_native_denoiser_components(self, state_dict=None):
         if state_dict is None:
-            import os
-
             from safetensors.torch import load_file
 
             model_path = self.od_config.model
@@ -242,16 +281,14 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
             state_dict = load_file(model_path, device="cpu")
         transformer_state_dict, text_conditioner_state_dict = self._split_single_file_state_dict(state_dict)
         del state_dict
-        transformer_state_dict = self._convert_cosmos_2_transformer_state_dict(transformer_state_dict)
+        transformer_state_dict = self._convert_original_transformer_state_dict(transformer_state_dict)
 
-        native_text_conditioner = AnimaTextConditioner(
-            **self._infer_text_conditioner_config(text_conditioner_state_dict)
-        )
+        native_text_conditioner = AnimaTextConditioner(**ANIMA_TEXT_CONDITIONER_CONFIG)
         native_text_conditioner.load_state_dict(text_conditioner_state_dict, strict=True)
         native_text_conditioner.to(device=self.device, dtype=self.od_config.dtype)
         del text_conditioner_state_dict
 
-        native_transformer = AnimaTransformer3DModel(**_ANIMA_TRANSFORMER_CONFIG)
+        native_transformer = AnimaTransformer3DModel(**ANIMA_TRANSFORMER_CONFIG)
         native_transformer.load_state_dict(transformer_state_dict, strict=True)
         native_transformer.to(device=self.device, dtype=self.od_config.dtype)
         del transformer_state_dict
@@ -259,8 +296,7 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         return native_transformer, native_text_conditioner
 
     def _component_path(self, name, default_model):
-        load_kwargs = self.od_config.diffusers_load_kwargs
-        return load_kwargs.get(f"{name}_model", load_kwargs.get(f"{name}_path", default_model))
+        return _anima_component_path(self.od_config, name, default_model)
 
     @staticmethod
     def _from_pretrained_kwargs(model, subfolder=None):
@@ -270,11 +306,7 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         return kwargs
 
     def _load_outer_components(self):
-        load_kwargs = self.od_config.diffusers_load_kwargs
-        components_model = load_kwargs.get("components_model", load_kwargs.get("components_path"))
-        if components_model is None:
-            checkpoint_dir = os.path.dirname(os.path.abspath(self.od_config.model))
-            components_model = checkpoint_dir if os.path.isdir(checkpoint_dir) else self.od_config.model
+        components_model = _anima_components_model(self.od_config)
 
         text_encoder_model = self._component_path("text_encoder", components_model)
         vae_model = self._component_path("vae", components_model)
@@ -331,9 +363,7 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         self.t5_tokenizer = t5_tokenizer
         self.vae = vae
         self.scheduler = scheduler
-        self.vae_scale_factor = (
-            2 ** len(self.vae.temperal_downsample) if hasattr(self.vae, "temperal_downsample") else 8
-        )
+        self.vae_scale_factor = _anima_vae_scale_factor_from_vae(self.vae)
         return loaded
 
     def _extract_prompts(self, prompts):

@@ -342,8 +342,6 @@ class DiffusersAdapterPipeline(nn.Module, DiffusionPipelineProfilerMixin):
         for key, value in sampling.__dict__.items():
             if value is None:
                 continue
-            if key == "guidance_scale" and not getattr(sampling, "guidance_scale_provided", False):
-                continue
             if self._accept_call_kwargs is None or key in self._accept_call_kwargs:
                 kwargs[key] = value
 

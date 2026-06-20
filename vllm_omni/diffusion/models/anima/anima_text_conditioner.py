@@ -11,6 +11,19 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 
+ANIMA_TEXT_CONDITIONER_CONFIG = {
+    "source_dim": 1024,
+    "target_dim": 1024,
+    "model_dim": 1024,
+    "num_layers": 6,
+    "num_attention_heads": 16,
+    "mlp_ratio": 4.0,
+    "target_vocab_size": 32128,
+    "use_self_attention": True,
+    "use_layer_norm": False,
+    "min_sequence_length": 512,
+}
+
 
 def _rotate_half(hidden_states):
     hidden_states_1 = hidden_states[..., : hidden_states.shape[-1] // 2]
