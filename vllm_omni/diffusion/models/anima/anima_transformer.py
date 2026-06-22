@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from diffusers.models.embeddings import Timesteps
+from diffusers.models.embeddings import Timesteps, apply_rotary_emb
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
@@ -32,13 +32,11 @@ ANIMA_TRANSFORMER_CONFIG = {
 }
 
 
-def _apply_rotary_emb(hidden_states, image_rotary_emb):
-    cos, sin = image_rotary_emb
-    cos = cos[None, :, None, :].to(device=hidden_states.device, dtype=hidden_states.dtype)
-    sin = sin[None, :, None, :].to(device=hidden_states.device, dtype=hidden_states.dtype)
-    x_real, x_imag = hidden_states.reshape(*hidden_states.shape[:-1], 2, -1).unbind(-2)
-    x_rotated = torch.cat([-x_imag, x_real], dim=-1)
-    return hidden_states * cos + x_rotated * sin
+# NOTE: We import and use diffusers' `apply_rotary_emb` instead of a custom native implementation
+# to prevent numerical drift in bfloat16. Diffusers upcasts queries, keys, and rotary frequency
+# tensors to float32 before computing the rotation, and casts back to bfloat16 at the end.
+# Performing the entire computation in bfloat16 accumulates precision errors across the 28
+# transformer blocks, which is heavily amplified by Classifier-Free Guidance (CFG).
 
 
 class CosmosPatchEmbed(nn.Module):
@@ -235,8 +233,10 @@ class CosmosAttention(nn.Module):
         key = self.norm_k(key)
 
         if image_rotary_emb is not None:
-            query = _apply_rotary_emb(query, image_rotary_emb)
-            key = _apply_rotary_emb(key, image_rotary_emb)
+            # We use diffusers' apply_rotary_emb to leverage its internal float32 rotation upcasting
+            # logic, resolving the bfloat16 cumulative precision drift vs. the reference pipeline.
+            query = apply_rotary_emb(query, image_rotary_emb, sequence_dim=1, use_real_unbind_dim=-2)
+            key = apply_rotary_emb(key, image_rotary_emb, sequence_dim=1, use_real_unbind_dim=-2)
 
         attn_metadata = AttentionMetadata(attn_mask=attention_mask) if attention_mask is not None else None
         hidden_states = self.attn(query, key, value, attn_metadata=attn_metadata)
