@@ -690,7 +690,7 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
             num_channels_latents=16,  # Cosmos/Anima has 16 channels
             height=height,
             width=width,
-            dtype=self.transformer.dtype,
+            dtype=torch.float32,
             device=self.device,
             generator=generator,
             latents=latents,
