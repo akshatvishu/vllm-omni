@@ -261,10 +261,7 @@ class AnimaTextConditioner(nn.Module):
     def _prepare_attention_mask(attention_mask):
         if attention_mask is None:
             return None
-        attention_mask = attention_mask.to(torch.bool)
-        if attention_mask.ndim == 2:
-            attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)
-        return attention_mask
+        return attention_mask.to(torch.bool)
 
     def forward(
         self,
@@ -297,7 +294,7 @@ class AnimaTextConditioner(nn.Module):
         hidden_states = self.norm(self.out_proj(hidden_states))
 
         if target_attention_mask is not None:
-            hidden_states = hidden_states * target_attention_mask.squeeze(1).squeeze(1).to(hidden_states).unsqueeze(-1)
+            hidden_states = hidden_states * target_attention_mask.to(hidden_states).unsqueeze(-1)
 
         if hidden_states.shape[1] < self.config.min_sequence_length:
             hidden_states = F.pad(hidden_states, (0, 0, 0, self.config.min_sequence_length - hidden_states.shape[1]))
