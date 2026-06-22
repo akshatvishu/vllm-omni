@@ -557,7 +557,10 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
                     noise_pred = noise_pred_uncond + true_cfg_scale * (noise_pred - noise_pred_uncond)
 
                 # Scheduler step
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents_dtype = latents.dtype
+                latents = self.scheduler.step(noise_pred.to(latents_dtype), t, latents, return_dict=False)[0]
+                if latents.dtype != latents_dtype:
+                    latents = latents.to(latents_dtype)
 
                 pbar.update()
 
