@@ -122,19 +122,36 @@ def test_enrich_config_native_anima_single_file_stays_native(tmp_path):
     assert config.diffusers_pipeline_cls is None
 
 
-def test_native_anima_single_file_allows_load_kwargs(tmp_path):
+def test_native_anima_single_file_allows_custom_pipeline_args(tmp_path):
     dummy_checkpoint = tmp_path / "model.safetensors"
     dummy_checkpoint.write_text("dummy")
 
     config = OmniDiffusionConfig(
         model=str(dummy_checkpoint),
         model_class_name="AnimaPipeline",
-        diffusers_load_kwargs={"local_files_only": True},
+        custom_pipeline_args={"components_path": "/tmp/anima-components"},
     )
     config.enrich_config()
 
     assert config.diffusion_load_format == "default"
-    assert config.diffusers_load_kwargs == {"local_files_only": True}
+    assert config.custom_pipeline_args == {"components_path": "/tmp/anima-components"}
+
+
+def test_native_anima_component_paths_use_custom_pipeline_args():
+    from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
+
+    pipeline = AnimaPipeline.__new__(AnimaPipeline)
+    pipeline.od_config = SimpleNamespace(
+        custom_pipeline_args={
+            "components_path": "/tmp/anima-components",
+            "vae_path": "/tmp/anima-vae",
+            "text_encoder_model": "/tmp/anima-text-encoder",
+        }
+    )
+
+    assert pipeline._component_path("vae", "/tmp/default") == "/tmp/anima-vae"
+    assert pipeline._component_path("text_encoder", "/tmp/default") == "/tmp/anima-text-encoder"
+    assert pipeline._component_path("tokenizer", "/tmp/default") == "/tmp/default"
 
 
 def test_diffusers_adapter_accepts_var_keyword_call_signature():

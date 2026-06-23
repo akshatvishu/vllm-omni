@@ -83,7 +83,7 @@ Then point `--model` at the raw Anima transformer checkpoint and `components_pat
 vllm serve "/path/to/anima.safetensors" \
     --omni \
     --model-class-name AnimaPipeline \
-    --diffusers-load-kwargs '{
+    --custom-pipeline-args '{
       "components_path": "/path/to/anima-components"
     }'
 ```
@@ -95,7 +95,7 @@ Native Anima currently supports baseline single-GPU execution. Cache-DiT,
 TeaCache, CPU offload, layer-wise offload, quantization, TP/SP, CFG parallel,
 HSDP, and step execution are not supported by `AnimaPipeline` yet.
 
-There are two more optional arguments, `--diffusers-load-kwargs` and `--diffusers-call-kwargs`, which are valid together with `--diffusion-load-format diffusers` or `diffusers_single_file`. Native Anima also accepts `--diffusers-load-kwargs` for component paths such as `components_path`, but does not delegate denoising to Diffusers.
+There are two more optional arguments, `--diffusers-load-kwargs` and `--diffusers-call-kwargs`, which are valid together with `--diffusion-load-format diffusers` or `diffusers_single_file`. Native Anima accepts component paths such as `components_path` through `--custom-pipeline-args`, but does not delegate denoising to Diffusers.
 
 After launching the model, users send a request as usual. Refer to other documentation pages on how to request a particular input/output modality, such as `examples/online_serving/text_to_image/openai_chat_client.py`.
 

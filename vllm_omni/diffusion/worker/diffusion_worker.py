@@ -995,25 +995,30 @@ class WorkerWrapperBase:
         self.base_worker_class = base_worker_class
         self.worker_extension_cls = worker_extension_cls
         self.custom_pipeline_args = custom_pipeline_args
+        uses_custom_pipeline = self._uses_custom_pipeline()
 
         # Prepare worker class with extension support
         worker_class = self._prepare_worker_class()
 
         # Create the actual worker instance
-        # When custom_pipeline_args is provided, skip initial model loading
-        # since re_init_pipeline will handle it. This avoids allocating memory
-        # through CuMemAllocator twice, which causes assertion failures in
-        # sleep mode.
+        # Only dynamic custom pipelines skip initial loading; native pipelines
+        # may also use custom_pipeline_args for model-specific component paths.
         self.worker = worker_class(
             local_rank=gpu_id,
             rank=gpu_id,
             od_config=od_config,
-            skip_load_model=(self.custom_pipeline_args is not None),
+            skip_load_model=uses_custom_pipeline,
         )
 
         # Re-initialize pipeline with custom pipeline if provided
-        if self.custom_pipeline_args is not None:
+        if uses_custom_pipeline:
             self.worker.re_init_pipeline(self.custom_pipeline_args)
+
+    def _uses_custom_pipeline(self) -> bool:
+        custom_pipeline_args = self.custom_pipeline_args
+        if not custom_pipeline_args:
+            return False
+        return "pipeline_class" in custom_pipeline_args
 
     def _prepare_worker_class(self) -> type:
         """
@@ -1025,8 +1030,8 @@ class WorkerWrapperBase:
         """
         worker_class = self.base_worker_class
 
-        # If custom_pipeline_args is provided, use CustomPipelineWorkerExtension
-        if self.custom_pipeline_args is not None:
+        # If custom pipeline initialization is requested, use CustomPipelineWorkerExtension.
+        if self._uses_custom_pipeline():
             # Set worker_extension_cls to CustomPipelineWorkerExtension if not already set
             if self.worker_extension_cls is None:
                 self.worker_extension_cls = CustomPipelineWorkerExtension

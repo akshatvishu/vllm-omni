@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from collections.abc import Iterable
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import torch
@@ -40,12 +42,18 @@ ANIMA_TRANSFORMER_CONFIG = {
 
 
 class CosmosPatchEmbed(nn.Module):
-    def __init__(self, in_channels, out_channels, patch_size, bias=True):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        patch_size: tuple[int, int, int],
+        bias: bool = True,
+    ) -> None:
         super().__init__()
         self.patch_size = patch_size
         self.proj = nn.Linear(in_channels * patch_size[0] * patch_size[1] * patch_size[2], out_channels, bias=bias)
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
         hidden_states = hidden_states.reshape(
@@ -63,26 +71,26 @@ class CosmosPatchEmbed(nn.Module):
 
 
 class CosmosTimestepEmbedding(nn.Module):
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features: int, out_features: int) -> None:
         super().__init__()
         self.linear_1 = nn.Linear(in_features, out_features, bias=False)
         self.activation = nn.SiLU()
         self.linear_2 = nn.Linear(out_features, 3 * out_features, bias=False)
 
-    def forward(self, timesteps):
+    def forward(self, timesteps: torch.Tensor) -> torch.Tensor:
         emb = self.linear_1(timesteps)
         emb = self.activation(emb)
         return self.linear_2(emb)
 
 
 class CosmosEmbedding(nn.Module):
-    def __init__(self, embedding_dim, condition_dim):
+    def __init__(self, embedding_dim: int, condition_dim: int) -> None:
         super().__init__()
         self.time_proj = Timesteps(embedding_dim, flip_sin_to_cos=True, downscale_freq_shift=0.0)
         self.t_embedder = CosmosTimestepEmbedding(embedding_dim, condition_dim)
         self.norm = nn.RMSNorm(embedding_dim, eps=1e-6)
 
-    def forward(self, hidden_states, timestep):
+    def forward(self, hidden_states: torch.Tensor, timestep: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         timesteps_proj = self.time_proj(timestep).type_as(hidden_states)
         temb = self.t_embedder(timesteps_proj)
         embedded_timestep = self.norm(timesteps_proj)
@@ -90,7 +98,7 @@ class CosmosEmbedding(nn.Module):
 
 
 class CosmosAdaLayerNorm(nn.Module):
-    def __init__(self, in_features, hidden_features):
+    def __init__(self, in_features: int, hidden_features: int) -> None:
         super().__init__()
         self.embedding_dim = in_features
         self.activation = nn.SiLU()
@@ -98,7 +106,12 @@ class CosmosAdaLayerNorm(nn.Module):
         self.linear_1 = nn.Linear(in_features, hidden_features, bias=False)
         self.linear_2 = nn.Linear(hidden_features, 2 * in_features, bias=False)
 
-    def forward(self, hidden_states, embedded_timestep, temb=None):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        embedded_timestep: torch.Tensor,
+        temb: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         embedded_timestep = self.activation(embedded_timestep)
         embedded_timestep = self.linear_1(embedded_timestep)
         embedded_timestep = self.linear_2(embedded_timestep)
@@ -116,7 +129,7 @@ class CosmosAdaLayerNorm(nn.Module):
 
 
 class CosmosAdaLayerNormZero(nn.Module):
-    def __init__(self, in_features, hidden_features=None):
+    def __init__(self, in_features: int, hidden_features: int | None = None) -> None:
         super().__init__()
         self.norm = nn.LayerNorm(in_features, elementwise_affine=False, eps=1e-6)
         self.activation = nn.SiLU()
@@ -125,7 +138,12 @@ class CosmosAdaLayerNormZero(nn.Module):
         )
         self.linear_2 = nn.Linear(hidden_features or in_features, 3 * in_features, bias=False)
 
-    def forward(self, hidden_states, embedded_timestep, temb=None):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        embedded_timestep: torch.Tensor,
+        temb: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         embedded_timestep = self.activation(embedded_timestep)
         embedded_timestep = self.linear_1(embedded_timestep)
         embedded_timestep = self.linear_2(embedded_timestep)
@@ -144,16 +162,16 @@ class CosmosAdaLayerNormZero(nn.Module):
 
 
 class CosmosGELU(nn.Module):
-    def __init__(self, dim, inner_dim, bias=False):
+    def __init__(self, dim: int, inner_dim: int, bias: bool = False) -> None:
         super().__init__()
         self.proj = nn.Linear(dim, inner_dim, bias=bias)
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         return F.gelu(self.proj(hidden_states))
 
 
 class CosmosFeedForward(nn.Module):
-    def __init__(self, dim, mult=4.0, bias=False):
+    def __init__(self, dim: int, mult: float = 4.0, bias: bool = False) -> None:
         super().__init__()
         inner_dim = int(dim * mult)
         self.net = nn.ModuleList(
@@ -164,7 +182,7 @@ class CosmosFeedForward(nn.Module):
             ]
         )
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         for module in self.net:
             hidden_states = module(hidden_states)
         return hidden_states
@@ -173,14 +191,14 @@ class CosmosFeedForward(nn.Module):
 class CosmosAttention(nn.Module):
     def __init__(
         self,
-        query_dim,
-        cross_attention_dim=None,
-        heads=8,
-        dim_head=64,
-        out_bias=False,
-        img_context=False,
-        prefix="",
-    ):
+        query_dim: int,
+        cross_attention_dim: int | None = None,
+        heads: int = 8,
+        dim_head: int = 64,
+        out_bias: bool = False,
+        img_context: bool = False,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         inner_dim = heads * dim_head
         cross_attention_dim = query_dim if cross_attention_dim is None else cross_attention_dim
@@ -220,7 +238,13 @@ class CosmosAttention(nn.Module):
                 prefix=f"{prefix}.img_attn" if prefix else "img_attn",
             )
 
-    def _attention(self, hidden_states, encoder_hidden_states=None, attention_mask=None, image_rotary_emb=None):
+    def _attention(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
         encoder_hidden_states = hidden_states if encoder_hidden_states is None else encoder_hidden_states
         batch_size, seq_len, _ = hidden_states.shape
         encoder_seq_len = encoder_hidden_states.shape[1]
@@ -242,7 +266,12 @@ class CosmosAttention(nn.Module):
         hidden_states = self.attn(query, key, value, attn_metadata=attn_metadata)
         return hidden_states.flatten(2, 3).type_as(query)
 
-    def _image_attention(self, hidden_states, img_context, attention_mask=None):
+    def _image_attention(
+        self,
+        hidden_states: torch.Tensor,
+        img_context: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         batch_size, seq_len, _ = hidden_states.shape
         img_seq_len = img_context.shape[1]
 
@@ -257,7 +286,13 @@ class CosmosAttention(nn.Module):
         hidden_states = self.img_attn(query, key, value, attn_metadata=attn_metadata)
         return hidden_states.flatten(2, 3).type_as(query)
 
-    def forward(self, hidden_states, encoder_hidden_states=None, attention_mask=None, image_rotary_emb=None):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor | tuple[torch.Tensor, torch.Tensor | None] | None = None,
+        attention_mask: torch.Tensor | tuple[torch.Tensor | None, torch.Tensor | None] | None = None,
+        image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
         if self.img_context:
             if not isinstance(encoder_hidden_states, tuple):
                 raise ValueError("Expected encoder_hidden_states as (text_context, img_context).")
@@ -277,17 +312,17 @@ class CosmosAttention(nn.Module):
 class CosmosTransformerBlock(nn.Module):
     def __init__(
         self,
-        num_attention_heads,
-        attention_head_dim,
-        cross_attention_dim,
-        mlp_ratio=4.0,
-        adaln_lora_dim=256,
-        out_bias=False,
-        img_context=False,
-        before_proj=False,
-        after_proj=False,
-        prefix="",
-    ):
+        num_attention_heads: int,
+        attention_head_dim: int,
+        cross_attention_dim: int,
+        mlp_ratio: float = 4.0,
+        adaln_lora_dim: int = 256,
+        out_bias: bool = False,
+        img_context: bool = False,
+        before_proj: bool = False,
+        after_proj: bool = False,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         hidden_size = num_attention_heads * attention_head_dim
 
@@ -319,17 +354,17 @@ class CosmosTransformerBlock(nn.Module):
 
     def forward(
         self,
-        hidden_states,
-        encoder_hidden_states,
-        embedded_timestep,
-        temb=None,
-        image_rotary_emb=None,
-        extra_pos_emb=None,
-        attention_mask=None,
-        controlnet_residual=None,
-        latents=None,
-        block_idx=None,
-    ):
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor | tuple[torch.Tensor, torch.Tensor | None],
+        embedded_timestep: torch.Tensor,
+        temb: torch.Tensor | None = None,
+        image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
+        extra_pos_emb: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | tuple[torch.Tensor | None, torch.Tensor | None] | None = None,
+        controlnet_residual: torch.Tensor | None = None,
+        latents: torch.Tensor | None = None,
+        block_idx: int | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         if self.before_proj is not None:
             hidden_states = self.before_proj(hidden_states) + latents
 
@@ -364,12 +399,12 @@ class CosmosTransformerBlock(nn.Module):
 class CosmosRotaryPosEmbed(nn.Module):
     def __init__(
         self,
-        hidden_size,
-        max_size=(128, 240, 240),
-        patch_size=(1, 2, 2),
-        base_fps=24,
-        rope_scale=(2.0, 1.0, 1.0),
-    ):
+        hidden_size: int,
+        max_size: tuple[int, int, int] = (128, 240, 240),
+        patch_size: tuple[int, int, int] = (1, 2, 2),
+        base_fps: int = 24,
+        rope_scale: tuple[float, float, float] = (2.0, 1.0, 1.0),
+    ) -> None:
         super().__init__()
         self.max_size = [size // patch for size, patch in zip(max_size, patch_size)]
         self.patch_size = patch_size
@@ -383,7 +418,7 @@ class CosmosRotaryPosEmbed(nn.Module):
         self.w_ntk_factor = rope_scale[2] ** (self.dim_w / (self.dim_w - 2))
         self.t_ntk_factor = rope_scale[0] ** (self.dim_t / (self.dim_t - 2))
 
-    def forward(self, hidden_states, fps=None):
+    def forward(self, hidden_states: torch.Tensor, fps: float | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         _, _, num_frames, height, width = hidden_states.shape
         pe_size = [num_frames // self.patch_size[0], height // self.patch_size[1], width // self.patch_size[2]]
         device = hidden_states.device
@@ -413,7 +448,13 @@ class CosmosRotaryPosEmbed(nn.Module):
 
 
 class CosmosLearnablePositionalEmbed(nn.Module):
-    def __init__(self, hidden_size, max_size, patch_size, eps=1e-6):
+    def __init__(
+        self,
+        hidden_size: int,
+        max_size: tuple[int, int, int],
+        patch_size: tuple[int, int, int],
+        eps: float = 1e-6,
+    ) -> None:
         super().__init__()
         self.max_size = [size // patch for size, patch in zip(max_size, patch_size)]
         self.patch_size = patch_size
@@ -422,7 +463,7 @@ class CosmosLearnablePositionalEmbed(nn.Module):
         self.pos_emb_h = nn.Parameter(torch.zeros(self.max_size[1], hidden_size))
         self.pos_emb_w = nn.Parameter(torch.zeros(self.max_size[2], hidden_size))
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         batch_size, _, num_frames, height, width = hidden_states.shape
         pe_size = [num_frames // self.patch_size[0], height // self.patch_size[1], width // self.patch_size[2]]
 
@@ -442,28 +483,28 @@ class AnimaTransformer3DModel(nn.Module):
 
     def __init__(
         self,
-        in_channels=16,
-        out_channels=16,
-        num_attention_heads=32,
-        attention_head_dim=128,
-        num_layers=28,
-        mlp_ratio=4.0,
-        text_embed_dim=1024,
-        adaln_lora_dim=256,
-        max_size=(128, 240, 240),
-        patch_size=(1, 2, 2),
-        rope_scale=(2.0, 1.0, 1.0),
-        concat_padding_mask=True,
-        extra_pos_embed_type="learnable",
-        use_crossattn_projection=False,
-        crossattn_proj_in_channels=1024,
-        encoder_hidden_states_channels=1024,
-        controlnet_block_every_n=None,
-        img_context_dim_in=None,
-        img_context_num_tokens=256,
-        img_context_dim_out=2048,
-        **kwargs,
-    ):
+        in_channels: int = 16,
+        out_channels: int = 16,
+        num_attention_heads: int = 32,
+        attention_head_dim: int = 128,
+        num_layers: int = 28,
+        mlp_ratio: float = 4.0,
+        text_embed_dim: int = 1024,
+        adaln_lora_dim: int = 256,
+        max_size: tuple[int, int, int] = (128, 240, 240),
+        patch_size: tuple[int, int, int] = (1, 2, 2),
+        rope_scale: tuple[float, float, float] = (2.0, 1.0, 1.0),
+        concat_padding_mask: bool = True,
+        extra_pos_embed_type: str | None = "learnable",
+        use_crossattn_projection: bool = False,
+        crossattn_proj_in_channels: int = 1024,
+        encoder_hidden_states_channels: int = 1024,
+        controlnet_block_every_n: int | None = None,
+        img_context_dim_in: int | None = None,
+        img_context_num_tokens: int = 256,
+        img_context_dim_out: int = 2048,
+        **kwargs: Any,
+    ) -> None:
         super().__init__()
         hidden_size = num_attention_heads * attention_head_dim
         self.config = SimpleNamespace(
@@ -498,7 +539,7 @@ class AnimaTransformer3DModel(nn.Module):
             patch_size=patch_size,
             rope_scale=rope_scale,
         )
-        self.learnable_pos_embed = None
+        self.learnable_pos_embed: CosmosLearnablePositionalEmbed | None = None
         if extra_pos_embed_type == "learnable":
             self.learnable_pos_embed = CosmosLearnablePositionalEmbed(
                 hidden_size=hidden_size,
@@ -524,12 +565,14 @@ class AnimaTransformer3DModel(nn.Module):
         self.norm_out = CosmosAdaLayerNorm(hidden_size, adaln_lora_dim)
         self.proj_out = nn.Linear(hidden_size, patch_size[0] * patch_size[1] * patch_size[2] * out_channels, bias=False)
 
+        self.crossattn_proj: nn.Module | None = None
         if use_crossattn_projection:
             self.crossattn_proj = nn.Sequential(
                 nn.Linear(crossattn_proj_in_channels, encoder_hidden_states_channels, bias=True),
                 nn.GELU(),
             )
 
+        self.img_context_proj: nn.Module | None = None
         if img_context_dim_in:
             self.img_context_proj = nn.Sequential(
                 nn.Linear(img_context_dim_in, img_context_dim_out, bias=True),
@@ -539,27 +582,29 @@ class AnimaTransformer3DModel(nn.Module):
         self.gradient_checkpointing = False
 
     @property
-    def dtype(self):
+    def dtype(self) -> torch.dtype:
         return next(self.parameters()).dtype
 
     def forward(
         self,
-        hidden_states,
-        timestep,
-        encoder_hidden_states,
-        block_controlnet_hidden_states=None,
-        attention_mask=None,
-        fps=None,
-        condition_mask=None,
-        padding_mask=None,
-        return_dict=True,
-    ):
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor | tuple[torch.Tensor, torch.Tensor | None],
+        block_controlnet_hidden_states: list[torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | tuple[torch.Tensor | None, torch.Tensor | None] | None = None,
+        fps: float | None = None,
+        condition_mask: torch.Tensor | None = None,
+        padding_mask: torch.Tensor | None = None,
+        return_dict: bool = True,
+    ) -> Transformer2DModelOutput | tuple[torch.Tensor]:
         batch_size, _, num_frames, height, width = hidden_states.shape
 
         if condition_mask is not None:
             hidden_states = torch.cat([hidden_states, condition_mask], dim=1)
 
         if self.config.concat_padding_mask:
+            if padding_mask is None:
+                raise ValueError("padding_mask is required when concat_padding_mask=True.")
             padding_mask_resized = F.interpolate(
                 padding_mask,
                 size=list(hidden_states.shape[-2:]),
@@ -570,11 +615,11 @@ class AnimaTransformer3DModel(nn.Module):
                 dim=1,
             )
 
-        if attention_mask is not None and attention_mask.ndim != 2:
+        if isinstance(attention_mask, torch.Tensor) and attention_mask.ndim != 2:
             attention_mask = attention_mask.squeeze(1).squeeze(1)
 
         image_rotary_emb = self.rope(hidden_states, fps=fps)
-        extra_pos_emb = self.learnable_pos_embed(hidden_states) if self.config.extra_pos_embed_type else None
+        extra_pos_emb = self.learnable_pos_embed(hidden_states) if self.learnable_pos_embed is not None else None
 
         p_t, p_h, p_w = self.config.patch_size
         post_patch_num_frames = num_frames // p_t
@@ -604,8 +649,12 @@ class AnimaTransformer3DModel(nn.Module):
             encoder_hidden_states if isinstance(encoder_hidden_states, tuple) else (encoder_hidden_states, None)
         )
         if self.config.use_crossattn_projection:
+            if self.crossattn_proj is None:
+                raise ValueError("crossattn_proj is required when use_crossattn_projection=True.")
             text_context = self.crossattn_proj(text_context)
         if img_context is not None and self.config.img_context_dim_in:
+            if self.img_context_proj is None:
+                raise ValueError("img_context_proj is required when img_context_dim_in is set.")
             img_context = self.img_context_proj(img_context)
         processed_encoder_hidden_states = (
             (text_context, img_context) if isinstance(encoder_hidden_states, tuple) else text_context
@@ -643,7 +692,7 @@ class AnimaTransformer3DModel(nn.Module):
 
         return Transformer2DModelOutput(sample=hidden_states)
 
-    def load_weights(self, weights):
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         params = dict(self.named_parameters())
         loaded = set()
         for name, tensor in weights:

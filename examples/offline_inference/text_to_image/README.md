@@ -198,13 +198,13 @@ python examples/offline_inference/text_to_image/text_to_image.py \
 ```
 ### Anima Single-File Checkpoints
 
-To load Anima, point `--model` to the single-file checkpoint path, pass the native pipeline class name using `--model-class-name`, and supply the converted components directory using `--diffusers-load-kwargs`:
+To load Anima, point `--model` to the single-file checkpoint path, pass the native pipeline class name using `--model-class-name`, and supply the converted components directory using `--custom-pipeline-args`:
 
 ```bash
 python examples/offline_inference/text_to_image/text_to_image.py \
   --model /path/to/models/anima-official/split_files/diffusion_models/anima-base-v1.0.safetensors \
   --model-class-name AnimaPipeline \
-  --diffusers-load-kwargs '{"components_path": "/path/to/models/anima-components"}' \
+  --custom-pipeline-args '{"components_path": "/path/to/models/anima-components"}' \
   --prompt "A cinematic close-up of a glass teapot on a wooden table." \
   --seed 42 \
   --guidance-scale 4.0 \

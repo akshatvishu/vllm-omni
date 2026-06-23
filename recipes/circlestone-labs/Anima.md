@@ -96,7 +96,7 @@ directly as `components_path`.
 python examples/offline_inference/text_to_image/text_to_image.py \
     --model "$ANIMA_CHECKPOINT" \
     --model-class-name AnimaPipeline \
-    --diffusers-load-kwargs "{\"components_path\":\"$ANIMA_COMPONENTS\"}" \
+    --custom-pipeline-args "{\"components_path\":\"$ANIMA_COMPONENTS\"}" \
     --prompt "A cinematic close-up of a glass teapot on a wooden table." \
     --seed 42 \
     --guidance-scale 4.0 \
@@ -117,7 +117,7 @@ Check that `/tmp/anima_output.png` exists and contains a generated image.
 #### Notes
 
 - Key flags: `--model-class-name AnimaPipeline` selects the native Anima path;
-  `--diffusers-load-kwargs` supplies `components_path`.
+  `--custom-pipeline-args` supplies `components_path`.
 - No deploy config is required for local single-file checkpoint discovery when
   `--model-class-name AnimaPipeline` is provided.
 - Start with `max-concurrency=1` for correctness and latency validation.
@@ -137,7 +137,7 @@ vllm serve "$ANIMA_CHECKPOINT" \
     --omni \
     --port 8099 \
     --model-class-name AnimaPipeline \
-    --diffusers-load-kwargs "{\"components_path\":\"$ANIMA_COMPONENTS\"}"
+    --custom-pipeline-args "{\"components_path\":\"$ANIMA_COMPONENTS\"}"
 ```
 
 ### Send requests

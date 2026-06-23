@@ -46,7 +46,7 @@ def test_anima_text_to_image(guidance_scale):
     server_args = [
         "--model-class-name",
         "AnimaPipeline",
-        "--diffusers-load-kwargs",
+        "--custom-pipeline-args",
         json.dumps({"components_path": components}),
     ]
     with OmniServer(checkpoint, server_args) as omni_server:

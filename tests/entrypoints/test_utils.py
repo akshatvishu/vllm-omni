@@ -344,7 +344,7 @@ class TestLoadAndResolveStageConfigs:
                 "anima-base-v1.0.ckpt",
                 {
                     "model_class_name": "AnimaPipeline",
-                    "diffusers_load_kwargs": {"components_path": "/tmp/anima-components"},
+                    "custom_pipeline_args": {"components_path": "/tmp/anima-components"},
                 },
                 True,
             ),
@@ -353,7 +353,7 @@ class TestLoadAndResolveStageConfigs:
                 {
                     "diffusion_load_format": "diffusers_single_file",
                     "model_class_name": "AnimaPipeline",
-                    "diffusers_load_kwargs": {"components_path": "/tmp/anima-components"},
+                    "custom_pipeline_args": {"components_path": "/tmp/anima-components"},
                 },
                 False,
             ),
@@ -405,7 +405,10 @@ class TestLoadAndResolveStageConfigs:
         assert engine_args["model_stage"] == "diffusion"
         assert engine_args["model_class_name"] == kwargs["model_class_name"]
         assert engine_args["diffusion_load_format"] == kwargs.get("diffusion_load_format", "default")
-        assert engine_args["diffusers_load_kwargs"] == kwargs["diffusers_load_kwargs"]
+        if "diffusers_load_kwargs" in kwargs:
+            assert engine_args["diffusers_load_kwargs"] == kwargs["diffusers_load_kwargs"]
+        if "custom_pipeline_args" in kwargs:
+            assert engine_args["custom_pipeline_args"] == kwargs["custom_pipeline_args"]
 
     def test_stage_configs_path_promotes_new_deploy_yaml_without_expanding_replicas(
         self, tmp_path, mocker: MockerFixture

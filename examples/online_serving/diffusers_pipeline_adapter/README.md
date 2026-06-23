@@ -39,7 +39,7 @@ vllm serve "stable-diffusion-v1-5/stable-diffusion-v1-5" \
 Users turn on the diffusers backend primarily through `--diffusion-load-format diffusers` argument.
 There are two more optional arguments, `--diffusers-load-kwargs` and `--diffusers-call-kwargs`,
 which are valid together with `--diffusion-load-format diffusers` or `diffusers_single_file`.
-Native Anima also accepts `--diffusers-load-kwargs` for component paths such as `components_path`,
+Native Anima accepts `--custom-pipeline-args` for component paths such as `components_path`,
 but does not delegate denoising to Diffusers.
 
 ### Native Anima Single-File Checkpoints
@@ -52,7 +52,7 @@ is passed for a local single-file checkpoint, vLLM-Omni maps it to `AnimaPipelin
 vllm serve "/path/to/anima-base-v1.0.safetensors" \
     --omni \
     --model-class-name AnimaPipeline \
-    --diffusers-load-kwargs '{"components_path": "/path/to/anima-components"}'
+    --custom-pipeline-args '{"components_path": "/path/to/anima-components"}'
 ```
 
 No deploy config is required for local Anima single-file checkpoint discovery

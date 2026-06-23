@@ -347,7 +347,13 @@ def parse_args() -> argparse.Namespace:
         "--diffusers-load-kwargs",
         type=parse_json_dict,
         default=None,
-        help='JSON object passed to model loader (e.g. \'{"components_path": "/path"}\').',
+        help="JSON object passed to the Diffusers model loader (e.g. '{\"use_safetensors\": true}').",
+    )
+    parser.add_argument(
+        "--custom-pipeline-args",
+        type=parse_json_dict,
+        default=None,
+        help='JSON object passed to native/custom pipelines (e.g. \'{"components_path": "/path"}\').',
     )
     current_omni_platform.pre_register_and_update(parser)
     return parser.parse_args()
@@ -451,6 +457,8 @@ def main():
         omni_kwargs["model_class_name"] = "NextStep11Pipeline"
     if args.diffusers_load_kwargs is not None:
         omni_kwargs["diffusers_load_kwargs"] = args.diffusers_load_kwargs
+    if args.custom_pipeline_args is not None:
+        omni_kwargs["custom_pipeline_args"] = args.custom_pipeline_args
     omni = Omni(**omni_kwargs)
     model_class_name = get_model_class_name(omni)
     declared_extra_body_params = get_extra_body_params(model_class_name)
@@ -485,6 +493,8 @@ def main():
         print(f"  Model class name: {args.model_class_name}")
     if args.diffusers_load_kwargs is not None:
         print(f"  Diffusers load kwargs: {args.diffusers_load_kwargs}")
+    if args.custom_pipeline_args is not None:
+        print(f"  Custom pipeline args: {args.custom_pipeline_args}")
     print(f"{'=' * 60}\n")
 
     # Build LoRA request when --lora-path is set

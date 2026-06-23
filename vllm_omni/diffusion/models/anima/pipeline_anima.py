@@ -4,7 +4,8 @@
 import inspect
 import logging
 import os
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -34,13 +35,13 @@ ANIMA_VAE_SCALE_FACTOR = 8
 
 
 def retrieve_timesteps(
-    scheduler,
+    scheduler: Any,
     num_inference_steps: int | None = None,
     device: str | torch.device | None = None,
     timesteps: list[int] | None = None,
     sigmas: list[float] | None = None,
-    **kwargs,
-):
+    **kwargs: Any,
+) -> tuple[torch.Tensor, int]:
     if timesteps is not None and sigmas is not None:
         raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
     if timesteps is not None:
@@ -50,8 +51,8 @@ def retrieve_timesteps(
                 f" timestep schedules. Please check whether you are using the correct scheduler."
             )
         scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
-        timesteps = scheduler.timesteps
-        num_inference_steps = len(timesteps)
+        scheduler_timesteps = scheduler.timesteps
+        num_inference_steps = len(scheduler_timesteps)
     elif sigmas is not None:
         if "sigmas" not in inspect.signature(scheduler.set_timesteps).parameters:
             raise ValueError(
@@ -59,12 +60,14 @@ def retrieve_timesteps(
                 f" sigmas schedules. Please check whether you are using the correct scheduler."
             )
         scheduler.set_timesteps(sigmas=sigmas, device=device, **kwargs)
-        timesteps = scheduler.timesteps
-        num_inference_steps = len(timesteps)
+        scheduler_timesteps = scheduler.timesteps
+        num_inference_steps = len(scheduler_timesteps)
     else:
         scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
-        timesteps = scheduler.timesteps
-    return timesteps, num_inference_steps
+        scheduler_timesteps = scheduler.timesteps
+    if num_inference_steps is None:
+        num_inference_steps = len(scheduler_timesteps)
+    return cast(torch.Tensor, scheduler_timesteps), num_inference_steps
 
 
 _ANIMA_ORIGINAL_TRANSFORMER_RENAMES = {
@@ -105,19 +108,21 @@ _ANIMA_ORIGINAL_TRANSFORMER_DROP_KEYS = (
 )
 
 
-def _anima_vae_scale_factor_from_vae(vae) -> int:
+def _anima_vae_scale_factor_from_vae(vae: Any) -> int:
     vae_config = getattr(vae, "config", None)
-    if getattr(vae_config, "spatial_compression_ratio", None):
-        return int(vae_config.spatial_compression_ratio)
-    if hasattr(vae, "temperal_downsample"):
-        return 2 ** len(vae.temperal_downsample)
+    spatial_compression_ratio = getattr(vae_config, "spatial_compression_ratio", None)
+    if spatial_compression_ratio is not None:
+        return int(spatial_compression_ratio)
+    temporal_downsample = getattr(vae, "temperal_downsample", None)
+    if temporal_downsample is not None:
+        return int(2 ** len(temporal_downsample))
     return ANIMA_VAE_SCALE_FACTOR
 
 
-def get_anima_post_process_func(od_config: OmniDiffusionConfig):
+def get_anima_post_process_func(od_config: OmniDiffusionConfig) -> Callable[[torch.Tensor], Any]:
     image_processor = VaeImageProcessor(vae_scale_factor=ANIMA_VAE_SCALE_FACTOR)
 
-    def post_process_func(images: torch.Tensor):
+    def post_process_func(images: torch.Tensor) -> Any:
         return image_processor.postprocess(images)
 
     return post_process_func
@@ -133,12 +138,12 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
 
     supports_step_execution = False
 
-    def __init__(self, *, od_config: OmniDiffusionConfig, device=None):
+    def __init__(self, *, od_config: OmniDiffusionConfig, device: torch.device | str | None = None) -> None:
         super().__init__()
         self.od_config = od_config
         self.parallel_config = od_config.parallel_config
         self.device = device or get_local_device()
-        self.weights_sources = []
+        self.weights_sources: list[str] = []
 
         self._raise_unsupported_features()
 
@@ -151,7 +156,7 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
             enable_diffusion_pipeline_profiler=self.od_config.enable_diffusion_pipeline_profiler
         )
 
-    def _raise_unsupported_features(self):
+    def _raise_unsupported_features(self) -> None:
         pc = self.od_config.parallel_config
         if pc.cfg_parallel_size > 1:
             raise NotImplementedError("AnimaPipeline does not yet support CFG parallel. Validate native CFG first.")
@@ -171,11 +176,11 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
             raise NotImplementedError("AnimaPipeline does not yet support layer-wise offload.")
 
     @staticmethod
-    def _sub_state_dict(state_dict, prefix):
+    def _sub_state_dict(state_dict: dict[str, torch.Tensor], prefix: str) -> dict[str, torch.Tensor]:
         return {key.removeprefix(prefix): value for key, value in state_dict.items() if key.startswith(prefix)}
 
     @staticmethod
-    def _convert_original_transformer_state_dict(state_dict):
+    def _convert_original_transformer_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         if "patch_embed.proj.weight" in state_dict:
             return state_dict
 
@@ -195,7 +200,9 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         return converted_state_dict
 
     @staticmethod
-    def _split_single_file_state_dict(state_dict):
+    def _split_single_file_state_dict(
+        state_dict: dict[str, torch.Tensor],
+    ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
         transformer_state_dict = AnimaPipeline._sub_state_dict(state_dict, "transformer.")
         text_conditioner_state_dict = AnimaPipeline._sub_state_dict(state_dict, "text_conditioner.")
         if transformer_state_dict and text_conditioner_state_dict:
@@ -213,12 +220,15 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
             "`text_conditioner.*` Diffusers keys or `net.llm_adapter.*` original Anima keys."
         )
 
-    def _load_native_denoiser_components(self, state_dict=None):
+    def _load_native_denoiser_components(
+        self,
+        state_dict: dict[str, torch.Tensor] | None = None,
+    ) -> tuple[AnimaTransformer3DModel, AnimaTextConditioner]:
         if state_dict is None:
             from safetensors.torch import load_file
 
             model_path = self.od_config.model
-            if not os.path.isfile(model_path):
+            if not isinstance(model_path, str) or not os.path.isfile(model_path):
                 raise ValueError(f"AnimaPipeline currently requires a local file path, got: {model_path}")
 
             state_dict = load_file(model_path, device="cpu")
@@ -226,37 +236,39 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         del state_dict
         transformer_state_dict = self._convert_original_transformer_state_dict(transformer_state_dict)
 
-        native_text_conditioner = AnimaTextConditioner(**ANIMA_TEXT_CONDITIONER_CONFIG)
+        native_text_conditioner = AnimaTextConditioner(**cast(dict[str, Any], ANIMA_TEXT_CONDITIONER_CONFIG))
         native_text_conditioner.load_state_dict(text_conditioner_state_dict, strict=True)
         native_text_conditioner.to(device=self.device, dtype=self.od_config.dtype)
         del text_conditioner_state_dict
 
-        native_transformer = AnimaTransformer3DModel(**ANIMA_TRANSFORMER_CONFIG)
+        native_transformer = AnimaTransformer3DModel(**cast(dict[str, Any], ANIMA_TRANSFORMER_CONFIG))
         native_transformer.load_state_dict(transformer_state_dict, strict=True)
         native_transformer.to(device=self.device, dtype=self.od_config.dtype)
         del transformer_state_dict
 
         return native_transformer, native_text_conditioner
 
-    def _component_path(self, name, default_model):
-        load_kwargs = self.od_config.diffusers_load_kwargs
-        return load_kwargs.get(f"{name}_model", load_kwargs.get(f"{name}_path", default_model))
+    def _component_path(self, name: str, default_model: str) -> str:
+        custom_args = self.od_config.custom_pipeline_args or {}
+        return str(custom_args.get(f"{name}_model", custom_args.get(f"{name}_path", default_model)))
 
     @staticmethod
-    def _from_pretrained_kwargs(model, subfolder=None):
-        kwargs = {"local_files_only": os.path.exists(model)}
+    def _from_pretrained_kwargs(model: str, subfolder: str | None = None) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"local_files_only": os.path.exists(model)}
         if subfolder is not None and os.path.isdir(os.path.join(model, subfolder)):
             kwargs["subfolder"] = subfolder
         return kwargs
 
-    def _load_outer_components(self):
-        load_kwargs = self.od_config.diffusers_load_kwargs
-        components_model = load_kwargs.get("components_model", load_kwargs.get("components_path"))
-        if components_model is None:
-            if self.od_config.model is None:
+    def _load_outer_components(self) -> tuple[Any, Any, Any, Any, Any]:
+        custom_args = self.od_config.custom_pipeline_args or {}
+        components_model_value = custom_args.get("components_model", custom_args.get("components_path"))
+        if components_model_value is None:
+            if not isinstance(self.od_config.model, str):
                 raise ValueError("AnimaPipeline requires `model` or `components_model` to load outer components.")
             checkpoint_dir = os.path.dirname(os.path.abspath(self.od_config.model))
             components_model = checkpoint_dir if os.path.isdir(checkpoint_dir) else self.od_config.model
+        else:
+            components_model = str(components_model_value)
 
         text_encoder_model = self._component_path("text_encoder", components_model)
         vae_model = self._component_path("vae", components_model)
@@ -316,7 +328,7 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         self.vae_scale_factor = _anima_vae_scale_factor_from_vae(self.vae)
         return loaded
 
-    def _extract_prompts(self, prompts):
+    def _extract_prompts(self, prompts: list[Any]) -> tuple[str | list[str] | None, str | list[str] | None]:
         """Extract prompt and negative_prompt from OmniPromptType list."""
         prompt = [p if isinstance(p, str) else (p.get("prompt") or "") for p in prompts] or None
         if all(isinstance(p, str) or p.get("negative_prompt") is None for p in prompts):
@@ -615,10 +627,17 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
     ) -> DiffusionOutput:
         extracted_prompt, negative_prompt = self._extract_prompts(req.prompts)
         prompt = extracted_prompt or prompt
+        if prompt is None:
+            prompt = ""
 
         height = req.sampling_params.height or height or 1024
         width = req.sampling_params.width or width or 1024
         height, width = normalize_min_aligned_size(height, width, self.vae_scale_factor * 2)
+        if height is None or width is None:
+            raise ValueError("AnimaPipeline requires resolved height and width.")
+        height = int(height)
+        width = int(width)
+        output_type = output_type or "pil"
 
         num_inference_steps = req.sampling_params.num_inference_steps or num_inference_steps
         sigmas = req.sampling_params.sigmas or sigmas
@@ -639,12 +658,10 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         self._guidance_scale = guidance_scale
         self._interrupt = False
 
-        if prompt is not None and isinstance(prompt, str):
+        if isinstance(prompt, str):
             batch_size = 1
-        elif prompt is not None and isinstance(prompt, list):
-            batch_size = len(prompt)
         else:
-            batch_size = 1
+            batch_size = len(prompt)
 
         do_true_cfg = guidance_scale > 1.0
 
@@ -657,23 +674,44 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
             device=self.device,
             dtype=self.text_encoder.dtype,
         )
+        qwen_prompt_embeds = enc_out["qwen_prompt_embeds"]
+        qwen_attention_mask = enc_out["qwen_attention_mask"]
+        t5_input_ids = enc_out["t5_input_ids"]
+        t5_attention_mask = enc_out["t5_attention_mask"]
+        if (
+            qwen_prompt_embeds is None
+            or qwen_attention_mask is None
+            or t5_input_ids is None
+            or t5_attention_mask is None
+        ):
+            raise ValueError("Anima prompt encoding did not produce all required positive embeddings.")
 
         # Condition prompt embeds
         prompt_embeds = self.condition_prompt_embeds(
-            qwen_prompt_embeds=enc_out["qwen_prompt_embeds"],
-            qwen_attention_mask=enc_out["qwen_attention_mask"],
-            t5_input_ids=enc_out["t5_input_ids"],
-            t5_attention_mask=enc_out["t5_attention_mask"],
+            qwen_prompt_embeds=qwen_prompt_embeds,
+            qwen_attention_mask=qwen_attention_mask,
+            t5_input_ids=t5_input_ids,
+            t5_attention_mask=t5_attention_mask,
             device=self.device,
         )
 
         negative_prompt_embeds = None
-        if do_true_cfg and enc_out["negative_qwen_prompt_embeds"] is not None:
+        negative_qwen_prompt_embeds = enc_out["negative_qwen_prompt_embeds"]
+        if do_true_cfg and negative_qwen_prompt_embeds is not None:
+            negative_qwen_attention_mask = enc_out["negative_qwen_attention_mask"]
+            negative_t5_input_ids = enc_out["negative_t5_input_ids"]
+            negative_t5_attention_mask = enc_out["negative_t5_attention_mask"]
+            if (
+                negative_qwen_attention_mask is None
+                or negative_t5_input_ids is None
+                or negative_t5_attention_mask is None
+            ):
+                raise ValueError("Anima prompt encoding did not produce all required negative embeddings.")
             negative_prompt_embeds = self.condition_prompt_embeds(
-                qwen_prompt_embeds=enc_out["negative_qwen_prompt_embeds"],
-                qwen_attention_mask=enc_out["negative_qwen_attention_mask"],
-                t5_input_ids=enc_out["negative_t5_input_ids"],
-                t5_attention_mask=enc_out["negative_t5_attention_mask"],
+                qwen_prompt_embeds=negative_qwen_prompt_embeds,
+                qwen_attention_mask=negative_qwen_attention_mask,
+                t5_input_ids=negative_t5_input_ids,
+                t5_attention_mask=negative_t5_attention_mask,
                 device=self.device,
             )
 
@@ -725,17 +763,17 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         return self.decode_latents(latents, output_type=output_type)
 
     @property
-    def guidance_scale(self):
+    def guidance_scale(self) -> float:
         return self._guidance_scale
 
     @property
-    def num_timesteps(self):
+    def num_timesteps(self) -> int:
         return self._num_timesteps
 
     @property
-    def current_timestep(self):
+    def current_timestep(self) -> torch.Tensor | None:
         return self._current_timestep
 
     @property
-    def interrupt(self):
+    def interrupt(self) -> bool:
         return self._interrupt

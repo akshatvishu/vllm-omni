@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from collections.abc import Iterable
 from types import SimpleNamespace
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -25,27 +27,32 @@ ANIMA_TEXT_CONDITIONER_CONFIG = {
 }
 
 
-def _rotate_half(hidden_states):
+def _rotate_half(hidden_states: torch.Tensor) -> torch.Tensor:
     hidden_states_1 = hidden_states[..., : hidden_states.shape[-1] // 2]
     hidden_states_2 = hidden_states[..., hidden_states.shape[-1] // 2 :]
     return torch.cat((-hidden_states_2, hidden_states_1), dim=-1)
 
 
-def _apply_rotary_pos_emb(hidden_states, cos, sin, unsqueeze_dim=1):
+def _apply_rotary_pos_emb(
+    hidden_states: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    unsqueeze_dim: int = 1,
+) -> torch.Tensor:
     cos = cos.unsqueeze(unsqueeze_dim)
     sin = sin.unsqueeze(unsqueeze_dim)
     return (hidden_states * cos) + (_rotate_half(hidden_states) * sin)
 
 
 class AnimaRotaryEmbedding(nn.Module):
-    def __init__(self, head_dim, rope_theta=10000.0):
+    def __init__(self, head_dim: int, rope_theta: float = 10000.0) -> None:
         super().__init__()
         inv_freq = 1.0 / (
             rope_theta ** (torch.arange(0, head_dim, 2, dtype=torch.int64).to(dtype=torch.float32) / head_dim)
         )
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-    def forward(self, hidden_states, position_ids):
+    def forward(self, hidden_states: torch.Tensor, position_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1)
         inv_freq_expanded = inv_freq_expanded.to(hidden_states.device)
         position_ids_expanded = position_ids[:, None, :].float()
@@ -60,12 +67,12 @@ class AnimaRotaryEmbedding(nn.Module):
 class AnimaTextConditionerAttention(nn.Module):
     def __init__(
         self,
-        query_dim,
-        context_dim,
-        num_attention_heads,
-        attention_head_dim,
-        prefix="",
-    ):
+        query_dim: int,
+        context_dim: int,
+        num_attention_heads: int,
+        attention_head_dim: int,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         inner_dim = num_attention_heads * attention_head_dim
 
@@ -88,12 +95,12 @@ class AnimaTextConditionerAttention(nn.Module):
 
     def forward(
         self,
-        hidden_states,
-        attention_mask=None,
-        encoder_hidden_states=None,
-        position_embeddings=None,
-        encoder_position_embeddings=None,
-    ):
+        hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        encoder_hidden_states: torch.Tensor | None = None,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+        encoder_position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
         encoder_hidden_states = hidden_states if encoder_hidden_states is None else encoder_hidden_states
         input_shape = hidden_states.shape[:-1]
         encoder_input_shape = encoder_hidden_states.shape[:-1]
@@ -126,14 +133,14 @@ class AnimaTextConditionerAttention(nn.Module):
 class AnimaTextConditionerBlock(nn.Module):
     def __init__(
         self,
-        source_dim,
-        model_dim,
-        num_attention_heads=16,
-        mlp_ratio=4.0,
-        use_self_attention=True,
-        use_layer_norm=False,
-        prefix="",
-    ):
+        source_dim: int,
+        model_dim: int,
+        num_attention_heads: int = 16,
+        mlp_ratio: float = 4.0,
+        use_self_attention: bool = True,
+        use_layer_norm: bool = False,
+        prefix: str = "",
+    ) -> None:
         super().__init__()
         self.use_self_attention = use_self_attention
         norm_cls = nn.LayerNorm if use_layer_norm else nn.RMSNorm
@@ -166,13 +173,13 @@ class AnimaTextConditionerBlock(nn.Module):
 
     def forward(
         self,
-        hidden_states,
-        encoder_hidden_states,
-        target_attention_mask=None,
-        source_attention_mask=None,
-        position_embeddings=None,
-        source_position_embeddings=None,
-    ):
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        target_attention_mask: torch.Tensor | None = None,
+        source_attention_mask: torch.Tensor | None = None,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+        source_position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+    ) -> torch.Tensor:
         if self.use_self_attention:
             norm_hidden_states = self.norm_self_attn(hidden_states)
             attn_hidden_states = self.self_attn(
@@ -196,7 +203,7 @@ class AnimaTextConditionerBlock(nn.Module):
         return hidden_states
 
 
-def is_conditioner_block_module(name: str, module) -> bool:
+def is_conditioner_block_module(name: str, module: nn.Module) -> bool:
     return "blocks" in name and name.split(".")[-1].isdigit()
 
 
@@ -206,18 +213,18 @@ class AnimaTextConditioner(nn.Module):
 
     def __init__(
         self,
-        source_dim=1024,
-        target_dim=1024,
-        model_dim=1024,
-        num_layers=6,
-        num_attention_heads=16,
-        mlp_ratio=4.0,
-        target_vocab_size=32128,
-        use_self_attention=True,
-        use_layer_norm=False,
-        min_sequence_length=512,
-        **kwargs,
-    ):
+        source_dim: int = 1024,
+        target_dim: int = 1024,
+        model_dim: int = 1024,
+        num_layers: int = 6,
+        num_attention_heads: int = 16,
+        mlp_ratio: float = 4.0,
+        target_vocab_size: int = 32128,
+        use_self_attention: bool = True,
+        use_layer_norm: bool = False,
+        min_sequence_length: int = 512,
+        **kwargs: Any,
+    ) -> None:
         super().__init__()
         self.config = SimpleNamespace(
             source_dim=source_dim,
@@ -254,22 +261,22 @@ class AnimaTextConditioner(nn.Module):
         self.gradient_checkpointing = False
 
     @property
-    def dtype(self):
+    def dtype(self) -> torch.dtype:
         return next(self.parameters()).dtype
 
     @staticmethod
-    def _prepare_attention_mask(attention_mask):
+    def _prepare_attention_mask(attention_mask: torch.Tensor | None) -> torch.Tensor | None:
         if attention_mask is None:
             return None
         return attention_mask.to(torch.bool)
 
     def forward(
         self,
-        source_hidden_states,
-        target_input_ids,
-        target_attention_mask=None,
-        source_attention_mask=None,
-    ):
+        source_hidden_states: torch.Tensor,
+        target_input_ids: torch.Tensor,
+        target_attention_mask: torch.Tensor | None = None,
+        source_attention_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         target_attention_mask = self._prepare_attention_mask(target_attention_mask)
         source_attention_mask = self._prepare_attention_mask(source_attention_mask)
 
@@ -301,7 +308,7 @@ class AnimaTextConditioner(nn.Module):
 
         return hidden_states
 
-    def load_weights(self, weights):
+    def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         params = dict(self.named_parameters())
         loaded = set()
         for name, tensor in weights:

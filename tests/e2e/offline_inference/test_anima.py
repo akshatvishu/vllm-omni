@@ -58,6 +58,6 @@ def test_anima_text_to_image(guidance_scale):
         checkpoint,
         seed=42,
         model_class_name="AnimaPipeline",
-        diffusers_load_kwargs={"components_path": components},
+        custom_pipeline_args={"components_path": components},
     ) as runner:
         OmniRunnerHandler(runner).send_diffusion_request(request_config)
