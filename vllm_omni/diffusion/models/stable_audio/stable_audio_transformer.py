@@ -10,6 +10,7 @@ from collections.abc import Iterable
 
 import torch
 import torch.nn as nn
+from cache_dit import ForwardPattern
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from vllm.distributed import (
     get_tensor_model_parallel_rank,
@@ -26,10 +27,25 @@ from vllm.model_executor.layers.linear import (
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.layer import Attention
+from vllm_omni.diffusion.cache.cache_dit_backend import CacheDiTAdapterConfig
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
+from vllm_omni.diffusion.layers.fourier import GaussianFourierProjection
 
 logger = init_logger(__name__)
+
+
+def _preprocess_stable_audio_weight(
+    param: torch.Tensor,
+    loaded_weight: torch.Tensor,
+) -> torch.Tensor:
+    if param.shape == loaded_weight.shape:
+        return loaded_weight
+
+    if loaded_weight.ndim + 1 == param.ndim and param.shape[-1] == 1 and loaded_weight.shape == param.shape[:-1]:
+        return loaded_weight.unsqueeze(-1)
+
+    return loaded_weight
 
 
 def apply_rotary_emb_stable_audio(
@@ -61,27 +77,99 @@ def apply_rotary_emb_stable_audio(
     return torch.cat([x_rot, x_pass], dim=-1)
 
 
-class StableAudioGaussianFourierProjection(nn.Module):
-    """
-    Gaussian Fourier embeddings for continuous noise levels (timesteps).
+class StableAudioSchedulerWrapper:
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+
+    def __getattr__(self, name):
+        return getattr(self.scheduler, name)
+
+    def _get_step_index(self, timestep):
+        step_index = getattr(self.scheduler, "step_index", None)
+        if step_index is not None:
+            return step_index
+
+        timesteps = getattr(self.scheduler, "timesteps", None)
+        if timesteps is None:
+            return None
+
+        timestep = torch.as_tensor(
+            timestep,
+            device=timesteps.device,
+            dtype=timesteps.dtype,
+        )
+        indices = (timesteps == timestep).nonzero()
+        if len(indices) == 0:
+            return None
+
+        return indices[0].item()
+
+    def _is_final_zero_sigma_step(self, timestep):
+        step_index = self._get_step_index(timestep)
+        if step_index is None:
+            return False
+
+        sigmas = self.scheduler.sigmas
+        if step_index + 1 >= len(sigmas):
+            return False
+
+        sigma = sigmas[step_index]
+        next_sigma = sigmas[step_index + 1]
+        sigma_min = torch.as_tensor(
+            self.scheduler.config.sigma_min,
+            device=sigma.device,
+            dtype=sigma.dtype,
+        )
+
+        return torch.isclose(sigma, sigma_min) and torch.isclose(
+            next_sigma,
+            torch.zeros_like(next_sigma),
+        )
+
+    def step(self, model_output, timestep, sample, generator=None, return_dict=True):
+        use_zero_noise = self._is_final_zero_sigma_step(timestep)
+        old_noise_sampler = None
+
+        if use_zero_noise:
+            old_noise_sampler = getattr(self.scheduler, "noise_sampler", None)
+            self.scheduler.noise_sampler = _StableAudioZeroNoiseSampler(sample)
+
+        try:
+            return self.scheduler.step(
+                model_output,
+                timestep,
+                sample,
+                generator=generator,
+                return_dict=return_dict,
+            )
+        finally:
+            if use_zero_noise:
+                self.scheduler.noise_sampler = old_noise_sampler
+
+
+class _StableAudioZeroNoiseSampler:
+    def __init__(self, sample: torch.Tensor):
+        self.sample = sample
+
+    def __call__(self, sigma, next_sigma):
+        return torch.zeros_like(self.sample)
+
+
+class StableAudioGaussianFourierProjection(GaussianFourierProjection):
+    """Gaussian Fourier embeddings for noise levels.
 
     Projects scalar diffusion timesteps into higher-dimensional periodic
     representations using randomly initialized Fourier features.
     """
 
     def __init__(self, embedding_size: int = 256, scale: float = 1.0) -> None:
-        super().__init__()
-        # Standard initialization. Checkpoint load_weights will overwrite this.
-        self.weight = nn.Parameter(
-            torch.randn(embedding_size) * scale,
-            requires_grad=False,
-        )
+        super().__init__(in_features=1, embedding_size=embedding_size, scale=scale, trainable=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Run Fourier projection in float32 safely to prevent precision overflow
         x_fp32 = x.float()
         fourier_weight = self.weight.float()
-        x_proj = 2 * math.pi * x_fp32[:, None] @ fourier_weight[None, :]
+        x_proj = 2 * math.pi * x_fp32.reshape(-1, 1) @ fourier_weight.T
 
         out = torch.cat([torch.cos(x_proj), torch.sin(x_proj)], dim=-1)
         # Cast back to the model's original dtype
@@ -393,7 +481,14 @@ class StableAudioDiTModel(nn.Module):
     layers to support multi-GPU execution.
     """
 
+    _cache_dit_adapter_config = CacheDiTAdapterConfig(
+        block_forward_patterns={
+            "transformer_blocks": ForwardPattern.Pattern_3,
+        },
+    )
+
     _repeated_blocks = ["StableAudioDiTBlock"]
+    _layerwise_offload_blocks_attrs = ["transformer_blocks"]
     _hsdp_shard_conditions = [is_transformer_block_module]
 
     def __init__(
@@ -695,8 +790,12 @@ class StableAudioDiTModel(nn.Module):
 
             if mapped_name in params_dict:
                 param = params_dict[mapped_name]
+                loaded_weight = _preprocess_stable_audio_weight(param, loaded_weight)
                 weight_loader = getattr(param, "weight_loader", default_weight_loader)
-                weight_loader(param, loaded_weight)
+                try:
+                    weight_loader(param, loaded_weight)
+                except AssertionError as err:
+                    raise AssertionError(f"Failed to load Stable Audio weight {name!r} as {mapped_name!r}") from err
                 loaded_params.add(mapped_name)
 
         return loaded_params

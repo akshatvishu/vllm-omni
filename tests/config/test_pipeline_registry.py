@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from vllm_omni.config.pipeline_registry import _OMNI_PIPELINES
@@ -28,6 +30,7 @@ class TestCentralRegistryDeclarations:
         assert "qwen2_5_omni" in _OMNI_PIPELINES
         assert "qwen2_5_omni_thinker_only" in _OMNI_PIPELINES
         assert "qwen3_omni_moe" in _OMNI_PIPELINES
+        assert "aura_omni" in _OMNI_PIPELINES
         assert "qwen3_tts" in _OMNI_PIPELINES
 
 
@@ -43,6 +46,20 @@ class TestLazyLoading:
         assert pipeline.model_type == "qwen3_omni_moe"
         assert pipeline.model_arch == "Qwen3OmniMoeForConditionalGeneration"
 
+    def test_getitem_loads_aura_omni_pipeline(self):
+        pipeline = _PIPELINE_REGISTRY["aura_omni"]
+        assert pipeline.model_type == "aura_omni"
+        assert [stage.model_stage for stage in pipeline.stages] == [
+            "asr",
+            "aura",
+            "qwen3_tts",
+            "code2wav",
+        ]
+        assert pipeline.stages[0].model_arch == "Qwen3ASRForConditionalGeneration"
+        assert pipeline.stages[1].model_arch == "AuraQwen3VLForConditionalGeneration"
+        assert pipeline.stages[2].model_arch == "Qwen3TTSTalkerForConditionalGeneration"
+        assert pipeline.stages[3].model_arch == "Qwen3TTSCode2Wav"
+
     def test_unknown_model_type_returns_none_via_get(self):
         assert _PIPELINE_REGISTRY.get("not_a_real_pipeline") is None
 
@@ -54,6 +71,36 @@ class TestLazyLoading:
         keys = set(_PIPELINE_REGISTRY)
         assert "qwen2_5_omni" in keys
         assert "qwen3_omni_moe" in keys
+
+    def test_iteration_resilience(self, monkeypatch, caplog):
+        # Synthetic failure to verify iteration robustness against load errors.
+        target_logger = logging.getLogger("vllm_omni.config.stage_config")
+        target_logger.addHandler(caplog.handler)
+        prev_level = target_logger.level
+        target_logger.setLevel(logging.ERROR)
+        try:
+            monkeypatch.setattr(
+                _PIPELINE_REGISTRY,
+                "_lazy_map",
+                {
+                    "healthy": ("vllm_omni.model_executor.models.qwen2_5_omni.pipeline", "QWEN2_5_OMNI_PIPELINE"),
+                    "broken": ("vllm_omni.non_existent_module", "SomeConfig"),
+                    "attr_fail": ("vllm_omni.config.stage_config", "NON_EXISTENT_VAR"),
+                },
+            )
+            monkeypatch.setattr(_PIPELINE_REGISTRY, "_loaded", {})
+
+            # Assert that list(_PIPELINE_REGISTRY.values()) and dict(_PIPELINE_REGISTRY.items())
+            # both yield only healthy entries.
+            healthy_instance = _PIPELINE_REGISTRY["healthy"]
+            assert list(_PIPELINE_REGISTRY.values()) == [healthy_instance]
+            assert dict(_PIPELINE_REGISTRY.items()) == {"healthy": healthy_instance}
+            assert "Failed to import pipeline module" in caplog.text
+            assert "Pipeline variable 'NON_EXISTENT_VAR' not found" in caplog.text
+
+        finally:
+            target_logger.removeHandler(caplog.handler)
+            target_logger.setLevel(prev_level)
 
 
 class TestDynamicRegistration:

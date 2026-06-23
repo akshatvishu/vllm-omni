@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from omegaconf import OmegaConf
 from pydantic import ValidationError
 from transformers import PretrainedConfig
 from vllm.engine.arg_utils import EngineArgs
@@ -17,6 +18,7 @@ from vllm.engine.arg_utils import EngineArgs
 from vllm_omni.config.model import OmniModelConfig
 from vllm_omni.engine.arg_utils import OmniEngineArgs
 from vllm_omni.engine.async_omni_engine import AsyncOmniEngine
+from vllm_omni.engine.stage_init_utils import build_engine_args_dict
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
@@ -230,24 +232,6 @@ def test_stage_configs_path_field():
     assert args.stage_configs_path == "/some/path.yaml"
 
 
-def test_voxcpm_model_arch_injects_model_type_override(mocker):
-    """Ensure VoxCPM model_arch injects hf_overrides for config resolution."""
-    mocker.patch.object(OmniEngineArgs, "_ensure_omni_models_registered", return_value=True)
-    mocker.patch.object(OmniEngineArgs, "_patch_empty_hf_config")
-    mocker.patch.object(EngineArgs, "create_model_config", return_value=Mock())
-    mocker.patch.object(OmniModelConfig, "from_vllm_model_config", return_value=Mock())
-
-    args = OmniEngineArgs(
-        model="OpenBMB/VoxCPM1.5",
-        model_arch="VoxCPMForConditionalGeneration",
-    )
-    args.create_model_config()
-
-    assert args.hf_overrides["architectures"] == ["VoxCPMForConditionalGeneration"]
-    assert args.hf_overrides["model_type"] == "voxcpm"
-    args._patch_empty_hf_config.assert_called_once_with("voxcpm")
-
-
 def test_strip_single_engine_args():
     """_strip_single_engine_args should remove EngineArgs fields but keep omni fields."""
     kwargs = {
@@ -314,3 +298,15 @@ def test_strip_single_engine_args_model_does_not_trigger_warning(mocker):
     assert "compilation_config" in warned_args
     assert "tensor_parallel_size" not in warned_args
     assert "model" not in warned_args
+
+
+# For https://github.com/vllm-project/vllm-omni/issues/3293
+def test_tensor_parallel_size_none_is_handled():
+    """Ensure the tensor parallel size of None isn't forwarded."""
+    engine_args = OmegaConf.create({"stage_id": 0, "engine_args": {"tensor_parallel_size": None}})
+    args = build_engine_args_dict(
+        engine_args,
+        model="snu-aidas/Dynin-Omni",
+    )
+    assert isinstance(args, dict)
+    assert "tensor_parallel_size" not in args
