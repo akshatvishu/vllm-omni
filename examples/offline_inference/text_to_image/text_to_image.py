@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import argparse
+import functools
 import json
 import time
 from pathlib import Path
@@ -38,13 +39,14 @@ def is_nextstep_model(model_name: str) -> bool:
     return False
 
 
-def parse_profiler_config(value: str) -> dict[str, Any]:
+def parse_json_object(value: str, flag_name: str = "argument") -> dict[str, Any]:
+    """Parse a CLI value as a JSON object, attributing errors to ``flag_name``."""
     try:
         config = json.loads(value)
     except json.JSONDecodeError as e:
-        raise argparse.ArgumentTypeError(f"--profiler-config must be valid JSON: {e}") from e
+        raise argparse.ArgumentTypeError(f"{flag_name} must be valid JSON: {e}") from e
     if not isinstance(config, dict):
-        raise argparse.ArgumentTypeError("--profiler-config must be a JSON object")
+        raise argparse.ArgumentTypeError(f"{flag_name} must be a JSON object")
     return config
 
 
@@ -56,6 +58,7 @@ def parse_json_dict(value: str) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise argparse.ArgumentTypeError("Must be a JSON object (dict)")
     return config
+parse_profiler_config = functools.partial(parse_json_object, flag_name="--profiler-config")
 
 
 def parse_args() -> argparse.Namespace:
@@ -279,7 +282,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--extra-body",
-        type=parse_profiler_config,
+        type=functools.partial(parse_json_object, flag_name="--extra-body"),
         default=None,
         help=(
             "Model-specific generation params as a JSON object, e.g. "
@@ -459,6 +462,10 @@ def main():
         omni_kwargs["diffusers_load_kwargs"] = args.diffusers_load_kwargs
     if args.custom_pipeline_args is not None:
         omni_kwargs["custom_pipeline_args"] = args.custom_pipeline_args
+    # Cosmos3 loads its (gated) guardrail models at build time, so the guardrails
+    # gate is an engine-level config (offline analog of the server's --no-guardrails).
+    if args.extra_body and "guardrails" in args.extra_body:
+        omni_kwargs["model_config"] = {"guardrails": bool(args.extra_body["guardrails"])}
     omni = Omni(**omni_kwargs)
     model_class_name = get_model_class_name(omni)
     declared_extra_body_params = get_extra_body_params(model_class_name)
