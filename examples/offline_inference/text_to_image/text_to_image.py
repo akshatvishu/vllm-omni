@@ -58,6 +58,8 @@ def parse_json_dict(value: str) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise argparse.ArgumentTypeError("Must be a JSON object (dict)")
     return config
+
+
 parse_profiler_config = functools.partial(parse_json_object, flag_name="--profiler-config")
 
 
