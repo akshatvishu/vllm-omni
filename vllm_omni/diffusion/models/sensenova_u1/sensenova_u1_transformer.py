@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from cache_dit import ForwardPattern
-from transformers.cache_utils import DynamicCache
+from transformers.cache_utils import DynamicCache, DynamicLayer
 from vllm.logger import init_logger
 from vllm.model_executor.layers.linear import (
     MergedColumnParallelLinear,
@@ -64,6 +64,13 @@ def create_block_causal_mask(index: torch.Tensor):
     arange = torch.arange(L, device=index.device)
     mask = (idx_j == idx_i) | (arange.unsqueeze(0) <= arange.unsqueeze(1))
     return torch.where(mask[None, None], 0.0, float("-inf"))
+
+
+def _ensure_preallocated_cache_layers(past_key_values: DynamicCache, num_layers: int) -> None:
+    """Preallocate cache layers before entering regionally compiled decoder blocks."""
+    if len(past_key_values.layers) < num_layers:
+        past_key_values.layers.extend(DynamicLayer() for _ in range(num_layers - len(past_key_values.layers)))
+    past_key_values.layer_class_to_replicate = None
 
 
 def prepare_flash_kv_cache(past_key_values, current_len: int, batch_size: int):
@@ -428,7 +435,7 @@ class SenseNovaU1Attention(nn.Module):
         key_states = torch.cat([k_t, k_h, k_w], dim=-1)
         return query_states, key_states, value_states
 
-    def forward_und(self, hidden_states, indexes, attention_mask, past_key_values=None, **kwargs):
+    def forward_und(self, hidden_states, indexes, attention_mask, cache_layer=None, **kwargs):
         """Understanding path — unified Attention with explicit 4D mask."""
         input_shape = hidden_states.shape[:-1]
         query_states, key_states, value_states = self._project_and_rope(
@@ -441,21 +448,19 @@ class SenseNovaU1Attention(nn.Module):
             self.k_norm_hw,
         )
         update_cache = kwargs.get("update_cache", True)
-        if past_key_values is not None:
+        if cache_layer is not None:
             if update_cache:
-                key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx)
-            else:
-                layer = past_key_values.layers[self.layer_idx]
-                if layer.keys is not None:
-                    key_states = torch.cat([layer.keys, key_states], dim=2)
-                    value_states = torch.cat([layer.values, value_states], dim=2)
+                key_states, value_states = cache_layer.update(key_states, value_states)
+            elif cache_layer.keys is not None:
+                key_states = torch.cat([cache_layer.keys, key_states], dim=2)
+                value_states = torch.cat([cache_layer.values, value_states], dim=2)
 
         attn_output = self._run_attn(query_states, key_states, value_states, attention_mask)
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output, _ = self.o_proj(attn_output)
         return attn_output
 
-    def forward_gen(self, hidden_states, indexes, attention_mask, past_key_values=None, **kwargs):
+    def forward_gen(self, hidden_states, indexes, attention_mask, cache_layer=None, **kwargs):
         """Generation path — unified Attention, bidirectional with optional KV cache."""
         input_shape = hidden_states.shape[:-1]
         query_states, key_states, value_states = self._project_and_rope(
@@ -475,23 +480,22 @@ class SenseNovaU1Attention(nn.Module):
             k_cur = key_states.transpose(1, 2).contiguous()
             v_cur = value_states.transpose(1, 2).contiguous()
 
-            if past_key_values is not None:
+            if cache_layer is not None:
                 if update_cache:
-                    key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx)
+                    key_states, value_states = cache_layer.update(key_states, value_states)
                     k = key_states.transpose(1, 2).contiguous()
                     v = value_states.transpose(1, 2).contiguous()
                 else:
-                    layer = past_key_values.layers[self.layer_idx]
-                    if hasattr(layer, "flash_k_cache") and layer.flash_k_cache is not None:
-                        prefix_len = layer.flash_prefix_len
+                    if hasattr(cache_layer, "flash_k_cache") and cache_layer.flash_k_cache is not None:
+                        prefix_len = cache_layer.flash_prefix_len
                         cur_len = k_cur.shape[1]
-                        layer.flash_k_cache[:, prefix_len : prefix_len + cur_len].copy_(k_cur)
-                        layer.flash_v_cache[:, prefix_len : prefix_len + cur_len].copy_(v_cur)
-                        k = layer.flash_k_cache[:, : prefix_len + cur_len]
-                        v = layer.flash_v_cache[:, : prefix_len + cur_len]
+                        cache_layer.flash_k_cache[:, prefix_len : prefix_len + cur_len].copy_(k_cur)
+                        cache_layer.flash_v_cache[:, prefix_len : prefix_len + cur_len].copy_(v_cur)
+                        k = cache_layer.flash_k_cache[:, : prefix_len + cur_len]
+                        v = cache_layer.flash_v_cache[:, : prefix_len + cur_len]
                     else:
-                        past_k = past_key_values.layers[self.layer_idx].keys
-                        past_v = past_key_values.layers[self.layer_idx].values
+                        past_k = cache_layer.keys
+                        past_v = cache_layer.values
                         if past_k is not None:
                             k = torch.cat([past_k.transpose(1, 2).contiguous(), k_cur], dim=1)
                             v = torch.cat([past_v.transpose(1, 2).contiguous(), v_cur], dim=1)
@@ -506,14 +510,12 @@ class SenseNovaU1Attention(nn.Module):
             return attn_output
 
         # Masked fallback with explicit 4D additive mask
-        if past_key_values is not None:
+        if cache_layer is not None:
             if update_cache:
-                key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx)
-            else:
-                layer = past_key_values.layers[self.layer_idx]
-                if layer.keys is not None:
-                    key_states = torch.cat([layer.keys, key_states], dim=2)
-                    value_states = torch.cat([layer.values, value_states], dim=2)
+                key_states, value_states = cache_layer.update(key_states, value_states)
+            elif cache_layer.keys is not None:
+                key_states = torch.cat([cache_layer.keys, key_states], dim=2)
+                value_states = torch.cat([cache_layer.values, value_states], dim=2)
 
         attn_output = self._run_attn(query_states, key_states, value_states, attention_mask)
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
@@ -528,13 +530,13 @@ class SenseNovaU1Attention(nn.Module):
         exist_gen,
         indexes,
         attention_mask,
-        past_key_values=None,
+        cache_layer=None,
         **kwargs,
     ):
         if exist_und and not exist_gen:
-            return self.forward_und(hidden_states, indexes, attention_mask, past_key_values, **kwargs)
+            return self.forward_und(hidden_states, indexes, attention_mask, cache_layer, **kwargs)
         if not exist_und and exist_gen:
-            return self.forward_gen(hidden_states, indexes, attention_mask, past_key_values, **kwargs)
+            return self.forward_gen(hidden_states, indexes, attention_mask, cache_layer, **kwargs)
         raise NotImplementedError("Mixed und+gen tokens in a single forward not implemented for initial port")
 
 
@@ -569,7 +571,7 @@ class SenseNovaU1DecoderLayer(nn.Module):
         self.post_attention_layernorm_mot_gen = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.attention_type = config.layer_types[layer_idx]
 
-    def _forward_und(self, hidden_states, indexes, attention_mask, past_key_values, **kwargs):
+    def _forward_und(self, hidden_states, indexes, attention_mask, cache_layer, **kwargs):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
         hidden_states = self.self_attn(
@@ -579,7 +581,7 @@ class SenseNovaU1DecoderLayer(nn.Module):
             exist_gen=False,
             indexes=indexes,
             attention_mask=attention_mask,
-            past_key_values=past_key_values,
+            cache_layer=cache_layer,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -587,7 +589,7 @@ class SenseNovaU1DecoderLayer(nn.Module):
         hidden_states = self.mlp(self.post_attention_layernorm(hidden_states))
         return residual + hidden_states
 
-    def _forward_gen(self, hidden_states, indexes, attention_mask, past_key_values, **kwargs):
+    def _forward_gen(self, hidden_states, indexes, attention_mask, cache_layer, **kwargs):
         residual = hidden_states
         hidden_states = self.input_layernorm_mot_gen(hidden_states)
         hidden_states = self.self_attn(
@@ -597,7 +599,7 @@ class SenseNovaU1DecoderLayer(nn.Module):
             exist_gen=True,
             indexes=indexes,
             attention_mask=attention_mask,
-            past_key_values=past_key_values,
+            cache_layer=cache_layer,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -613,7 +615,7 @@ class SenseNovaU1DecoderLayer(nn.Module):
         exist_gen,
         indexes,
         attention_mask,
-        past_key_values=None,
+        cache_layer=None,
         **kwargs,
     ):
         if isinstance(attention_mask, dict):
@@ -623,9 +625,9 @@ class SenseNovaU1DecoderLayer(nn.Module):
             )
 
         if exist_und and not exist_gen:
-            return self._forward_und(hidden_states, indexes, attention_mask, past_key_values, **kwargs)
+            return self._forward_und(hidden_states, indexes, attention_mask, cache_layer, **kwargs)
         if not exist_und and exist_gen:
-            return self._forward_gen(hidden_states, indexes, attention_mask, past_key_values, **kwargs)
+            return self._forward_gen(hidden_states, indexes, attention_mask, cache_layer, **kwargs)
         raise NotImplementedError("Mixed und+gen tokens in a single forward not implemented for initial port")
 
 
@@ -635,6 +637,8 @@ class SenseNovaU1DecoderLayer(nn.Module):
 
 
 class SenseNovaU1Model(nn.Module):
+    _repeated_blocks = ["SenseNovaU1DecoderLayer"]
+
     _cache_dit_adapter_config = CacheDiTAdapterConfig(
         block_forward_patterns={
             "layers": ForwardPattern.Pattern_3,
@@ -682,6 +686,8 @@ class SenseNovaU1Model(nn.Module):
 
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
+        if past_key_values is not None:
+            _ensure_preallocated_cache_layers(past_key_values, len(self.layers))
 
         # Resolve attention mask. Callers must always provide `indexes`; this
         # keeps the model stateless and safe under concurrent requests.
@@ -699,7 +705,8 @@ class SenseNovaU1Model(nn.Module):
             causal_mask_mapping = attention_mask
 
         hidden_states = inputs_embeds
-        for layer in self.layers:
+        for layer_idx, layer in enumerate(self.layers):
+            cache_layer = past_key_values.layers[layer_idx] if past_key_values is not None else None
             hidden_states = layer(
                 hidden_states,
                 image_gen_indicators=image_gen_indicators,
@@ -707,7 +714,7 @@ class SenseNovaU1Model(nn.Module):
                 exist_gen=exist_gen,
                 indexes=indexes,
                 attention_mask=causal_mask_mapping,
-                past_key_values=past_key_values,
+                cache_layer=cache_layer,
                 use_cache=use_cache,
                 **kwargs,
             )
