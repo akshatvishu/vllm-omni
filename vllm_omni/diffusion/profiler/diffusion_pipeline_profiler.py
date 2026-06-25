@@ -95,7 +95,7 @@ class DiffusionPipelineProfilerMixin:
             targets = []
         else:
             targets = list(targets)
-        if profiler_targets is None and hasattr(self, "denoise_step"):
+        if not profiler_targets and hasattr(self, "denoise_step"):
             targets.append("denoise_step")
 
         targets = ["forward"] + [
