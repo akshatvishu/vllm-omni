@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 import torch.nn as nn
@@ -17,6 +19,10 @@ pytestmark = [pytest.mark.core_model, pytest.mark.diffusion, pytest.mark.cpu]
 
 
 class _CacheUpdatingAttention(nn.Module):
+    def __init__(self, layer_idx: int) -> None:
+        super().__init__()
+        self.layer_idx = layer_idx
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -28,18 +34,33 @@ class _CacheUpdatingAttention(nn.Module):
         return hidden_states * 2
 
 
-def _build_tiny_sensenova_model() -> SenseNovaU1Model:
-    layer = SenseNovaU1DecoderLayer.__new__(SenseNovaU1DecoderLayer)
-    nn.Module.__init__(layer)
-    layer.self_attn = _CacheUpdatingAttention()
-    layer.input_layernorm = nn.Identity()
-    layer.post_attention_layernorm = nn.Identity()
-    layer.mlp = nn.Identity()
-    layer.attention_type = "full_attention"
+class _CacheDiTLikeWrapper(nn.Module):
+    def __init__(self, layers: nn.ModuleList) -> None:
+        super().__init__()
+        self.layers = layers
+
+    def forward(self, hidden_states: torch.Tensor, **kwargs) -> torch.Tensor:
+        for layer in self.layers:
+            hidden_states = layer(hidden_states, **kwargs)
+        return hidden_states
+
+
+def _build_tiny_sensenova_model(num_layers: int = 2) -> SenseNovaU1Model:
+    layers = []
+    for layer_idx in range(num_layers):
+        layer = SenseNovaU1DecoderLayer.__new__(SenseNovaU1DecoderLayer)
+        nn.Module.__init__(layer)
+        layer.self_attn = _CacheUpdatingAttention(layer_idx)
+        layer.input_layernorm = nn.Identity()
+        layer.post_attention_layernorm = nn.Identity()
+        layer.mlp = nn.Identity()
+        layer.attention_type = "full_attention"
+        layers.append(layer)
 
     model = SenseNovaU1Model.__new__(SenseNovaU1Model)
     nn.Module.__init__(model)
-    model.layers = nn.ModuleList([layer])
+    model.config = SimpleNamespace(num_hidden_layers=num_layers)
+    model.layers = nn.ModuleList(layers)
     model.norm = nn.Identity()
     return model
 
@@ -52,6 +73,7 @@ def test_regionally_compiled_decoder_matches_eager_cache_updates() -> None:
     eager_model = _build_tiny_sensenova_model()
     compiled_model = _build_tiny_sensenova_model()
     regionally_compile(compiled_model, backend="eager", fullgraph=True, dynamic=True)
+    compiled_model.layers = nn.ModuleList([_CacheDiTLikeWrapper(compiled_model.layers)])
 
     eager_cache = DynamicCache()
     compiled_cache = DynamicCache()
@@ -74,8 +96,10 @@ def test_regionally_compiled_decoder_matches_eager_cache_updates() -> None:
         )
 
         torch.testing.assert_close(compiled_output.last_hidden_state, eager_output.last_hidden_state)
-        torch.testing.assert_close(compiled_cache.layers[0].keys, eager_cache.layers[0].keys)
-        torch.testing.assert_close(compiled_cache.layers[0].values, eager_cache.layers[0].values)
+        assert len(compiled_cache.layers) == len(eager_cache.layers) == 2
+        for compiled_layer, eager_layer in zip(compiled_cache.layers, eager_cache.layers):
+            torch.testing.assert_close(compiled_layer.keys, eager_layer.keys)
+            torch.testing.assert_close(compiled_layer.values, eager_layer.values)
 
 
 def test_preallocated_cache_does_not_grow_during_layer_updates() -> None:

@@ -615,7 +615,7 @@ class SenseNovaU1DecoderLayer(nn.Module):
         exist_gen,
         indexes,
         attention_mask,
-        cache_layer=None,
+        past_key_values=None,
         **kwargs,
     ):
         if isinstance(attention_mask, dict):
@@ -624,6 +624,7 @@ class SenseNovaU1DecoderLayer(nn.Module):
                 attention_mask.get("full_attention"),
             )
 
+        cache_layer = past_key_values.layers[self.self_attn.layer_idx] if past_key_values is not None else None
         if exist_und and not exist_gen:
             return self._forward_und(hidden_states, indexes, attention_mask, cache_layer, **kwargs)
         if not exist_und and exist_gen:
@@ -687,7 +688,7 @@ class SenseNovaU1Model(nn.Module):
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
         if past_key_values is not None:
-            _ensure_preallocated_cache_layers(past_key_values, len(self.layers))
+            _ensure_preallocated_cache_layers(past_key_values, self.config.num_hidden_layers)
 
         # Resolve attention mask. Callers must always provide `indexes`; this
         # keeps the model stateless and safe under concurrent requests.
@@ -705,8 +706,7 @@ class SenseNovaU1Model(nn.Module):
             causal_mask_mapping = attention_mask
 
         hidden_states = inputs_embeds
-        for layer_idx, layer in enumerate(self.layers):
-            cache_layer = past_key_values.layers[layer_idx] if past_key_values is not None else None
+        for layer in self.layers:
             hidden_states = layer(
                 hidden_states,
                 image_gen_indicators=image_gen_indicators,
@@ -714,7 +714,7 @@ class SenseNovaU1Model(nn.Module):
                 exist_gen=exist_gen,
                 indexes=indexes,
                 attention_mask=causal_mask_mapping,
-                cache_layer=cache_layer,
+                past_key_values=past_key_values,
                 use_cache=use_cache,
                 **kwargs,
             )
