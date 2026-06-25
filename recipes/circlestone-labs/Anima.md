@@ -31,8 +31,6 @@ HSDP, and step execution are not supported by `AnimaPipeline` yet.
 
 - Offline example:
   [`examples/offline_inference/text_to_image/README.md`](../../examples/offline_inference/text_to_image/README.md)
-- Online serving notes:
-  [Diffusers pipeline adapter docs](../../docs/user_guide/examples/online_serving/diffusers_pipeline_adapter.md)
 - Supported model entry:
   [`docs/models/supported_models.md`](../../docs/models/supported_models.md)
 - HuggingFace model page:
@@ -118,8 +116,8 @@ Check that `/tmp/anima_output.png` exists and contains a generated image.
 
 - Key flags: `--model-class-name AnimaPipeline` selects the native Anima path;
   `--custom-pipeline-args` supplies `components_path`.
-- No deploy config is required for local single-file checkpoint discovery when
-  `--model-class-name AnimaPipeline` is provided.
+- Keep the default diffusion load format. No deploy config is required when a
+  local checkpoint and `--model-class-name AnimaPipeline` are provided.
 - Start with `max-concurrency=1` for correctness and latency validation.
 - Keep requests at the same resolution when comparing runs.
 - Do not enable parallelism, cache acceleration, offload, or quantized

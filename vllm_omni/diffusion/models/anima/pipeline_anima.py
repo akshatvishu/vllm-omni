@@ -151,10 +151,7 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         self._guidance_scale = 1.0
         self._num_timesteps = 0
         self._current_timestep = None
-
-        self.setup_diffusion_pipeline_profiler(
-            enable_diffusion_pipeline_profiler=self.od_config.enable_diffusion_pipeline_profiler
-        )
+        self._profiler_initialized = False
 
     def _raise_unsupported_features(self) -> None:
         pc = self.od_config.parallel_config
@@ -326,7 +323,17 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         self.vae = vae
         self.scheduler = scheduler
         self.vae_scale_factor = _anima_vae_scale_factor_from_vae(self.vae)
+        self._setup_profiler()
         return loaded
+
+    def _setup_profiler(self) -> None:
+        if self._profiler_initialized:
+            return
+        self.setup_diffusion_pipeline_profiler(
+            profiler_targets=["vae.decode", "diffuse", "text_encoder.forward"],
+            enable_diffusion_pipeline_profiler=self.od_config.enable_diffusion_pipeline_profiler,
+        )
+        self._profiler_initialized = True
 
     def _extract_prompts(self, prompts: list[Any]) -> tuple[str | list[str] | None, str | list[str] | None]:
         """Extract prompt and negative_prompt from OmniPromptType list."""

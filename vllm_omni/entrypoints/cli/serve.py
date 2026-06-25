@@ -407,10 +407,10 @@ class OmniServeCommand(CLISubcommand):
             dest="diffusion_load_format",
             type=str,
             default=None,
-            choices=["default", "custom_pipeline", "dummy", "diffusers", "diffusers_single_file"],
+            choices=["default", "custom_pipeline", "dummy", "diffusers"],
             help=(
                 "How to load the diffusion pipeline: native/registry (default), "
-                "custom_pipeline, dummy, or diffusers/diffusers_single_file for the HF diffusers adapter."
+                "custom_pipeline, dummy, or diffusers for the HF diffusers adapter."
             ),
         )
         omni_config_group.add_argument(

@@ -989,14 +989,15 @@ class WorkerWrapperBase:
             gpu_id: GPU device ID
             od_config: OmniDiffusionConfig configuration
             worker_extension_cls: Optional qualified name of worker extension class
-            custom_pipeline_args: Optional arguments for custom pipeline initialization
+            custom_pipeline_args: Optional arguments passed to native pipelines.
+                A ``pipeline_class`` entry triggers custom pipeline initialization.
         """
         self.gpu_id = gpu_id
         self.od_config = od_config
         self.base_worker_class = base_worker_class
         self.worker_extension_cls = worker_extension_cls
         self.custom_pipeline_args = custom_pipeline_args
-        uses_custom_pipeline = self._uses_custom_pipeline()
+        self.uses_custom_pipeline = bool(custom_pipeline_args and "pipeline_class" in custom_pipeline_args)
 
         # Prepare worker class with extension support
         worker_class = self._prepare_worker_class()
@@ -1008,18 +1009,12 @@ class WorkerWrapperBase:
             local_rank=gpu_id,
             rank=gpu_id,
             od_config=od_config,
-            skip_load_model=uses_custom_pipeline,
+            skip_load_model=self.uses_custom_pipeline,
         )
 
         # Re-initialize pipeline with custom pipeline if provided
-        if uses_custom_pipeline:
+        if self.uses_custom_pipeline:
             self.worker.re_init_pipeline(self.custom_pipeline_args)
-
-    def _uses_custom_pipeline(self) -> bool:
-        custom_pipeline_args = self.custom_pipeline_args
-        if not custom_pipeline_args:
-            return False
-        return "pipeline_class" in custom_pipeline_args
 
     def _prepare_worker_class(self) -> type:
         """
@@ -1032,7 +1027,7 @@ class WorkerWrapperBase:
         worker_class = self.base_worker_class
 
         # If custom pipeline initialization is requested, use CustomPipelineWorkerExtension.
-        if self._uses_custom_pipeline():
+        if self.uses_custom_pipeline:
             # Set worker_extension_cls to CustomPipelineWorkerExtension if not already set
             if self.worker_extension_cls is None:
                 self.worker_extension_cls = CustomPipelineWorkerExtension

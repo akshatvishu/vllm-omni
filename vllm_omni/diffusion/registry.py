@@ -19,6 +19,19 @@ from vllm_omni.platforms import current_omni_platform
 
 logger = init_logger(__name__)
 
+_NATIVE_SINGLE_FILE_MODELS = {
+    "AnimaPipeline": ("AnimaModularPipeline",),
+}
+
+
+def resolve_native_single_file(model_class_name: str | None) -> str | None:
+    """Return the canonical native pipeline for a single-file model class."""
+    for canonical, aliases in _NATIVE_SINGLE_FILE_MODELS.items():
+        if model_class_name == canonical or model_class_name in aliases:
+            return canonical
+    return None
+
+
 _DIFFUSION_MODELS = {
     # arch:(mod_folder, mod_relname, cls_name)
     "QwenImagePipeline": (

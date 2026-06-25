@@ -50,17 +50,8 @@ def parse_json_object(value: str, flag_name: str = "argument") -> dict[str, Any]
     return config
 
 
-def parse_json_dict(value: str) -> dict[str, Any]:
-    try:
-        config = json.loads(value)
-    except json.JSONDecodeError as e:
-        raise argparse.ArgumentTypeError(f"Must be a valid JSON object: {e}") from e
-    if not isinstance(config, dict):
-        raise argparse.ArgumentTypeError("Must be a JSON object (dict)")
-    return config
-
-
 parse_profiler_config = functools.partial(parse_json_object, flag_name="--profiler-config")
+parse_custom_pipeline_args = functools.partial(parse_json_object, flag_name="--custom-pipeline-args")
 
 
 def parse_args() -> argparse.Namespace:
@@ -349,14 +340,8 @@ def parse_args() -> argparse.Namespace:
         help="Override the diffusion pipeline class name (e.g. AnimaPipeline).",
     )
     parser.add_argument(
-        "--diffusers-load-kwargs",
-        type=parse_json_dict,
-        default=None,
-        help="JSON object passed to the Diffusers model loader (e.g. '{\"use_safetensors\": true}').",
-    )
-    parser.add_argument(
         "--custom-pipeline-args",
-        type=parse_json_dict,
+        type=parse_custom_pipeline_args,
         default=None,
         help='JSON object passed to native/custom pipelines (e.g. \'{"components_path": "/path"}\').',
     )
@@ -460,8 +445,6 @@ def main():
     elif use_nextstep:
         # NextStep-1.1 requires explicit pipeline class
         omni_kwargs["model_class_name"] = "NextStep11Pipeline"
-    if args.diffusers_load_kwargs is not None:
-        omni_kwargs["diffusers_load_kwargs"] = args.diffusers_load_kwargs
     if args.custom_pipeline_args is not None:
         omni_kwargs["custom_pipeline_args"] = args.custom_pipeline_args
     # Cosmos3 loads its (gated) guardrail models at build time, so the guardrails
@@ -500,8 +483,6 @@ def main():
         print(f"  stage-configs-path: {args.stage_configs_path}")
     if args.model_class_name:
         print(f"  Model class name: {args.model_class_name}")
-    if args.diffusers_load_kwargs is not None:
-        print(f"  Diffusers load kwargs: {args.diffusers_load_kwargs}")
     if args.custom_pipeline_args is not None:
         print(f"  Custom pipeline args: {args.custom_pipeline_args}")
     print(f"{'=' * 60}\n")

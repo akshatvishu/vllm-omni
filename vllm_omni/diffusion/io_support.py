@@ -10,10 +10,7 @@ from vllm_omni.diffusion.registry import DiffusionModelRegistry
 
 
 def supports_multimodal_input(od_config: OmniDiffusionConfig) -> tuple[bool, bool]:
-    if (
-        od_config.diffusion_load_format in ("diffusers", "diffusers_single_file")
-        and (pipe_cls := od_config.diffusers_pipeline_cls) is not None
-    ):
+    if od_config.diffusion_load_format == "diffusers" and (pipe_cls := od_config.diffusers_pipeline_cls) is not None:
         signature = inspect.signature(pipe_cls.__call__)
         support_image_input = "image" in signature.parameters
         support_audio_input = (

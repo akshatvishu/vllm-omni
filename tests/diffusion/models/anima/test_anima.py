@@ -1,89 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
 from safetensors.torch import save_file
 
-import vllm_omni.diffusion.models.diffusers_adapter.pipeline_diffusers_adapter as diffusers_adapter
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
-from vllm_omni.diffusion.models.diffusers_adapter.pipeline_diffusers_adapter import DiffusersAdapterPipeline
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
 
-
-class _FakeLoadedPipeline:
-    def __init__(self):
-        self.device = None
-
-    def __call__(self, prompt=None):
-        return prompt
-
-    def to(self, device):
-        self.device = device
-        return self
+pytestmark = [pytest.mark.core_model, pytest.mark.cpu, pytest.mark.diffusion]
 
 
-class _FakeSingleFilePipeline:
-    calls = []
-
-    @classmethod
-    def from_single_file(cls, model_id, **kwargs):
-        cls.calls.append(("from_single_file", model_id, kwargs))
-        return _FakeLoadedPipeline()
-
-    @classmethod
-    def from_pretrained(cls, model_id, **kwargs):
-        cls.calls.append(("from_pretrained", model_id, kwargs))
-        return _FakeLoadedPipeline()
-
-
-class _FakeNoSingleFilePipeline:
-    @classmethod
-    def from_pretrained(cls, model_id, **kwargs):
-        return _FakeLoadedPipeline()
-
-
-def _make_adapter_for_load_weights(
-    *,
-    model,
-    diffusion_load_format,
-    pipeline_cls=None,
-    diffusers_load_kwargs=None,
-):
-    adapter = DiffusersAdapterPipeline.__new__(DiffusersAdapterPipeline)
-    adapter.od_config = SimpleNamespace(
-        model=model,
-        dtype=torch.float32,
-        diffusers_load_kwargs=diffusers_load_kwargs or {},
-        diffusers_pipeline_cls=pipeline_cls,
-        diffusion_load_format=diffusion_load_format,
-        enable_layerwise_offload=False,
-        enable_cpu_offload=False,
-        vae_use_slicing=False,
-        vae_use_tiling=False,
-    )
-    adapter.device = torch.device("cpu")
-    adapter._set_attention_backend = lambda: None
-    return adapter
-
-
-def test_anima_registration():
+def test_anima_registration() -> None:
+    """The native Anima pipeline is registered and importable."""
     from vllm_omni.diffusion.registry import DiffusionModelRegistry
 
     assert DiffusionModelRegistry._try_load_model_cls("AnimaPipeline") is not None
 
 
-def test_enrich_config_single_file(tmp_path):
+@pytest.mark.parametrize("model_class_name", ["AnimaPipeline", "AnimaModularPipeline"])
+def test_enrich_config_native_anima_checkpoint(tmp_path: Path, model_class_name: str) -> None:
+    """Native and reference Anima class names resolve to AnimaPipeline."""
     dummy_checkpoint = tmp_path / "model.safetensors"
     dummy_checkpoint.write_text("dummy")
 
     config = OmniDiffusionConfig(
         model=str(dummy_checkpoint),
-        diffusion_load_format="diffusers_single_file",
-        model_class_name="AnimaModularPipeline",
+        model_class_name=model_class_name,
     )
     config.enrich_config()
 
@@ -92,52 +39,8 @@ def test_enrich_config_single_file(tmp_path):
     assert config.diffusers_pipeline_cls is None
 
 
-def test_enrich_config_single_file_autodetects_local_file(tmp_path):
-    dummy_checkpoint = tmp_path / "model.safetensors"
-    dummy_checkpoint.write_text("dummy")
-
-    config = OmniDiffusionConfig(
-        model=str(dummy_checkpoint),
-        model_class_name="AnimaModularPipeline",
-    )
-    config.enrich_config()
-
-    assert config.diffusion_load_format == "default"
-    assert config.model_class_name == "AnimaPipeline"
-    assert config.diffusers_pipeline_cls is None
-
-
-def test_enrich_config_native_anima_single_file_stays_native(tmp_path):
-    dummy_checkpoint = tmp_path / "model.safetensors"
-    dummy_checkpoint.write_text("dummy")
-
-    config = OmniDiffusionConfig(
-        model=str(dummy_checkpoint),
-        model_class_name="AnimaPipeline",
-    )
-    config.enrich_config()
-
-    assert config.diffusion_load_format == "default"
-    assert config.model_class_name == "AnimaPipeline"
-    assert config.diffusers_pipeline_cls is None
-
-
-def test_native_anima_single_file_allows_custom_pipeline_args(tmp_path):
-    dummy_checkpoint = tmp_path / "model.safetensors"
-    dummy_checkpoint.write_text("dummy")
-
-    config = OmniDiffusionConfig(
-        model=str(dummy_checkpoint),
-        model_class_name="AnimaPipeline",
-        custom_pipeline_args={"components_path": "/tmp/anima-components"},
-    )
-    config.enrich_config()
-
-    assert config.diffusion_load_format == "default"
-    assert config.custom_pipeline_args == {"components_path": "/tmp/anima-components"}
-
-
-def test_native_anima_component_paths_use_custom_pipeline_args():
+def test_native_anima_component_paths_use_custom_pipeline_args() -> None:
+    """Anima resolves shared and component-specific paths from native args."""
     from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
 
     pipeline = AnimaPipeline.__new__(AnimaPipeline)
@@ -154,113 +57,8 @@ def test_native_anima_component_paths_use_custom_pipeline_args():
     assert pipeline._component_path("tokenizer", "/tmp/default") == "/tmp/default"
 
 
-def test_diffusers_adapter_accepts_var_keyword_call_signature():
-    class ModularLikePipeline:
-        def __call__(self, state=None, output=None, **kwargs):
-            return kwargs
-
-    pipeline = DiffusersAdapterPipeline.__new__(DiffusersAdapterPipeline)
-    pipeline._pipeline = ModularLikePipeline()
-    pipeline._accept_call_kwargs = DiffusersAdapterPipeline._get_accepted_call_kwargs(pipeline._pipeline.__call__)
-    pipeline._pipeline_utils = SimpleNamespace(validate_runtime_sampling_params=lambda sampling: None)
-    pipeline.od_config = SimpleNamespace(
-        diffusers_call_kwargs={"height": 512},
-        output_type="pil",
-    )
-
-    req = OmniDiffusionRequest(
-        prompts=["a red cube"],
-        sampling_params=OmniDiffusionSamplingParams(
-            width=768,
-            num_inference_steps=4,
-            num_outputs_per_prompt=2,
-            seed=123,
-            generator_device="cpu",
-        ),
-        request_id="req",
-    )
-
-    kwargs = pipeline._build_call_kwargs(req)
-
-    assert kwargs["prompt"] == "a red cube"
-    assert kwargs["height"] == 512
-    assert kwargs["width"] == 768
-    assert kwargs["num_inference_steps"] == 4
-    assert kwargs["num_images_per_prompt"] == 2
-
-
-def test_diffusers_adapter_loads_explicit_single_file_format(tmp_path):
-    checkpoint = tmp_path / "model.safetensors"
-    checkpoint.write_text("dummy")
-    _FakeSingleFilePipeline.calls = []
-
-    adapter = _make_adapter_for_load_weights(
-        model=str(checkpoint),
-        diffusion_load_format="diffusers_single_file",
-        pipeline_cls=_FakeSingleFilePipeline,
-        diffusers_load_kwargs={"custom": "value"},
-    )
-    adapter.load_weights()
-
-    assert len(_FakeSingleFilePipeline.calls) == 1
-    method, model_id, kwargs = _FakeSingleFilePipeline.calls[0]
-    assert method == "from_single_file"
-    assert model_id == str(checkpoint)
-    assert kwargs["torch_dtype"] is torch.float32
-    assert kwargs["custom"] == "value"
-    assert adapter._pipeline.device == torch.device("cpu")
-
-
-def test_diffusers_adapter_autodetects_local_single_file(tmp_path):
-    checkpoint = tmp_path / "model.safetensors"
-    checkpoint.write_text("dummy")
-    _FakeSingleFilePipeline.calls = []
-
-    adapter = _make_adapter_for_load_weights(
-        model=str(checkpoint),
-        diffusion_load_format="diffusers",
-        pipeline_cls=_FakeSingleFilePipeline,
-    )
-    adapter.load_weights()
-
-    assert _FakeSingleFilePipeline.calls[0][0] == "from_single_file"
-
-
-def test_diffusers_adapter_repo_layout_uses_from_pretrained(monkeypatch):
-    calls = []
-
-    def fake_from_pretrained(model_id, **kwargs):
-        calls.append((model_id, kwargs))
-        return _FakeLoadedPipeline()
-
-    monkeypatch.setattr(diffusers_adapter.DiffusionPipeline, "from_pretrained", staticmethod(fake_from_pretrained))
-    adapter = _make_adapter_for_load_weights(
-        model="repo/model",
-        diffusion_load_format="diffusers",
-        pipeline_cls=_FakeSingleFilePipeline,
-    )
-    adapter.load_weights()
-
-    assert len(calls) == 1
-    assert calls[0][0] == "repo/model"
-    assert calls[0][1]["torch_dtype"] is torch.float32
-
-
-def test_diffusers_adapter_single_file_requires_supported_pipeline(tmp_path):
-    checkpoint = tmp_path / "model.safetensors"
-    checkpoint.write_text("dummy")
-
-    adapter = _make_adapter_for_load_weights(
-        model=str(checkpoint),
-        diffusion_load_format="diffusers_single_file",
-        pipeline_cls=_FakeNoSingleFilePipeline,
-    )
-
-    with pytest.raises(ValueError, match="does not support from_single_file"):
-        adapter.load_weights()
-
-
-def test_native_anima_converts_original_cosmos_transformer_keys():
+def test_native_anima_converts_original_cosmos_transformer_keys() -> None:
+    """Original Cosmos checkpoint names map to native module names."""
     from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
 
     converted = AnimaPipeline._convert_original_transformer_state_dict(
@@ -283,7 +81,8 @@ def test_native_anima_converts_original_cosmos_transformer_keys():
     }
 
 
-def test_native_anima_resolves_vae_scale_factor_from_loaded_vae():
+def test_native_anima_resolves_vae_scale_factor_from_loaded_vae() -> None:
+    """The loaded VAE determines the spatial scale factor."""
     from vllm_omni.diffusion.models.anima.pipeline_anima import _anima_vae_scale_factor_from_vae
 
     vae = SimpleNamespace(config=SimpleNamespace(spatial_compression_ratio=16))
@@ -291,7 +90,8 @@ def test_native_anima_resolves_vae_scale_factor_from_loaded_vae():
     assert _anima_vae_scale_factor_from_vae(vae) == 16
 
 
-def test_native_anima_loads_synthetic_single_file(tmp_path, monkeypatch):
+def test_native_anima_loads_synthetic_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Native modules load exact weights from an Anima safetensors checkpoint."""
     import vllm_omni.diffusion.models.anima.pipeline_anima as pipeline_anima
     from vllm_omni.diffusion.models.anima.anima_text_conditioner import AnimaTextConditioner
     from vllm_omni.diffusion.models.anima.anima_transformer import AnimaTransformer3DModel
@@ -352,6 +152,29 @@ def test_native_anima_loads_synthetic_single_file(tmp_path, monkeypatch):
     assert_loaded(loaded_transformer, loaded_text_conditioner)
 
 
+def test_native_anima_profiler_setup_is_deferred_and_idempotent() -> None:
+    """Profiler targets are wrapped once, after deferred components are loaded."""
+    from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
+
+    pipeline = AnimaPipeline.__new__(AnimaPipeline)
+    pipeline.od_config = SimpleNamespace(enable_diffusion_pipeline_profiler=True)
+    pipeline._profiler_initialized = False
+    pipeline.vae = SimpleNamespace(decode=lambda: "decoded")
+    pipeline.text_encoder = SimpleNamespace(forward=lambda: "encoded")
+
+    pipeline._setup_profiler()
+    wrapped_decode = pipeline.vae.decode
+    wrapped_text_encoder = pipeline.text_encoder.forward
+    pipeline._setup_profiler()
+
+    assert pipeline.vae.decode is wrapped_decode
+    assert pipeline.text_encoder.forward is wrapped_text_encoder
+    assert pipeline.vae.decode() == "decoded"
+    assert pipeline.text_encoder.forward() == "encoded"
+    assert "AnimaPipeline.vae.decode" in pipeline.stage_durations
+    assert "AnimaPipeline.text_encoder.forward" in pipeline.stage_durations
+
+
 def _make_anima_forward_probe():
     from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
 
@@ -365,8 +188,7 @@ def _make_anima_forward_probe():
     pipeline._guidance_scale = 0.0
     captured = {}
 
-    def encode_prompt(**kwargs):
-        captured["encode_prompt"] = kwargs
+    def encode_prompt(**_kwargs):
         return {
             "qwen_prompt_embeds": torch.zeros(1, 2, 4),
             "qwen_attention_mask": torch.ones(1, 2),
@@ -398,7 +220,8 @@ def _make_anima_forward_probe():
     return pipeline, captured
 
 
-def test_native_anima_forward_uses_official_default_resolution():
+def test_native_anima_forward_uses_official_default_resolution() -> None:
+    """Forward uses Anima's reference resolution when none is requested."""
     pipeline, captured = _make_anima_forward_probe()
     req = OmniDiffusionRequest(
         prompts=["a red cube"],
@@ -412,7 +235,8 @@ def test_native_anima_forward_uses_official_default_resolution():
     assert captured["prepare_latents"]["width"] == 1024
 
 
-def test_native_anima_explicit_guidance_scale_drives_cfg_multiplier():
+def test_native_anima_explicit_guidance_scale_drives_cfg_multiplier() -> None:
+    """An explicit guidance scale controls native classifier-free guidance."""
     pipeline, captured = _make_anima_forward_probe()
     req = OmniDiffusionRequest(
         prompts=["a red cube"],
@@ -426,7 +250,8 @@ def test_native_anima_explicit_guidance_scale_drives_cfg_multiplier():
     assert captured["diffuse"]["true_cfg_scale"] == 5.0
 
 
-def test_native_anima_true_cfg_scale_overrides_guidance_multiplier():
+def test_native_anima_true_cfg_scale_overrides_guidance_multiplier() -> None:
+    """An explicit true-CFG scale overrides the guidance-scale multiplier."""
     pipeline, captured = _make_anima_forward_probe()
     req = OmniDiffusionRequest(
         prompts=["a red cube"],
@@ -440,20 +265,8 @@ def test_native_anima_true_cfg_scale_overrides_guidance_multiplier():
     assert captured["diffuse"]["true_cfg_scale"] == 3.0
 
 
-def test_enrich_config_single_file_rejects_unknown_pipeline(tmp_path):
-    dummy_checkpoint = tmp_path / "model.safetensors"
-    dummy_checkpoint.write_text("dummy")
-
-    config = OmniDiffusionConfig(
-        model=str(dummy_checkpoint),
-        diffusion_load_format="diffusers_single_file",
-        model_class_name="MissingPipeline",
-    )
-    with pytest.raises(ValueError, match="Could not find diffusers pipeline class MissingPipeline"):
-        config.enrich_config()
-
-
-def test_native_anima_cfg_equation():
+def test_native_anima_cfg_equation() -> None:
+    """The denoising loop applies the standard true-CFG equation."""
     from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
 
     pipeline = AnimaPipeline.__new__(AnimaPipeline)
@@ -470,7 +283,7 @@ def test_native_anima_cfg_equation():
         def update(self):
             pass
 
-    pipeline.progress_bar = lambda **kwargs: MockProgressBar()
+    pipeline.progress_bar = lambda **_kwargs: MockProgressBar()
 
     class MockTransformer:
         dtype = torch.float32

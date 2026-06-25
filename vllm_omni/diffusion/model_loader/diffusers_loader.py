@@ -344,11 +344,10 @@ class DiffusersPipelineLoader:
             else:
                 model = self._init_from_load_format(load_format, target_device, custom_pipeline_name, is_hsdp=False)
                 logger.debug("Loading weights on %s ...", load_device)
-                if load_format in ("diffusers", "diffusers_single_file"):
+                if load_format == "diffusers":
                     # DiffusersAdapterPipeline.load_weights() calls
-                    # DiffusionPipeline.from_pretrained() or from_single_file()
-                    # internally; it does not use native customized pipeline
-                    # classes.
+                    # DiffusionPipeline.from_pretrained() internally; it does
+                    # not use our native customized pipeline classes.
                     cast(DiffusersAdapterPipeline, model).load_weights()
                 elif self._is_gguf_quantization():
                     self._load_weights_with_gguf(model)
@@ -617,7 +616,7 @@ class DiffusersPipelineLoader:
             with device_ctx:
                 if load_format == "default":
                     model = initialize_model(self.od_config)
-                elif load_format in ("diffusers", "diffusers_single_file"):
+                elif load_format == "diffusers":
                     model = DiffusersAdapterPipeline(od_config=self.od_config, device=target_device)
                 else:
                     raise ValueError(f"Unknown load_format: {load_format}")
@@ -649,7 +648,7 @@ class DiffusersPipelineLoader:
         # directly on GPU, HSDP needs weights on CPU first so they can be redistributed
         # across GPUs by apply_hsdp_to_model. The model's load_weights handles weight
         # mapping (QKV fusion, etc.).
-        if load_format in ("diffusers", "diffusers_single_file"):
+        if load_format == "diffusers":
             raise ValueError("HSDP is not supported with the diffusers adapter load format")
         model = self._init_from_load_format(load_format, target_device, custom_pipeline_name, is_hsdp=True)
         self.load_weights(model)
