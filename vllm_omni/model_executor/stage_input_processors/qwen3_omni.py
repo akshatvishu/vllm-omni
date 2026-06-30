@@ -754,7 +754,20 @@ def thinker2talker_token_only(
             continue
         mm_hs = thinker_mm_raw.get("hidden_states", {})
         mm_layers = mm_hs.get("layers", {}) if isinstance(mm_hs, Mapping) else {}
-        if _layer_tensor(mm_layers, _EMBED_LAYER_KEY) is None or _layer_tensor(mm_layers, _HIDDEN_LAYER_KEY) is None:
+        emb = _layer_tensor(mm_layers, _EMBED_LAYER_KEY)
+        if emb is None:
+            emb = thinker_mm_raw.get(f"hidden_states.layer_{_EMBED_LAYER_KEY}")
+            emb = emb if isinstance(emb, torch.Tensor) else None
+            if emb is None:
+                hidden = thinker_mm_raw.get("hidden")
+                emb = hidden if isinstance(hidden, torch.Tensor) else None
+
+        hid = _layer_tensor(mm_layers, _HIDDEN_LAYER_KEY)
+        if hid is None:
+            hid = thinker_mm_raw.get(f"hidden_states.layer_{_HIDDEN_LAYER_KEY}")
+            hid = hid if isinstance(hid, torch.Tensor) else None
+
+        if emb is None or hid is None:
             logger.debug("thinker2talker_token_only: skip req=%s due to missing hidden-state layers", req_id)
             continue
         prompt_token_ids = _ensure_list(thinker_output.prompt_token_ids)

@@ -252,6 +252,48 @@ def test_thinker2talker_full_payload_packs_complete_tensors() -> None:
     assert payload["hidden_states"]["output"].shape[0] == 2
 
 
+def test_thinker2talker_token_only_accepts_flat_sync_payload() -> None:
+    """Sync token-only path must accept flattened payload keys from the runner."""
+    output = SimpleNamespace(
+        cumulative_token_ids=[3],
+        multimodal_output={
+            "hidden_states.layer_0": torch.ones(3, 2),
+            "hidden_states.layer_24": torch.full((3, 2), 2.0),
+        },
+    )
+    thinker_output = SimpleNamespace(
+        outputs=[output],
+        prompt_token_ids=[151644, 872, 151644, 77091],
+        request_id="thinker",
+        finished=True,
+    )
+
+    talker_inputs = q3.thinker2talker_token_only([thinker_output])
+
+    assert len(talker_inputs) == 1
+    assert len(talker_inputs[0]["prompt_token_ids"]) > 0
+    assert talker_inputs[0]["additional_information"] is None
+
+
+def test_thinker2talker_token_only_rejects_malformed_flat_sync_payload() -> None:
+    """Malformed flat payloads must be skipped like full_payload would skip them."""
+    output = SimpleNamespace(
+        cumulative_token_ids=[3],
+        multimodal_output={
+            "hidden_states.layer_0": torch.ones(3, 2),
+            "hidden_states.layer_24": "not-a-tensor",
+        },
+    )
+    thinker_output = SimpleNamespace(
+        outputs=[output],
+        prompt_token_ids=[151644, 872, 151644, 77091],
+        request_id="thinker",
+        finished=True,
+    )
+
+    assert q3.thinker2talker_token_only([thinker_output]) == []
+
+
 def test_accumulator_replaces_keys_in_replace_set() -> None:
     """REPLACE-key semantics: subsequent emissions of the same key replace, not append."""
     from vllm_omni.worker.omni_connector_model_runner_mixin import OmniConnectorModelRunnerMixin
