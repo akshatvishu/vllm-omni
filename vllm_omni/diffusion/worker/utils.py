@@ -75,7 +75,8 @@ class DiffusionRequestState:
     # ── Identity / request-level inputs ──
     request_id: str
     sampling: OmniDiffusionSamplingParams
-    prompts: list[OmniPromptType] | None = None
+    prompt: OmniPromptType | None = None
+    kv_sender_info: dict | None = None
 
     # ── Encoded prompts (set once by prepare_encode) ──
     prompt_embeds: torch.Tensor | None = None
@@ -115,6 +116,9 @@ class DiffusionRequestState:
 
     # ── Runner-owned profiling metadata ──
     stage_durations: dict[str, float] = field(default_factory=dict)
+
+    # Peak device memory observed while this request is active in step mode.
+    peak_memory_mb: float = 0.0
 
     # ── Properties ──
 

@@ -162,6 +162,26 @@ class _InterruptingStepPipeline(_StepPipeline):
         raise AssertionError("post_decode should not run after interrupt")
 
 
+class _FakePeakMemoryPlatform:
+    def __init__(self, reserved_mb: list[float]):
+        self._reserved_mb = reserved_mb
+        self.reset_calls = 0
+
+    def reset_peak_memory_stats(self):
+        self.reset_calls += 1
+
+    def max_memory_reserved(self):
+        index = min(self.reset_calls - 1, len(self._reserved_mb) - 1)
+        return int(self._reserved_mb[index] * 1024**2)
+
+    def max_memory_allocated(self):
+        index = min(self.reset_calls - 1, len(self._reserved_mb) - 1)
+        return int((self._reserved_mb[index] - 100) * 1024**2)
+
+    def is_available(self) -> bool:
+        return True
+
+
 class _IdentityNoiseTransformer(torch.nn.Module):
     def forward(self, x: torch.Tensor, **kwargs):
         del kwargs
@@ -253,15 +273,10 @@ class _DistributedStepPipeline(CFGParallelMixin):
 
 
 def _make_step_request(num_inference_steps: int = 2):
-    return SimpleNamespace(
-        prompts=["a prompt"],
+    return OmniDiffusionRequest(
+        prompt="a prompt",
         request_id="req-1",
-        sampling_params=SimpleNamespace(
-            generator=None,
-            seed=None,
-            generator_device=None,
-            num_inference_steps=num_inference_steps,
-        ),
+        sampling_params=OmniDiffusionSamplingParams(num_inference_steps=num_inference_steps),
     )
 
 
@@ -274,7 +289,7 @@ def _assert_aborted_output(output: DiffusionOutput, request_id: str) -> None:
 
 def _make_engine_request(req_id: str = "req-1", num_inference_steps: int = 2) -> OmniDiffusionRequest:
     return OmniDiffusionRequest(
-        prompts=[f"prompt-{req_id}"],
+        prompt=f"prompt-{req_id}",
         sampling_params=OmniDiffusionSamplingParams(num_inference_steps=num_inference_steps),
         request_id=req_id,
     )
@@ -330,6 +345,7 @@ def _make_distributed_runner(mode: str, device: torch.device):
 
 
 def _make_scheduler_output(req, request_id="req-1", step_id=0, finished_req_ids=None):
+    req.request_id = request_id
     return DiffusionSchedulerOutput(
         step_id=step_id,
         scheduled_new_reqs=[NewRequestData(request_id=request_id, req=req)],
@@ -357,7 +373,7 @@ def _make_input_batch_state(request_id: str, latent_value: float) -> DiffusionRe
     state = DiffusionRequestState(
         request_id=request_id,
         sampling=SimpleNamespace(),
-        prompts=None,
+        prompt=None,
     )
     state.latents = torch.tensor([[latent_value]])
     state.timesteps = torch.tensor([1.0])
@@ -560,6 +576,24 @@ class TestRunner:
             "QwenImagePipeline.vae.decode": 3.0,
         }
         assert reset_calls == [True]
+
+    def test_carries_peak_memory_across_stepwise_request_lifecycle(self, monkeypatch):
+        runner = _make_runner()
+        req = _make_step_request()
+        fake_platform = _FakePeakMemoryPlatform([1500.0, 1200.0])
+        monkeypatch.setattr(model_runner_module, "set_forward_context", _noop_forward_context)
+        monkeypatch.setattr(model_runner_module, "current_omni_platform", fake_platform)
+
+        first = DiffusionModelRunner.execute_stepwise(runner, _make_scheduler_output(req, step_id=0))
+        first_output = first.get_request_output("req-1")
+        assert first_output.finished is False
+        assert first_output.result is None
+
+        second = DiffusionModelRunner.execute_stepwise(runner, _make_cached_scheduler_output(step_id=1))
+        second_output = second.get_request_output("req-1")
+        assert second_output.finished is True
+        assert second_output.result is not None
+        assert second_output.result.peak_memory_mb == pytest.approx(1500.0)
 
     def test_rejects_multi_request_step_batch(self):
         runner = _make_runner()
