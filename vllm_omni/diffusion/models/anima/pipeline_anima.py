@@ -644,6 +644,8 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
             raise ValueError("AnimaPipeline requires resolved height and width.")
         height = int(height)
         width = int(width)
+        if req.sampling_params.output_type is not None:
+            output_type = req.sampling_params.output_type
         output_type = output_type or "pil"
 
         num_inference_steps = req.sampling_params.num_inference_steps or num_inference_steps

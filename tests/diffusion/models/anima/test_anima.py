@@ -216,7 +216,12 @@ def _make_anima_forward_probe():
     pipeline.prepare_latents = prepare_latents
     pipeline.prepare_timesteps = lambda **_kwargs: (torch.ones(1), 1)
     pipeline.diffuse = diffuse
-    pipeline.decode_latents = lambda latents, output_type="pil": DiffusionOutput(output=latents)
+
+    def decode_latents(latents, output_type="pil"):
+        captured["output_type"] = output_type
+        return DiffusionOutput(output=latents)
+
+    pipeline.decode_latents = decode_latents
     return pipeline, captured
 
 
@@ -233,6 +238,20 @@ def test_native_anima_forward_uses_official_default_resolution() -> None:
 
     assert captured["prepare_latents"]["height"] == 1024
     assert captured["prepare_latents"]["width"] == 1024
+
+
+def test_native_anima_forward_honors_sampling_output_type() -> None:
+    """Request-level output type controls Anima decoding."""
+    pipeline, captured = _make_anima_forward_probe()
+    req = OmniDiffusionRequest(
+        prompts=["a red cube"],
+        sampling_params=OmniDiffusionSamplingParams(output_type="latent"),
+        request_id="anima-output-type",
+    )
+
+    pipeline.forward(req)
+
+    assert captured["output_type"] == "latent"
 
 
 def test_native_anima_explicit_guidance_scale_drives_cfg_multiplier() -> None:
