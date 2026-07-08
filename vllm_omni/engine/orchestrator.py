@@ -286,7 +286,10 @@ class Orchestrator:
         already no-ops on ``scheduler_stats is None`` (which is what
         the upstream scheduler returns when its own log_stats is False),
         so this gate is mainly to keep the ``/metrics`` surface clean
-        when the user did not request stats.
+        when the user did not request stats. When stats are enabled, record()
+        must still receive IterationStats even on ticks where scheduler_stats
+        is None; upstream PrometheusStatLogger records token/request metrics
+        from iteration_stats independently of scheduler gauges.
         """
         self._running_counter = running_counter
         self._transfer_emitter = transfer_emitter
@@ -693,12 +696,11 @@ class Orchestrator:
                                 )
                                 if req_state.streaming.enabled:
                                     await self._apply_raw_terminal_stage_finish(stage_id, eco, req_state)
-                            # OmniSchedulerMixin.make_stats() already throttles
-                            # per-scheduler at 1 Hz, so raw_outputs.scheduler_stats
-                            # being non-None means this replica passed its own gate.
-                            # A second global throttle here would drop stats for
-                            # other (stage, replica) pairs in the same 1s window.
-                            record_stats = self._stat_logger is not None and raw_outputs.scheduler_stats is not None
+                            # SchedulerStats is independently throttled per
+                            # scheduler, but IterationStats must be recorded for
+                            # every non-empty output batch so token and finished
+                            # request metrics are not dropped between stats ticks.
+                            record_stats = self._stat_logger is not None and bool(raw_outputs.outputs)
                             iteration_stats = IterationStats() if record_stats else None
                             raw_output = await pool.process_llm_raw_outputs(
                                 replica_id,

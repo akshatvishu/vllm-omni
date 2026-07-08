@@ -196,6 +196,24 @@ class FakeOutputProcessor:
         return None
 
 
+class IterationStatsOutputProcessor(FakeOutputProcessor):
+    def process_outputs(self, *_args, **kwargs):
+        iteration_stats = kwargs.get("iteration_stats")
+        if iteration_stats is None and len(_args) >= 3:
+            iteration_stats = _args[2]
+        assert iteration_stats is not None
+        iteration_stats.num_generation_tokens += 3
+        return super().process_outputs(*_args, **kwargs)
+
+
+class RecordingStatLogger:
+    def __init__(self) -> None:
+        self.records: list[tuple[Any, Any, int]] = []
+
+    def record(self, scheduler_stats, iteration_stats, *, engine_idx: int = 0) -> None:
+        self.records.append((scheduler_stats, iteration_stats, engine_idx))
+
+
 def _sampling_params(max_tokens: int = 4) -> SamplingParams:
     return SamplingParams(max_tokens=max_tokens)
 
@@ -1147,6 +1165,40 @@ async def test_multi_replica_cfg_companion_inherits_parent_affinity(orchestrator
         await _shutdown_orchestrator(orchestrator_fixture)
 
 
+@pytest.mark.asyncio
+async def test_orchestrator_records_iteration_stats_without_scheduler_stats(orchestrator_factory) -> None:
+    stage0 = FakeStageClient(stage_type="llm", final_output=True)
+    processor = IterationStatsOutputProcessor(
+        request_outputs=[_build_request_output("req-stats", token_ids=[1], finished=True)]
+    )
+    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor])
+    stat_logger = RecordingStatLogger()
+    orchestrator_fixture.orchestrator._stat_logger = stat_logger
+    request = SimpleNamespace(request_id="req-stats", prompt_token_ids=[1, 2])
+
+    try:
+        await _enqueue_add_request(
+            orchestrator_fixture,
+            request_id="req-stats",
+            prompt=request,
+            original_prompt={"prompt": "hello"},
+            sampling_params_list=[_sampling_params()],
+            final_stage_id=0,
+        )
+        await _wait_for(lambda: len(stage0.add_request_calls) == 1)
+
+        stage0.push_engine_core_outputs(_engine_core_outputs("raw-without-scheduler-stats", 1.0))
+
+        await _wait_for(lambda: len(stat_logger.records) == 1)
+        scheduler_stats, iteration_stats, engine_idx = stat_logger.records[0]
+        assert scheduler_stats is None
+        assert iteration_stats is not None
+        assert iteration_stats.num_generation_tokens == 3
+        assert engine_idx == 0
+    finally:
+        await _shutdown_orchestrator(orchestrator_fixture)
+
+
 def test_orchestrator_does_not_re_introduce_global_stats_throttle() -> None:
     """Regression: each (stage, replica) must independently publish its wrapped
     vllm:* stats when its scheduler emits non-None scheduler_stats.
@@ -1158,9 +1210,8 @@ def test_orchestrator_does_not_re_introduce_global_stats_throttle() -> None:
     other than the first to emit within each second — their {stage, replica}
     gauges/counters went stale.
 
-    The fix removed the global gate entirely; the only signal needed is
-    'this replica's scheduler emitted non-None scheduler_stats'. This test
-    fails loudly if someone reintroduces the global throttle.
+    The fix removed the global gate entirely. This test fails loudly if
+    someone reintroduces the global throttle.
     """
     import inspect
 
@@ -1174,8 +1225,8 @@ def test_orchestrator_does_not_re_introduce_global_stats_throttle() -> None:
         "first replica to emit within each 1s window."
     )
     assert "_stats_interval_s" not in source
-    assert "raw_outputs.scheduler_stats is not None" in source, (
-        "Orchestrator must gate stat recording solely on "
-        "raw_outputs.scheduler_stats being non-None — the per-scheduler 1Hz "
-        "throttle in OmniSchedulerMixin.make_stats() is the only gate needed."
+    assert "bool(raw_outputs.outputs)" in source, (
+        "Orchestrator must create IterationStats whenever log stats is enabled "
+        "and raw outputs are present. SchedulerStats is throttled independently "
+        "and can be None on iterations that still need token/request metrics."
     )
