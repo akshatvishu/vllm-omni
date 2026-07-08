@@ -696,18 +696,17 @@ class Orchestrator:
                                 )
                                 if req_state.streaming.enabled:
                                     await self._apply_raw_terminal_stage_finish(stage_id, eco, req_state)
-                            # SchedulerStats is independently throttled per
-                            # scheduler, but IterationStats must be recorded for
-                            # every non-empty output batch so token and finished
-                            # request metrics are not dropped between stats ticks.
-                            record_stats = self._stat_logger is not None and bool(raw_outputs.outputs)
-                            iteration_stats = IterationStats() if record_stats else None
+                            iteration_stats = (
+                                IterationStats() if (self._stat_logger is not None and raw_outputs.outputs) else None
+                            )
                             raw_output = await pool.process_llm_raw_outputs(
                                 replica_id,
                                 raw_outputs,
                                 iteration_stats=iteration_stats,
                             )
-                            if record_stats:
+                            if self._stat_logger is not None and (
+                                raw_outputs.scheduler_stats is not None or iteration_stats is not None
+                            ):
                                 self._stat_logger.record(
                                     raw_outputs.scheduler_stats,
                                     iteration_stats,

@@ -58,7 +58,11 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
 
     @staticmethod
     def _record_prefill_stats(request: Request) -> None:
-        """Mirror upstream first-prefill prompt accounting for generation stages."""
+        """Mirror upstream first-prefill prompt accounting for generation stages.
+
+        Keep this in sync with vLLM Scheduler.schedule() if this fast path gains
+        prefix-cache or external-KV accounting.
+        """
         if request.prefill_stats is None:
             return
         request.prefill_stats.set(

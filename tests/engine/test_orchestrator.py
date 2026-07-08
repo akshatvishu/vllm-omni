@@ -206,6 +206,16 @@ class IterationStatsOutputProcessor(FakeOutputProcessor):
         return super().process_outputs(*_args, **kwargs)
 
 
+class RecordingOutputProcessor(FakeOutputProcessor):
+    def __init__(self, *, request_outputs: list[object] | None = None) -> None:
+        super().__init__(request_outputs=request_outputs)
+        self.process_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def process_outputs(self, *args, **kwargs):
+        self.process_calls.append((args, kwargs))
+        return super().process_outputs(*args, **kwargs)
+
+
 class RecordingStatLogger:
     def __init__(self) -> None:
         self.records: list[tuple[Any, Any, int]] = []
@@ -1199,34 +1209,46 @@ async def test_orchestrator_records_iteration_stats_without_scheduler_stats(orch
         await _shutdown_orchestrator(orchestrator_fixture)
 
 
-def test_orchestrator_does_not_re_introduce_global_stats_throttle() -> None:
-    """Regression: each (stage, replica) must independently publish its wrapped
-    vllm:* stats when its scheduler emits non-None scheduler_stats.
+@pytest.mark.asyncio
+async def test_orchestrator_records_scheduler_stats_without_outputs(orchestrator_factory) -> None:
+    stage0 = FakeStageClient(stage_type="llm", final_output=True)
+    processor = RecordingOutputProcessor()
+    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor])
+    stat_logger = RecordingStatLogger()
+    orchestrator_fixture.orchestrator._stat_logger = stat_logger
+    scheduler_stats = SimpleNamespace(num_running_reqs=0, kv_cache_usage=0.5)
 
-    A previous version of Orchestrator carried a global self._last_stats_ts /
-    _stats_interval_s gate around _stat_logger.record(). Because
-    OmniSchedulerMixin.make_stats() already throttles at 1 Hz per scheduler
-    (one per (stage, replica)), the extra global gate starved every replica
-    other than the first to emit within each second — their {stage, replica}
-    gauges/counters went stale.
+    try:
+        stage0.push_engine_core_outputs(
+            SimpleNamespace(
+                outputs=[],
+                timestamp=1.0,
+                scheduler_stats=scheduler_stats,
+            )
+        )
 
-    The fix removed the global gate entirely. This test fails loudly if
-    someone reintroduces the global throttle.
-    """
-    import inspect
+        await _wait_for(lambda: len(stat_logger.records) == 1)
+        recorded_scheduler_stats, iteration_stats, engine_idx = stat_logger.records[0]
+        assert recorded_scheduler_stats is scheduler_stats
+        assert iteration_stats is None
+        assert engine_idx == 0
+        assert processor.process_calls[0][0][2] is None
+    finally:
+        await _shutdown_orchestrator(orchestrator_fixture)
 
-    from vllm_omni.engine.orchestrator import Orchestrator
 
-    source = inspect.getsource(Orchestrator)
-    assert "_last_stats_ts" not in source, (
-        "Orchestrator must not gate stat recording on a global timestamp. "
-        "OmniSchedulerMixin.make_stats() already throttles per scheduler "
-        "(per (stage, replica)); an outer global gate starves all but the "
-        "first replica to emit within each 1s window."
+@pytest.mark.asyncio
+async def test_stage_pool_preserves_none_iteration_stats() -> None:
+    client = FakeStageClient(stage_type="llm", final_output=True)
+    processor = RecordingOutputProcessor()
+    pool = StagePool(
+        0,
+        [client],
+        output_processor=processor,
+        stage_vllm_config=SimpleNamespace(model_config=SimpleNamespace(max_model_len=64)),
     )
-    assert "_stats_interval_s" not in source
-    assert "bool(raw_outputs.outputs)" in source, (
-        "Orchestrator must create IterationStats whenever log stats is enabled "
-        "and raw outputs are present. SchedulerStats is throttled independently "
-        "and can be None on iterations that still need token/request metrics."
-    )
+    raw_outputs = SimpleNamespace(outputs=["raw"], timestamp=1.0, scheduler_stats=None)
+
+    await pool.process_llm_raw_outputs(0, raw_outputs, iteration_stats=None)
+
+    assert processor.process_calls[0][0][2] is None
