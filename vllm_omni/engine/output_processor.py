@@ -638,7 +638,11 @@ class MultimodalOutputProcessor(VLLMOutputProcessor):
                 upstream_outputs.append(eco)
 
         # Handle multimodal-only outputs (generation stages) locally.
-        self._process_mm_only_outputs(mm_only_outputs)
+        self._process_mm_only_outputs(
+            mm_only_outputs,
+            engine_core_timestamp=engine_core_timestamp,
+            iteration_stats=iteration_stats,
+        )
 
         # Delegate text/pooling outputs to upstream.
         return super().process_outputs(
@@ -650,6 +654,9 @@ class MultimodalOutputProcessor(VLLMOutputProcessor):
     def _process_mm_only_outputs(
         self,
         engine_core_outputs: list[EngineCoreOutput],
+        *,
+        engine_core_timestamp: float | None = None,
+        iteration_stats: IterationStats | None = None,
     ) -> None:
         """Handle outputs from generation stages that have no detokenizer.
 
@@ -666,7 +673,14 @@ class MultimodalOutputProcessor(VLLMOutputProcessor):
             stop_reason = eco.stop_reason
             kv_transfer_params = eco.kv_transfer_params
             routed_experts = eco.routed_experts
-            req_state.num_cached_tokens = eco.num_cached_tokens
+            self._update_stats_from_output(
+                req_state,
+                eco,
+                engine_core_timestamp,
+                iteration_stats,
+            )
+            if eco.prefill_stats is not None:
+                req_state.num_cached_tokens = eco.prefill_stats.num_cached_tokens
             req_state.is_prefilling = False
 
             if request_output := req_state.make_request_output(
@@ -682,6 +696,11 @@ class MultimodalOutputProcessor(VLLMOutputProcessor):
 
             if finish_reason is not None:
                 self._finish_request(req_state)
+                self._update_stats_from_finished(
+                    req_state,
+                    finish_reason,
+                    iteration_stats,
+                )
 
     def _update_stats_from_output(
         self,
