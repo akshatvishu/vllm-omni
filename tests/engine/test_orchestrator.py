@@ -14,6 +14,7 @@ import janus
 import pytest
 from vllm.outputs import CompletionOutput, RequestOutput
 from vllm.sampling_params import SamplingParams
+from vllm.v1.metrics.stats import IterationStats
 
 from vllm_omni.engine.messages import (
     AbortRequestMessage,
@@ -300,6 +301,7 @@ def _build_harness(
     output_processors: list[object] | None = None,
     stage_vllm_configs: list[object] | None = None,
     async_chunk: bool = False,
+    log_stats: bool = False,
     stage_pools: list[StagePool] | None = None,
 ) -> OrchestratorFixture:
     """Build an Orchestrator test harness.
@@ -335,6 +337,7 @@ def _build_harness(
                 rpc_async_queue=rpc_queue.async_q,
                 stage_pools=stage_pools,
                 async_chunk=async_chunk,
+                log_stats=log_stats,
             )
             ready_future.set_result((orchestrator, request_queue, output_queue, rpc_queue))
             await orchestrator.run()
@@ -1181,7 +1184,7 @@ async def test_orchestrator_records_iteration_stats_without_scheduler_stats(orch
     processor = IterationStatsOutputProcessor(
         request_outputs=[_build_request_output("req-stats", token_ids=[1], finished=True)]
     )
-    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor])
+    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor], log_stats=True)
     stat_logger = RecordingStatLogger()
     orchestrator_fixture.orchestrator._stat_logger = stat_logger
     request = SimpleNamespace(request_id="req-stats", prompt_token_ids=[1, 2])
@@ -1213,7 +1216,7 @@ async def test_orchestrator_records_iteration_stats_without_scheduler_stats(orch
 async def test_orchestrator_records_scheduler_stats_without_outputs(orchestrator_factory) -> None:
     stage0 = FakeStageClient(stage_type="llm", final_output=True)
     processor = RecordingOutputProcessor()
-    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor])
+    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor], log_stats=True)
     stat_logger = RecordingStatLogger()
     orchestrator_fixture.orchestrator._stat_logger = stat_logger
     scheduler_stats = SimpleNamespace(num_running_reqs=0, kv_cache_usage=0.5)
@@ -1238,6 +1241,65 @@ async def test_orchestrator_records_scheduler_stats_without_outputs(orchestrator
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_does_not_build_iteration_stats_for_finished_only_batch(orchestrator_factory) -> None:
+    stage0 = FakeStageClient(stage_type="llm", final_output=True)
+    processor = RecordingOutputProcessor()
+    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor], log_stats=True)
+    stat_logger = RecordingStatLogger()
+    orchestrator_fixture.orchestrator._stat_logger = stat_logger
+
+    try:
+        stage0.push_engine_core_outputs(
+            SimpleNamespace(
+                outputs=[],
+                timestamp=1.0,
+                scheduler_stats=None,
+                finished_requests={"req-finished"},
+            )
+        )
+
+        await _wait_for(lambda: bool(processor.process_calls))
+        assert processor.process_calls[0][0][2] is None
+        assert stat_logger.records == []
+    finally:
+        await _shutdown_orchestrator(orchestrator_fixture)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_builds_iteration_stats_from_log_stats_not_logger(orchestrator_factory) -> None:
+    stage0 = FakeStageClient(stage_type="llm", final_output=True)
+    processor = RecordingOutputProcessor()
+    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor], log_stats=True)
+    orchestrator_fixture.orchestrator._stat_logger = None
+
+    try:
+        stage0.push_engine_core_outputs(_engine_core_outputs("raw-output", 1.0))
+
+        await _wait_for(lambda: bool(processor.process_calls))
+        iteration_stats = processor.process_calls[0][0][2]
+        assert isinstance(iteration_stats, IterationStats)
+    finally:
+        await _shutdown_orchestrator(orchestrator_fixture)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_does_not_build_iteration_stats_from_logger_alone(orchestrator_factory) -> None:
+    stage0 = FakeStageClient(stage_type="llm", final_output=True)
+    processor = RecordingOutputProcessor()
+    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor], log_stats=False)
+    orchestrator_fixture.orchestrator._stat_logger = RecordingStatLogger()
+
+    try:
+        stage0.push_engine_core_outputs(_engine_core_outputs("raw-output", 1.0))
+
+        await _wait_for(lambda: bool(processor.process_calls))
+        assert processor.process_calls[0][0][2] is None
+        assert orchestrator_fixture.orchestrator._stat_logger.records == []
+    finally:
+        await _shutdown_orchestrator(orchestrator_fixture)
+
+
+@pytest.mark.asyncio
 async def test_stage_pool_preserves_none_iteration_stats() -> None:
     client = FakeStageClient(stage_type="llm", final_output=True)
     processor = RecordingOutputProcessor()
@@ -1252,3 +1314,21 @@ async def test_stage_pool_preserves_none_iteration_stats() -> None:
     await pool.process_llm_raw_outputs(0, raw_outputs, iteration_stats=None)
 
     assert processor.process_calls[0][0][2] is None
+
+
+@pytest.mark.asyncio
+async def test_stage_pool_process_llm_raw_outputs_mutates_iteration_stats() -> None:
+    client = FakeStageClient(stage_type="llm", final_output=True)
+    processor = IterationStatsOutputProcessor()
+    pool = StagePool(
+        0,
+        [client],
+        output_processor=processor,
+        stage_vllm_config=SimpleNamespace(model_config=SimpleNamespace(max_model_len=64)),
+    )
+    raw_outputs = SimpleNamespace(outputs=["raw"], timestamp=1.0, scheduler_stats=None)
+    iteration_stats = IterationStats()
+
+    await pool.process_llm_raw_outputs(0, raw_outputs, iteration_stats=iteration_stats)
+
+    assert iteration_stats.num_generation_tokens == 3
