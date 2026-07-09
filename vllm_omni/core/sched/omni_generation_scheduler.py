@@ -60,8 +60,11 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
     def _record_prefill_stats(request: Request) -> None:
         """Mirror upstream first-prefill prompt accounting for generation stages.
 
-        Keep this in sync with vLLM Scheduler.schedule() if this fast path gains
-        prefix-cache or external-KV accounting.
+        Async-chunk generation stages can grow ``prompt_token_ids`` after the
+        first schedule; until this path tracks final chunk lengths, this records
+        the first scheduled prompt snapshot. Keep this in sync with vLLM
+        Scheduler.schedule() if this fast path gains prefix-cache or external-KV
+        accounting.
         """
         if request.prefill_stats is None:
             return
@@ -213,7 +216,8 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
             self.running.append(request)
             if self.log_stats:
                 request.record_event(EngineCoreEventType.SCHEDULED, scheduled_timestamp)
-            self._record_prefill_stats(request)
+            if request.num_computed_tokens == 0:
+                self._record_prefill_stats(request)
 
             req_to_new_blocks[request.request_id] = new_blocks
             num_scheduled_tokens[request.request_id] = num_new_tokens
