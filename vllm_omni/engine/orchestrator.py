@@ -231,6 +231,7 @@ class Orchestrator:
         self.async_chunk = bool(async_chunk)
         self.num_stages = len(stage_pools)
         self.stage_pools: list[StagePool] = stage_pools
+        self.log_stats = log_stats
         self._orch_monitor = create_orch_monitor(
             enabled=enable_orch_monitor,
             replica_sampler=self._sample_replica_metrics,
@@ -696,9 +697,7 @@ class Orchestrator:
                                 )
                                 if req_state.streaming.enabled:
                                     await self._apply_raw_terminal_stage_finish(stage_id, eco, req_state)
-                            iteration_stats = (
-                                IterationStats() if (self._stat_logger is not None and raw_outputs.outputs) else None
-                            )
+                            iteration_stats = IterationStats() if (self.log_stats and raw_outputs.outputs) else None
                             raw_output = await pool.process_llm_raw_outputs(
                                 replica_id,
                                 raw_outputs,
