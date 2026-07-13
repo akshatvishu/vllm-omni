@@ -9,8 +9,8 @@ FROM ${BASE_IMAGE} AS base
 # 2. Whenever vLLM upstream has released a stable version,
 #    we should swap over to use stable release ASAP.
 #    We should avoid relying on custom commits.
-ARG USE_NIGHTLY_BUILD=0
-ARG VLLM_VERSION_OR_COMMIT_HASH=89138b21cc246ae944c741d5c399c148e2b770ab
+ARG USE_NIGHTLY_BUILD=1
+ARG VLLM_VERSION_OR_COMMIT_HASH=v0.25.0
 ARG ARG_PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH=${ARG_PYTORCH_ROCM_ARCH:-${PYTORCH_ROCM_ARCH}}
 
