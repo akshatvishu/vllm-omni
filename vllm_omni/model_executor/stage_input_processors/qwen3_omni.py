@@ -653,6 +653,7 @@ def thinker2talker_token_only(
         thinker_input_ids = prompt_token_ids
         info_for_len = {"ids": {"all": thinker_sequences, "prompt": thinker_input_ids}}
         prompt_len = _compute_talker_prompt_ids_length(info_for_len, device="cpu")
+        # Keep this fallback until the connector reliably preserves voice metadata.
         additional_information = to_dict(
             OmniPayloadStruct(
                 speaker=extract_speaker_from_prompt(prompt, index=i),
