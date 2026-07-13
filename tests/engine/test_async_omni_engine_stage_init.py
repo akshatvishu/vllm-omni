@@ -635,10 +635,11 @@ def test_initialize_local_llm_replica_passes_stage_init_timeout_to_complete_stag
         stage_configs=[],
         model="dummy-model",
         config_path="dummy-config",
-        stage_init_timeout=302,
+        stage_init_timeout=1,
         diffusion_batch_size=1,
         async_chunk=False,
     )
+    stage_init_timeout = 302
 
     fake_vllm_config = types.SimpleNamespace()
     fake_addresses = types.SimpleNamespace(inputs=["in"], outputs=["out"], frontend_stats_publish_address=None)
@@ -685,14 +686,14 @@ def test_initialize_local_llm_replica_passes_stage_init_timeout_to_complete_stag
     )
 
     try:
-        runtime._initialize_local_llm_replica(plan, 302)
+        runtime._initialize_local_llm_replica(plan, stage_init_timeout)
     finally:
         if prev_device_env is None:
             os.environ.pop(device_env_var, None)
         else:
             os.environ[device_env_var] = prev_device_env
 
-    assert captured_timeout == 302
+    assert captured_timeout == stage_init_timeout
 
 
 def test_build_engine_args_cli_tokenizer_overrides_inferred_base_tokenizer(tmp_path):
