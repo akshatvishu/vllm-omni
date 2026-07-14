@@ -20,7 +20,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cache_dit_backend import CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.data import DiffusionParallelConfig, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
@@ -577,7 +577,7 @@ class LongCatImageSingleTransformerBlock(nn.Module):
         return encoder_hidden_states, hidden_states
 
 
-class LongCatImageTransformer2DModel(nn.Module):
+class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
     """
     The Transformer model introduced in Flux.
 
