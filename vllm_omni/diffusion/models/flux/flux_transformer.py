@@ -27,7 +27,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.quantization.component_config import safe_quant_config
 
 if TYPE_CHECKING:
@@ -479,7 +479,7 @@ class FluxPosEmbed(nn.Module):
         return freqs_cos, freqs_sin
 
 
-class FluxTransformer2DModel(nn.Module):
+class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
     """
     The Transformer model introduced in Flux.
 

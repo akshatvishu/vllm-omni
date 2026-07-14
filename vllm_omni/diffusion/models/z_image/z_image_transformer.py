@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.base import CachedTransformer
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
     SequenceParallelOutput,
@@ -591,7 +591,7 @@ class RopeEmbedder:
         return torch.cat(cos_result, dim=-1), torch.cat(sin_result, dim=-1)
 
 
-class ZImageTransformer2DModel(CachedTransformer):
+class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
     """Z-Image Transformer model for image generation.
 
     Sequence Parallelism:

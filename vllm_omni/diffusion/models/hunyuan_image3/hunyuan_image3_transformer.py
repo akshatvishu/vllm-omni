@@ -61,6 +61,7 @@ from vllm_omni.diffusion.attention.backends.abstract import (
 )
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.distributed.parallel_state import (
     get_allgather_parallel_world_size,
     get_cfg_group,
@@ -2016,7 +2017,7 @@ class HunyuanImagePostprocessor(nn.Module):
         return x
 
 
-class HunyuanImage3Model(nn.Module):
+class HunyuanImage3Model(nn.Module, SupportsTeaCache):
     _cache_dit_adapter_config = CacheDiTAdapterConfig(
         block_forward_patterns={
             "layers": ForwardPattern.Pattern_4,
@@ -2359,6 +2360,19 @@ class HunyuanImage3Model(nn.Module):
         text_output = x[:, 0:text_prompt_len, :].contiguous()
         image_output = x[:, text_prompt_len:, :].contiguous()
         return text_output, image_output
+
+    # SupportsTeaCache protocol stubs
+    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
+        raise NotImplementedError
+
+    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
+        raise NotImplementedError
+
+    def postprocess(self, ctx: ForwardState) -> BaseModelOutputWithPast:
+        raise NotImplementedError
+
+    def get_teacache_coefficients(self) -> list[float]:
+        return [1.04117826e02, -1.26848482e02, 5.68168652e01, -1.04182570e01, 6.78098549e-01]
 
     def forward(
         self,

@@ -37,7 +37,7 @@ from vllm_omni.diffusion.attention.backends.abstract import (
 )
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.base import CachedTransformer
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
 from vllm_omni.diffusion.distributed.sp_plan import (
@@ -902,7 +902,7 @@ class QwenImageTransformerBlock(nn.Module):
 
 
 # Note: inheriting from CachedTransformer only when we support caching
-class QwenImageTransformer2DModel(CachedTransformer):
+class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
     """
     The Transformer model introduced in Qwen.
 

@@ -33,7 +33,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig, SensenovaCachedAdapter
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 
 logger = init_logger(__name__)
 
@@ -729,7 +729,7 @@ class SenseNovaU1Model(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-class SenseNovaU1ForCausalLM(nn.Module):
+class SenseNovaU1ForCausalLM(nn.Module, SupportsTeaCache):
     def __init__(self, config, quant_config=None, prefix: str = ""):
         super().__init__()
         self.config = config
