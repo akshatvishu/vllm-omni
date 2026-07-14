@@ -9,10 +9,34 @@ import torch
 from vllm_omni.diffusion.cache.teacache.backend import TeaCacheBackend
 from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.data import DiffusionCacheConfig
+from vllm_omni.diffusion.models.bagel.bagel_transformer import Bagel
+from vllm_omni.diffusion.models.flux.flux_transformer import FluxTransformer2DModel
+from vllm_omni.diffusion.models.flux2.flux2_transformer import Flux2Transformer2DModel
+from vllm_omni.diffusion.models.flux2_klein.flux2_klein_transformer import (
+    Flux2Transformer2DModel as Flux2KleinTransformer2DModel,
+)
+from vllm_omni.diffusion.models.longcat_image.longcat_image_transformer import LongCatImageTransformer2DModel
+from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import QwenImageTransformer2DModel
+from vllm_omni.diffusion.models.sensenova_u1.sensenova_u1_transformer import SenseNovaU1ForCausalLM
+from vllm_omni.diffusion.models.stable_audio.stable_audio_transformer import StableAudioDiTModel
+from vllm_omni.diffusion.models.z_image.z_image_transformer import ZImageTransformer2DModel
 
 pytestmark = [pytest.mark.core_model]
 
 MOCK_COEFFICIENTS = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+
+TEACACHE_TRANSFORMER_CLASSES = [
+    FluxTransformer2DModel,
+    Flux2Transformer2DModel,
+    Flux2KleinTransformer2DModel,
+    QwenImageTransformer2DModel,
+    LongCatImageTransformer2DModel,
+    ZImageTransformer2DModel,
+    StableAudioDiTModel,
+    Bagel,
+    SenseNovaU1ForCausalLM,
+]
 
 
 class FakePipeline:
@@ -81,3 +105,9 @@ def test_backend_raises_for_non_protocol_model():
     backend = TeaCacheBackend(DiffusionCacheConfig())
     with pytest.raises(TypeError):
         backend.enable(pipeline)
+
+
+@pytest.mark.parametrize("cls", TEACACHE_TRANSFORMER_CLASSES, ids=lambda c: c.__name__)
+def test_transformer_implements_protocol(cls):
+    """Ensure classes being migrated support teacache protocol."""
+    assert issubclass(cls, SupportsTeaCache)
