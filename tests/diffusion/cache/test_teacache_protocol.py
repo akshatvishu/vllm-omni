@@ -38,6 +38,76 @@ TEACACHE_TRANSFORMER_CLASSES = [
     SenseNovaU1ForCausalLM,
 ]
 
+# TODO - handle HunyuanImage3, which has a hackier approach
+MODEL_COEFFICIENTS = {
+    # FLUX transformer coefficients from TeaCache paper
+    FluxTransformer2DModel: [
+        4.98651651e02,
+        -2.83781631e02,
+        5.58554382e01,
+        -3.82021401e00,
+        2.64230861e-01,
+    ],
+    # Flux2 Klein transformer coefficients
+    # Same as FLUX.1 (similar dual-stream architecture)
+    Flux2KleinTransformer2DModel: [
+        4.98651651e02,
+        -2.83781631e02,
+        5.58554382e01,
+        -3.82021401e00,
+        2.64230861e-01,
+    ],
+    # Qwen-Image transformer coefficients from ComfyUI-TeaCache
+    # Tuned specifically for Qwen's dual-stream transformer architecture
+    # Used for all Qwen-Image Family pipelines, in general
+    QwenImageTransformer2DModel: [
+        -4.50000000e02,
+        2.80000000e02,
+        -4.50000000e01,
+        3.20000000e00,
+        -2.00000000e-02,
+    ],
+    # Bagel transformer coefficients
+    # Using Qwen's coefficients as reasonable default given shared architecture
+    Bagel: [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00],
+    # SenseNova-U1 transformer coefficients
+    SenseNovaU1ForCausalLM: [
+        9.07281930e04,
+        -2.17699186e04,
+        1.83940990e03,
+        -6.30339273e01,
+        7.61309272e-01,
+    ],
+    # Z-Image transformer coefficients
+    # Copied from Qwen-Image, need to be tuned specifically for Z-Image in future
+    ZImageTransformer2DModel: [
+        -4.50000000e02,
+        2.80000000e02,
+        -4.50000000e01,
+        3.20000000e00,
+        -2.00000000e-02,
+    ],
+    # Estimated TeaCache polynomial coefficients for StableAudioDiTModel.
+    StableAudioDiTModel: [
+        121.77490545701518,
+        -153.7449426160371,
+        68.05368574596551,
+        -12.281286412689623,
+        1.0733905006198015,
+    ],
+    # Flux2 transformer coefficients
+    # Copied from Qwen-Image, need to be tuned specifically for Flux2 in future
+    Flux2Transformer2DModel: [
+        -4.50000000e02,
+        2.80000000e02,
+        -4.50000000e01,
+        3.20000000e00,
+        -2.00000000e-02,
+    ],
+    # LongCat Image transformer coefficients
+    LongCatImageTransformer2DModel: [652.5980, -424.1615, 84.5526, -4.5923, 0.1694],
+}
+
 
 class FakePipeline:
     def __init__(self, transformer):
@@ -111,3 +181,12 @@ def test_backend_raises_for_non_protocol_model():
 def test_transformer_implements_protocol(cls):
     """Ensure classes being migrated support teacache protocol."""
     assert issubclass(cls, SupportsTeaCache)
+
+
+@pytest.mark.parametrize("cls", TEACACHE_TRANSFORMER_CLASSES, ids=lambda c: c.__name__)
+def test_model_coefficients_match(cls):
+    """Ensure each model's get_teacache_coefficients matches expected values."""
+    expected = MODEL_COEFFICIENTS[cls]
+    actual = cls.get_teacache_coefficients(None)
+    assert actual == expected, f"{cls.__name__} coefficients mismatch"
+    assert len(actual) == 5

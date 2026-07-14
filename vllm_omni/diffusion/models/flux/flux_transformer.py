@@ -622,7 +622,7 @@ class FluxTransformer2DModel(nn.Module):
         raise NotImplementedError
 
     def get_teacache_coefficients(self) -> list[float]:
-        raise NotImplementedError
+        return [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01]
 
     def forward(
         self,

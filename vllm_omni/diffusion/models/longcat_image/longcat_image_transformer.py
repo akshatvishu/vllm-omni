@@ -685,7 +685,7 @@ class LongCatImageTransformer2DModel(nn.Module):
         raise NotImplementedError
 
     def get_teacache_coefficients(self) -> list[float]:
-        raise NotImplementedError
+        return [652.5980, -424.1615, 84.5526, -4.5923, 0.1694]
 
     def forward(
         self,
