@@ -2388,7 +2388,7 @@ class Bagel(CFGParallelMixin, nn.Module):
         raise NotImplementedError
 
     def get_teacache_coefficients(self) -> list[float]:
-        raise NotImplementedError
+        return [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00]
 
     def forward(
         self,

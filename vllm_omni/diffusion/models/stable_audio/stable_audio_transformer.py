@@ -593,7 +593,7 @@ class StableAudioDiTModel(nn.Module):
         raise NotImplementedError
 
     def get_teacache_coefficients(self) -> list[float]:
-        raise NotImplementedError
+        return [121.77490545701518, -153.7449426160371, 68.05368574596551, -12.281286412689623, 1.0733905006198015]
 
     def forward(
         self,

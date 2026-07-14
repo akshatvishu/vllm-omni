@@ -751,7 +751,7 @@ class SenseNovaU1ForCausalLM(nn.Module):
         raise NotImplementedError
 
     def get_teacache_coefficients(self) -> list[float]:
-        raise NotImplementedError
+        return [9.07281930e04, -2.17699186e04, 1.83940990e03, -6.30339273e01, 7.61309272e-01]
 
     def forward(
         self,
