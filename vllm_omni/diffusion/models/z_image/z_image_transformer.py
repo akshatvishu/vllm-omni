@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.base import CachedTransformer
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
     SequenceParallelOutput,
@@ -923,6 +924,19 @@ class ZImageTransformer2DModel(CachedTransformer):
             all_image_pad_mask,
             all_cap_pad_mask,
         )
+
+    # SupportsTeaCache protocol stubs
+    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
+        raise NotImplementedError
+
+    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
+        raise NotImplementedError
+
+    def postprocess(self, ctx: ForwardState) -> tuple[torch.Tensor, dict]:
+        raise NotImplementedError
+
+    def get_teacache_coefficients(self) -> list[float]:
+        raise NotImplementedError
 
     def forward(
         self,

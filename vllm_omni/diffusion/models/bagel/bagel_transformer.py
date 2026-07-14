@@ -38,6 +38,7 @@ from vllm.transformers_utils.configs.bagel import BagelConfig
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata as DiffusionAttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention as DiffusionAttention
 from vllm_omni.diffusion.cache.cachedit import BagelCachedAdapter, CacheDiTAdapterConfig
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState
 from vllm_omni.diffusion.data import DiffusionParallelConfig
 from vllm_omni.diffusion.distributed.cfg_parallel import CFGParallelMixin
 from vllm_omni.diffusion.distributed.parallel_state import (
@@ -2375,6 +2376,19 @@ class Bagel(CFGParallelMixin, nn.Module):
         v_t = self.llm2vae(output.packed_query_sequence)
         v_t = v_t[packed_vae_token_indexes]
         return v_t
+
+    # SupportsTeaCache protocol stubs
+    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
+        raise NotImplementedError
+
+    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
+        raise NotImplementedError
+
+    def postprocess(self, ctx: ForwardState) -> torch.Tensor:
+        raise NotImplementedError
+
+    def get_teacache_coefficients(self) -> list[float]:
+        raise NotImplementedError
 
     def forward(
         self,
