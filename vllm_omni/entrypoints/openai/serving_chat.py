@@ -1906,8 +1906,6 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
                         req_state.first_audio_ts = now_ts
                         replica_id = getattr(omni_res, "replica_id", None)
                         if replica_id is None:
-                            replica_id = req_state.audio_emit_replica_id
-                        if replica_id is None:
                             stage_pools = getattr(self.engine_client.engine, "stage_pools", None)
                             # Fallback for older outputs. The orchestrator binds
                             # requests by internal id, but can release that

@@ -697,7 +697,9 @@ class Orchestrator:
                                 )
                                 if req_state.streaming.enabled:
                                     await self._apply_raw_terminal_stage_finish(stage_id, eco, req_state)
-                            iteration_stats = IterationStats() if (self.log_stats and raw_outputs.outputs) else None
+                            iteration_stats = (
+                                IterationStats() if (self._stat_logger is not None and raw_outputs.outputs) else None
+                            )
                             raw_output = await pool.process_llm_raw_outputs(
                                 replica_id,
                                 raw_outputs,

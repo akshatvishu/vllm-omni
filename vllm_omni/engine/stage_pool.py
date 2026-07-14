@@ -1059,11 +1059,7 @@ class StagePool:
         # upstream by emitting SchedulerStats on throttled ticks even when no
         # request output is produced, and dropping those batches loses KV/queue
         # gauges for that interval.
-        if (
-            not outputs.outputs
-            and getattr(outputs, "scheduler_stats", None) is None
-            and not getattr(outputs, "finished_requests", None)
-        ):
+        if not outputs.outputs and outputs.scheduler_stats is None and not outputs.finished_requests:
             return None
         return outputs
 

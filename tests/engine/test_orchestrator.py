@@ -89,7 +89,7 @@ class FakeStageClient:
         try:
             return self._engine_core_outputs.get_nowait()
         except queue.Empty:
-            return SimpleNamespace(outputs=[])
+            return SimpleNamespace(outputs=[], scheduler_stats=None, finished_requests=None)
 
     def get_diffusion_output_nowait(self):
         try:
@@ -230,7 +230,7 @@ def _sampling_params(max_tokens: int = 4) -> SamplingParams:
 
 
 def _engine_core_outputs(tag: str, timestamp: float) -> SimpleNamespace:
-    return SimpleNamespace(outputs=[tag], timestamp=timestamp, scheduler_stats=None)
+    return SimpleNamespace(outputs=[tag], timestamp=timestamp, scheduler_stats=None, finished_requests=None)
 
 
 def _build_request_output(
@@ -1227,6 +1227,7 @@ async def test_orchestrator_records_scheduler_stats_without_outputs(orchestrator
                 outputs=[],
                 timestamp=1.0,
                 scheduler_stats=scheduler_stats,
+                finished_requests=None,
             )
         )
 
@@ -1266,7 +1267,7 @@ async def test_orchestrator_does_not_build_iteration_stats_for_finished_only_bat
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_builds_iteration_stats_from_log_stats_not_logger(orchestrator_factory) -> None:
+async def test_orchestrator_does_not_build_iteration_stats_without_stat_logger(orchestrator_factory) -> None:
     stage0 = FakeStageClient(stage_type="llm", final_output=True)
     processor = RecordingOutputProcessor()
     orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor], log_stats=True)
@@ -1276,25 +1277,7 @@ async def test_orchestrator_builds_iteration_stats_from_log_stats_not_logger(orc
         stage0.push_engine_core_outputs(_engine_core_outputs("raw-output", 1.0))
 
         await _wait_for(lambda: bool(processor.process_calls))
-        iteration_stats = processor.process_calls[0][0][2]
-        assert isinstance(iteration_stats, IterationStats)
-    finally:
-        await _shutdown_orchestrator(orchestrator_fixture)
-
-
-@pytest.mark.asyncio
-async def test_orchestrator_does_not_build_iteration_stats_from_logger_alone(orchestrator_factory) -> None:
-    stage0 = FakeStageClient(stage_type="llm", final_output=True)
-    processor = RecordingOutputProcessor()
-    orchestrator_fixture = orchestrator_factory([stage0], output_processors=[processor], log_stats=False)
-    orchestrator_fixture.orchestrator._stat_logger = RecordingStatLogger()
-
-    try:
-        stage0.push_engine_core_outputs(_engine_core_outputs("raw-output", 1.0))
-
-        await _wait_for(lambda: bool(processor.process_calls))
         assert processor.process_calls[0][0][2] is None
-        assert orchestrator_fixture.orchestrator._stat_logger.records == []
     finally:
         await _shutdown_orchestrator(orchestrator_fixture)
 

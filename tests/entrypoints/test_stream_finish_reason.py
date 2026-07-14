@@ -341,9 +341,21 @@ async def test_single_modality_audio_only_one_stop():
     assert finish_reasons[-1] == "stop"
 
 
+@pytest.mark.parametrize(
+    ("output_replica_id", "pool_replica_id", "expected_replica_id", "pool_lookup"),
+    [
+        (7, None, 7, False),
+        (None, 5, 5, True),
+    ],
+)
 @pytest.mark.asyncio
-async def test_streaming_audio_metrics_use_output_replica_after_binding_release(monkeypatch):
-    """Audio metrics should use OutputMessage.replica_id after binding cleanup."""
+async def test_streaming_audio_metrics_resolve_replica_id(
+    monkeypatch,
+    output_replica_id,
+    pool_replica_id,
+    expected_replica_id,
+    pool_lookup,
+):
     import vllm_omni.entrypoints.openai.serving_chat as serving_chat_mod
     from vllm_omni.entrypoints.client_request_state import ClientRequestState
 
@@ -358,7 +370,7 @@ async def test_streaming_audio_metrics_use_output_replica_after_binding_release(
     serving_chat.engine_client.mod_metrics = object()
     serving_chat.engine_client.engine = MagicMock()
     serving_chat.engine_client.engine.stage_pools = [MagicMock(), MagicMock(), MagicMock()]
-    serving_chat.engine_client.engine.stage_pools[2].get_bound_replica_id.return_value = None
+    serving_chat.engine_client.engine.stage_pools[2].get_bound_replica_id.return_value = pool_replica_id
 
     first_packet_calls = []
     finalize_calls = []
@@ -373,7 +385,7 @@ async def test_streaming_audio_metrics_use_output_replica_after_binding_release(
     monkeypatch.setattr(serving_chat_mod, "observe_audio_streaming_finalize", fake_observe_audio_streaming_finalize)
 
     async def result_generator():
-        yield _make_audio_omni_output(stage_id=2, replica_id=7, audio_samples=2400)
+        yield _make_audio_omni_output(stage_id=2, replica_id=output_replica_id, audio_samples=2400)
 
     await _collect_stream(
         serving_chat.chat_completion_stream_generator(
@@ -387,11 +399,14 @@ async def test_streaming_audio_metrics_use_output_replica_after_binding_release(
         )
     )
 
-    serving_chat.engine_client.engine.stage_pools[2].get_bound_replica_id.assert_not_called()
+    if pool_lookup:
+        serving_chat.engine_client.engine.stage_pools[2].get_bound_replica_id.assert_called_once_with("internal-req")
+    else:
+        serving_chat.engine_client.engine.stage_pools[2].get_bound_replica_id.assert_not_called()
     assert first_packet_calls[0]["stage_id"] == 2
-    assert first_packet_calls[0]["replica_id"] == 7
+    assert first_packet_calls[0]["replica_id"] == expected_replica_id
     assert finalize_calls[0]["stage_id"] == 2
-    assert finalize_calls[0]["replica_id"] == 7
+    assert finalize_calls[0]["replica_id"] == expected_replica_id
 
 
 # ---------------------------------------------------------------------------
