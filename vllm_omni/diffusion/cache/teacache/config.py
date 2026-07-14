@@ -6,9 +6,8 @@ from dataclasses import dataclass
 # Model-specific polynomial coefficients for rescaling L1 distances
 # These coefficients account for model-specific characteristics in how embeddings change
 # Source: TeaCache paper and ComfyUI-TeaCache empirical tuning
-# Legacy coefficient registry — only used for models that don't implement
-# SupportsTeaCache (i.e., HunyuanImage3 which bypasses the hook system).
-# All other models provide coefficients via get_teacache_coefficients().
+
+# TODO - need to move hunyuan image out of this path and onto the hook approach
 _MODEL_COEFFICIENTS = {
     "HunyuanImage3Pipeline": [
         1.04117826e02,

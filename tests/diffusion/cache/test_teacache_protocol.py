@@ -15,6 +15,7 @@ from vllm_omni.diffusion.models.flux2.flux2_transformer import Flux2Transformer2
 from vllm_omni.diffusion.models.flux2_klein.flux2_klein_transformer import (
     Flux2Transformer2DModel as Flux2KleinTransformer2DModel,
 )
+from vllm_omni.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import HunyuanImage3Model
 from vllm_omni.diffusion.models.longcat_image.longcat_image_transformer import LongCatImageTransformer2DModel
 from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import QwenImageTransformer2DModel
 from vllm_omni.diffusion.models.sensenova_u1.sensenova_u1_transformer import SenseNovaU1ForCausalLM
@@ -36,9 +37,9 @@ TEACACHE_TRANSFORMER_CLASSES = [
     StableAudioDiTModel,
     Bagel,
     SenseNovaU1ForCausalLM,
+    HunyuanImage3Model,
 ]
 
-# TODO - handle HunyuanImage3, which has a hackier approach
 MODEL_COEFFICIENTS = {
     # FLUX transformer coefficients from TeaCache paper
     FluxTransformer2DModel: [
@@ -106,6 +107,9 @@ MODEL_COEFFICIENTS = {
     ],
     # LongCat Image transformer coefficients
     LongCatImageTransformer2DModel: [652.5980, -424.1615, 84.5526, -4.5923, 0.1694],
+    # HunyuanImage3 coefficients
+    # Calibrated via polyfit on 3920 data points (80 prompts x 49 steps)
+    HunyuanImage3Model: [1.04117826e02, -1.26848482e02, 5.68168652e01, -1.04182570e01, 6.78098549e-01],
 }
 
 
