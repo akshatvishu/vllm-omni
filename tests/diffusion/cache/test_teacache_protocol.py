@@ -5,10 +5,18 @@ from unittest.mock import patch
 
 import pytest
 import torch
+from vllm.config import VllmConfig, set_current_vllm_config
 
+from tests.helpers.mark import hardware_test
 from vllm_omni.diffusion.cache.teacache.backend import TeaCacheBackend
 from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
-from vllm_omni.diffusion.data import DiffusionCacheConfig
+from vllm_omni.diffusion.data import DiffusionCacheConfig, OmniDiffusionConfig
+from vllm_omni.diffusion.distributed.parallel_state import (
+    destroy_distributed_environment,
+    init_distributed_environment,
+    initialize_model_parallel,
+)
+from vllm_omni.diffusion.forward_context import set_forward_context
 from vllm_omni.diffusion.models.bagel.bagel_transformer import Bagel
 from vllm_omni.diffusion.models.flux.flux_transformer import FluxTransformer2DModel
 from vllm_omni.diffusion.models.flux2.flux2_transformer import Flux2Transformer2DModel
@@ -194,3 +202,212 @@ def test_model_coefficients_match(cls):
     actual = cls.get_teacache_coefficients(None)
     assert actual == expected, f"{cls.__name__} coefficients mismatch"
     assert len(actual) == 5
+
+
+# ---------------------------------------------------------------------------
+# Forward decomposition equivalence tests
+# ---------------------------------------------------------------------------
+
+
+def _assert_tensors_equal(a: torch.Tensor, b: torch.Tensor):
+    """Assert two tensors are bitwise equal, handling NaN (random weights produce NaN)."""
+    assert a.shape == b.shape
+    nan_match = torch.isnan(a) == torch.isnan(b)
+    finite_match = torch.where(torch.isnan(a), True, a == b)
+    assert nan_match.all() and finite_match.all()
+
+
+@pytest.fixture(scope="module")
+def distributed_env():
+    """Single-process distributed environment for TP-aware layers."""
+    import os
+
+    env_vars = {"MASTER_ADDR": "127.0.0.1", "MASTER_PORT": "29500", "WORLD_SIZE": "1", "RANK": "0", "LOCAL_RANK": "0"}
+    old = {k: os.environ.get(k) for k in env_vars}
+    os.environ.update(env_vars)
+    init_distributed_environment()
+    initialize_model_parallel()
+    yield
+    destroy_distributed_environment()
+    for k, v in old.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+
+def _make_flux():
+    model = FluxTransformer2DModel(
+        num_layers=2,
+        num_single_layers=2,
+        num_attention_heads=2,
+        attention_head_dim=16,
+        joint_attention_dim=32,
+        pooled_projection_dim=16,
+        axes_dims_rope=(4, 4, 8),
+    )
+    inputs = {
+        "hidden_states": torch.randn(1, 16, 64, device="cuda"),
+        "encoder_hidden_states": torch.randn(1, 8, 32, device="cuda"),
+        "pooled_projections": torch.randn(1, 16, device="cuda"),
+        "timestep": torch.tensor([500], device="cuda"),
+        "img_ids": torch.randint(0, 64, (1, 16, 3), device="cuda"),
+        "txt_ids": torch.randint(0, 64, (1, 8, 3), device="cuda"),
+        "guidance": torch.tensor([3.5], device="cuda"),
+    }
+    return model, inputs
+
+
+def _make_flux2():
+    model = Flux2Transformer2DModel(
+        num_layers=2,
+        num_single_layers=2,
+        num_attention_heads=48,
+        attention_head_dim=128,
+        joint_attention_dim=15360,
+    )
+    inputs = {
+        "hidden_states": torch.randn(1, 64, 128, device="cuda"),
+        "encoder_hidden_states": torch.randn(1, 32, 15360, device="cuda"),
+        "timestep": torch.tensor([500], device="cuda"),
+        "img_ids": torch.randint(0, 64, (1, 64, 4), device="cuda"),
+        "txt_ids": torch.randint(0, 64, (1, 32, 4), device="cuda"),
+        "guidance": torch.tensor([3.5], device="cuda"),
+    }
+    return model, inputs
+
+
+def _make_flux2_klein():
+    model = Flux2KleinTransformer2DModel(
+        num_layers=2,
+        num_single_layers=2,
+        num_attention_heads=48,
+        attention_head_dim=128,
+        joint_attention_dim=15360,
+    )
+    inputs = {
+        "hidden_states": torch.randn(1, 64, 128, device="cuda"),
+        "encoder_hidden_states": torch.randn(1, 32, 15360, device="cuda"),
+        "timestep": torch.tensor([500], device="cuda"),
+        "img_ids": torch.randint(0, 64, (1, 64, 4), device="cuda"),
+        "txt_ids": torch.randint(0, 64, (1, 32, 4), device="cuda"),
+        "guidance": torch.tensor([3.5], device="cuda"),
+    }
+    return model, inputs
+
+
+def _make_stable_audio():
+    model = StableAudioDiTModel(
+        sample_size=64,
+        in_channels=64,
+        num_layers=2,
+        attention_head_dim=64,
+        num_attention_heads=4,
+        num_key_value_attention_heads=2,
+        out_channels=64,
+        cross_attention_dim=32,
+        time_proj_dim=16,
+        global_states_input_dim=32,
+        cross_attention_input_dim=32,
+    )
+    inputs = {
+        "hidden_states": torch.randn(1, 64, 16, device="cuda"),
+        "timestep": torch.tensor([0.5], device="cuda"),
+        "encoder_hidden_states": torch.randn(1, 8, 32, device="cuda"),
+        "global_hidden_states": torch.randn(1, 32, device="cuda"),
+        "rotary_embedding": (
+            torch.randn(16 + 1, 32, device="cuda"),
+            torch.randn(16 + 1, 32, device="cuda"),
+        ),
+    }
+    return model, inputs
+
+
+def _make_longcat():
+    from vllm_omni.diffusion.data import TransformerConfig
+
+    tf_config = TransformerConfig(
+        params={
+            "patch_size": 1,
+            "in_channels": 64,
+            "num_layers": 2,
+            "num_single_layers": 2,
+            "attention_head_dim": 16,
+            "num_attention_heads": 2,
+            "joint_attention_dim": 32,
+            "pooled_projection_dim": 16,
+            "axes_dims_rope": [4, 4, 8],
+        }
+    )
+    od = OmniDiffusionConfig(tf_model_config=tf_config)
+    with set_current_vllm_config(VllmConfig()):
+        model = LongCatImageTransformer2DModel(od)
+    inputs = {
+        "hidden_states": torch.randn(1, 16, 64, device="cuda"),
+        "timestep": torch.tensor([500.0], device="cuda"),
+        "guidance": torch.tensor([3.5], device="cuda"),
+        "encoder_hidden_states": torch.randn(1, 8, 32, device="cuda"),
+        "txt_ids": torch.randint(0, 64, (8, 3), device="cuda"),
+        "img_ids": torch.randint(0, 64, (16, 3), device="cuda"),
+    }
+    return model, inputs
+
+
+def _make_qwen():
+    with set_current_vllm_config(VllmConfig()):
+        model = QwenImageTransformer2DModel(
+            OmniDiffusionConfig(),
+            num_layers=2,
+            num_attention_heads=2,
+            attention_head_dim=16,
+            joint_attention_dim=32,
+            in_channels=64,
+            out_channels=16,
+            axes_dims_rope=(4, 4, 8),
+        )
+    inputs = {
+        "hidden_states": torch.randn(1, 16, 64, device="cuda"),
+        "timestep": torch.tensor([500.0], device="cuda"),
+        "encoder_hidden_states": torch.randn(1, 8, 32, device="cuda"),
+        "img_shapes": [(1, 4, 4)],
+        "txt_seq_lens": [8],
+    }
+    return model, inputs
+
+
+EQUIVALENCE_MODELS = {
+    "Flux": _make_flux,
+    "Flux2": _make_flux2,
+    "Flux2Klein": _make_flux2_klein,
+    "StableAudio": _make_stable_audio,
+    "LongCat": _make_longcat,
+    "Qwen": _make_qwen,
+    # TODO: ZImage (complex patchification), Bagel, SenseNova, HunyuanImage3
+}
+
+
+@hardware_test(res={"cuda": "L4"}, num_cards=1)
+@pytest.mark.parametrize("model_name", EQUIVALENCE_MODELS.keys())
+def test_decomposition_matches_original(distributed_env, model_name):
+    """Cache-disabled path: forward() == _original_forward()."""
+    model, inputs = EQUIVALENCE_MODELS[model_name]()
+    model = model.cuda().eval()
+    with set_forward_context(omni_diffusion_config=OmniDiffusionConfig()):
+        original = model._original_forward(**inputs)
+        new = model.forward(**inputs)
+    _assert_tensors_equal(original.sample, new.sample)
+
+
+@hardware_test(res={"cuda": "L4"}, num_cards=1)
+@pytest.mark.parametrize("model_name", EQUIVALENCE_MODELS.keys())
+def test_protocol_path_matches_original(distributed_env, model_name):
+    """Cache-enabled path: preprocess -> blocks -> postprocess == _original_forward()."""
+    model, inputs = EQUIVALENCE_MODELS[model_name]()
+    model = model.cuda().eval()
+    with set_forward_context(omni_diffusion_config=OmniDiffusionConfig()):
+        original = model._original_forward(**inputs)
+        ctx = model.preprocess(**inputs, skip_modulated_input=False)
+        assert ctx.modulated_input is not None
+        ctx = model.run_transformer_blocks(ctx)
+        result = model.postprocess(ctx)
+    _assert_tensors_equal(original.sample, result.sample)
