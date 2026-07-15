@@ -36,8 +36,10 @@ class SupportsTeaCache(Protocol):
     with the model's forward to avoid duplicating code in a separate extractor.
     The expected flow is equivalent to as follows:
 
-    Cache-disabled:
+    Cache-disabled (for most models):
 
+        # NOTE - this is left as a protocol and .forward is implemented in each class,
+        # since it's very small, and finding torch modules with no forward is not intuitive
         ctx = self.preprocess(*args, skip_modulated_input=True, **kwargs)
         ctx = self.run_transformer_blocks(ctx)
         return self.postprocess(ctx)
