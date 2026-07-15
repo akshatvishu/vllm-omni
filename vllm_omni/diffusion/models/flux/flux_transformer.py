@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -456,7 +457,7 @@ class FluxPosEmbed(nn.Module):
         self.theta = theta
         self.axes_dim = axes_dim
 
-    def forward(self, ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         n_axes = ids.shape[-1]
         cos_out = []
         sin_out = []
@@ -477,6 +478,14 @@ class FluxPosEmbed(nn.Module):
         freqs_cos = torch.cat(cos_out, dim=-1).to(ids.device)
         freqs_sin = torch.cat(sin_out, dim=-1).to(ids.device)
         return freqs_cos, freqs_sin
+
+
+@dataclass
+class FluxState:
+    """Intermediate model-specific info for Flux Transformer."""
+
+    image_rotary_emb: tuple[torch.Tensor, torch.Tensor]
+    joint_attention_kwargs: dict[str, Any]
 
 
 class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
@@ -612,19 +621,7 @@ class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
         self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
 
     # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
-        raise NotImplementedError
-
-    def get_teacache_coefficients(self) -> list[float]:
-        return [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01]
-
-    def forward(
+    def preprocess(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor = None,
@@ -634,8 +631,109 @@ class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
         txt_ids: torch.Tensor = None,
         guidance: torch.Tensor | None = None,
         joint_attention_kwargs: dict[str, Any] | None = None,
-        return_dict: bool = True,
-    ) -> torch.Tensor | Transformer2DModelOutput:
+        skip_modulated_input: bool = False,
+    ) -> ForwardState[FluxState]:
+        hidden_states = self.x_embedder(hidden_states)
+        timestep = timestep.to(device=hidden_states.device, dtype=hidden_states.dtype) * 1000
+
+        if guidance is not None:
+            guidance = guidance.to(device=hidden_states.device, dtype=hidden_states.dtype) * 1000
+
+        temb = (
+            self.time_text_embed(timestep, pooled_projections)
+            if guidance is None
+            else self.time_text_embed(timestep, guidance, pooled_projections)
+        )
+        encoder_hidden_states = self.context_embedder(encoder_hidden_states)
+
+        if txt_ids.ndim == 3:
+            logger.warning(
+                "Passing `txt_ids` 3d torch.Tensor is deprecated."
+                "Please remove the batch dimension and pass it as a 2d torch Tensor"
+            )
+            txt_ids = txt_ids[0]
+        if img_ids.ndim == 3:
+            logger.warning(
+                "Passing `img_ids` 3d torch.Tensor is deprecated."
+                "Please remove the batch dimension and pass it as a 2d torch Tensor"
+            )
+            img_ids = img_ids[0]
+
+        ids = torch.cat((txt_ids, img_ids), dim=0)
+        if is_torch_npu_available():
+            freqs_cos, freqs_sin = self.pos_embed(ids.cpu())
+            image_rotary_emb = (freqs_cos.npu(), freqs_sin.npu())
+        else:
+            image_rotary_emb = self.pos_embed(ids)
+        if not skip_modulated_input:
+            first_block = self.transformer_blocks[0]
+            modulated_input, *_ = first_block.norm1(hidden_states, emb=temb)
+
+        else:
+            modulated_input = None
+        return ForwardState[FluxState](
+            modulated_input,
+            hidden_states,
+            encoder_hidden_states,
+            temb,
+            intermediates=FluxState(
+                image_rotary_emb=image_rotary_emb,
+                joint_attention_kwargs=joint_attention_kwargs,
+            ),
+        )
+
+    def run_transformer_blocks(self, ctx: ForwardState[FluxState]) -> ForwardState[FluxState]:
+        for block in self.transformer_blocks:
+            ctx.encoder_hidden_states, ctx.hidden_states = block(
+                hidden_states=ctx.hidden_states,
+                encoder_hidden_states=ctx.encoder_hidden_states,
+                temb=ctx.temb,
+                image_rotary_emb=ctx.intermediates.image_rotary_emb,
+                joint_attention_kwargs=ctx.intermediates.joint_attention_kwargs,
+            )
+
+        for block in self.single_transformer_blocks:
+            ctx.encoder_hidden_states, ctx.hidden_states = block(
+                hidden_states=ctx.hidden_states,
+                encoder_hidden_states=ctx.encoder_hidden_states,
+                temb=ctx.temb,
+                image_rotary_emb=ctx.intermediates.image_rotary_emb,
+                joint_attention_kwargs=ctx.intermediates.joint_attention_kwargs,
+            )
+        return ctx
+
+    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
+        ctx.hidden_states = self.norm_out(ctx.hidden_states, ctx.temb)
+        output = self.proj_out(ctx.hidden_states)
+
+        return Transformer2DModelOutput(sample=output)
+
+    def get_teacache_coefficients(self) -> list[float]:
+        return [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01]
+
+    def forward_with_teacache_pattern(self, *args, **kwargs) -> Transformer2DModelOutput:
+        ctx = self.preprocess(*args, **kwargs, skip_modulated_input=True)
+        ctx = self.run_transformer_blocks(ctx)
+        return self.postprocess(ctx)
+
+    def forward(
+        self,
+        *args,
+        **kwargs,
+    ) -> Transformer2DModelOutput:
+        return self.forward_with_teacache_pattern(*args, **kwargs)
+
+    def _original_forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor = None,
+        pooled_projections: torch.Tensor = None,
+        timestep: torch.LongTensor = None,
+        img_ids: torch.Tensor = None,
+        txt_ids: torch.Tensor = None,
+        guidance: torch.Tensor | None = None,
+        joint_attention_kwargs: dict[str, Any] | None = None,
+    ) -> Transformer2DModelOutput:
         """
         The [`FluxTransformer2DModel`] forward method.
 
@@ -658,9 +756,6 @@ class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
                 A kwargs dictionary that if specified is passed along to the `AttentionProcessor` as defined under
                 `self.processor` in
                 [diffusers.models.attention_processor](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention_processor.py).
-            return_dict (`bool`, *optional*, defaults to `True`):
-                Whether or not to return a [`~models.transformer_2d.Transformer2DModelOutput`] instead of a plain
-                tuple.
 
         Returns:
             If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a
@@ -720,9 +815,6 @@ class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
 
         hidden_states = self.norm_out(hidden_states, temb)
         output = self.proj_out(hidden_states)
-
-        if not return_dict:
-            return (output,)
 
         return Transformer2DModelOutput(sample=output)
 
