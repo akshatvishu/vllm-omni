@@ -28,6 +28,7 @@ from vllm_omni.core.sched.omni_scheduler_mixin import OmniSchedulerMixin
 from vllm_omni.core.sched.output import OmniCachedRequestData, OmniNewRequestData
 from vllm_omni.engine import OmniEngineCoreOutputs
 from vllm_omni.engine.serialization import deserialize_additional_information
+from vllm_omni.outputs import StageMemoryStats
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.request_queue import RequestQueue
@@ -60,6 +61,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
         self._retains_state_across_chunks = bool(getattr(model_config, "retains_state_across_chunks", False))
         self._supports_pending_generation = bool(getattr(model_config, "supports_pending_generation", False))
         self._pending_finish_reqs: list[Request] = []
+        self._latest_stage_memory_stats: StageMemoryStats | None = None
         self._pending_chunk_error_outputs: list[tuple[int, EngineCoreOutput]] = []
         connector_config = getattr(model_config, "stage_connector_config", None)
         extra = (

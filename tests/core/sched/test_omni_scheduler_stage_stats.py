@@ -51,12 +51,7 @@ def test_stage_stats_collection_does_not_predict_stats_interval():
     assert not disabled.collect_stage_stats
 
 
-def _update_from_empty_scheduler(
-    model_runner_output: ModelRunnerOutput,
-    *,
-    finished_req_ids: set[str] | None = None,
-    scheduler_stats: SchedulerStats | None = None,
-):
+def _empty_scheduler() -> MagicMock:
     scheduler = MagicMock()
     scheduler.chunk_transfer_adapter = None
     scheduler.connector = None
@@ -68,7 +63,20 @@ def _update_from_empty_scheduler(
     scheduler.requests = {}
     scheduler.running = []
     scheduler._pending_finish_reqs = []
+    scheduler._latest_stage_memory_stats = None
     scheduler.kv_cache_manager.take_events.return_value = None
+    return scheduler
+
+
+def _update_from_empty_scheduler(
+    model_runner_output: ModelRunnerOutput,
+    *,
+    finished_req_ids: set[str] | None = None,
+    scheduler_stats: SchedulerStats | None = None,
+    scheduler: MagicMock | None = None,
+):
+    if scheduler is None:
+        scheduler = _empty_scheduler()
     scheduler.make_stats.return_value = scheduler_stats
 
     return OmniGenerationScheduler.update_from_output(
@@ -84,6 +92,17 @@ def test_update_from_output_accepts_upstream_output_without_stage_memory_stats()
     assert outputs == {}
 
 
+def test_update_from_output_stats_tick_without_stage_memory_observation():
+    scheduler_stats = MagicMock()
+    outputs = _update_from_empty_scheduler(
+        ModelRunnerOutput(req_ids=[], req_id_to_index={}),
+        scheduler_stats=scheduler_stats,
+    )
+
+    assert outputs[0].scheduler_stats is scheduler_stats
+    assert outputs[0].stage_memory_stats is None
+
+
 def test_update_from_output_forwards_omni_stage_memory_stats():
     stats = StageMemoryStats(allocated_bytes=1)
     scheduler_stats = MagicMock()
@@ -96,23 +115,45 @@ def test_update_from_output_forwards_omni_stage_memory_stats():
     assert outputs[0].stage_memory_stats is stats
 
 
-def test_update_from_output_defers_stage_memory_stats_between_intervals():
-    outputs = _update_from_empty_scheduler(
+def test_update_from_output_retains_stage_memory_stats_until_next_stats_tick():
+    scheduler = _empty_scheduler()
+    stats = StageMemoryStats(allocated_bytes=1)
+
+    deferred_outputs = _update_from_empty_scheduler(
         OmniModelRunnerOutput(
             req_ids=[],
             req_id_to_index={},
-            stage_memory_stats=StageMemoryStats(allocated_bytes=1),
-        )
+            stage_memory_stats=stats,
+        ),
+        scheduler=scheduler,
+    )
+    scheduler_stats = MagicMock()
+    emitted_outputs = _update_from_empty_scheduler(
+        ModelRunnerOutput(req_ids=[], req_id_to_index={}),
+        scheduler_stats=scheduler_stats,
+        scheduler=scheduler,
     )
 
-    assert outputs == {}
+    assert deferred_outputs == {}
+    assert emitted_outputs[0].scheduler_stats is scheduler_stats
+    assert emitted_outputs[0].stage_memory_stats is stats
 
 
-def test_update_from_output_forwards_cleanup_stage_memory_stats():
-    stats = StageMemoryStats()
-    outputs = _update_from_empty_scheduler(
-        OmniModelRunnerOutput(req_ids=[], req_id_to_index={}, stage_memory_stats=stats),
+def test_update_from_output_cleanup_replaces_retained_stage_memory_stats():
+    scheduler = _empty_scheduler()
+    scheduler._latest_stage_memory_stats = StageMemoryStats(ref_context_cache_entries=1)
+    cleanup_stats = StageMemoryStats()
+
+    cleanup_outputs = _update_from_empty_scheduler(
+        OmniModelRunnerOutput(req_ids=[], req_id_to_index={}, stage_memory_stats=cleanup_stats),
         finished_req_ids={"req-1"},
+        scheduler=scheduler,
+    )
+    next_tick_outputs = _update_from_empty_scheduler(
+        ModelRunnerOutput(req_ids=[], req_id_to_index={}),
+        scheduler_stats=MagicMock(),
+        scheduler=scheduler,
     )
 
-    assert outputs[0].stage_memory_stats is stats
+    assert cleanup_outputs[0].stage_memory_stats is cleanup_stats
+    assert next_tick_outputs[0].stage_memory_stats is cleanup_stats

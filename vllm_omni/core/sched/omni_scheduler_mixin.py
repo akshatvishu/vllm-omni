@@ -995,7 +995,11 @@ class OmniSchedulerMixin(_SchedulerMixinBase):
             cudagraph_stats,
             perf_stats,
         )
-        if stats is None and not force_stage_memory_stats:
+        if stage_memory_stats is not None:
+            self._latest_stage_memory_stats = stage_memory_stats
+        if stats is not None:
+            stage_memory_stats = getattr(self, "_latest_stage_memory_stats", None)
+        elif not force_stage_memory_stats:
             stage_memory_stats = None
         if stats is None and stage_memory_stats is None:
             return
