@@ -60,6 +60,7 @@ def _empty_scheduler() -> MagicMock:
     scheduler.log_stats = False
     scheduler.recompute_kv_load_failures = False
     scheduler.finished_req_ids_dict = {}
+    scheduler.finished_req_ids = set()
     scheduler.requests = {}
     scheduler.running = []
     scheduler._pending_finish_reqs = []
@@ -157,3 +158,16 @@ def test_update_from_output_cleanup_replaces_retained_stage_memory_stats():
 
     assert cleanup_outputs[0].stage_memory_stats is cleanup_stats
     assert next_tick_outputs[0].stage_memory_stats is cleanup_stats
+
+
+def test_update_from_output_emits_cleanup_when_current_output_finishes_request():
+    scheduler = _empty_scheduler()
+    scheduler.finished_req_ids = {"req-1"}
+    cleanup_stats = StageMemoryStats()
+
+    outputs = _update_from_empty_scheduler(
+        OmniModelRunnerOutput(req_ids=[], req_id_to_index={}, stage_memory_stats=cleanup_stats),
+        scheduler=scheduler,
+    )
+
+    assert outputs[0].stage_memory_stats is cleanup_stats

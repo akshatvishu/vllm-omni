@@ -1184,7 +1184,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
             cudagraph_stats,
             perf_stats,
             stage_memory_stats=getattr(model_runner_output, "stage_memory_stats", None),
-            force_stage_memory_stats=bool(scheduler_output.finished_req_ids),
+            force_stage_memory_stats=bool(scheduler_output.finished_req_ids or self.finished_req_ids),
         )
 
         self._capture_omni_connector_output(model_runner_output)
