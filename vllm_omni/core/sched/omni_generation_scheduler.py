@@ -35,7 +35,7 @@ from vllm_omni.distributed.omni_connectors.transfer_adapter.chunk_transfer_adapt
     OmniChunkTransferAdapter,
 )
 from vllm_omni.engine import OmniEngineCoreOutput, OmniEngineCoreOutputs
-from vllm_omni.outputs import OmniConnectorOutput
+from vllm_omni.outputs import OmniConnectorOutput, StageMemoryStats
 
 logger = init_logger(__name__)
 
@@ -56,6 +56,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
                 async_chunk=False,
             )
         self._latest_omni_connector_output: OmniConnectorOutput | None = None
+        self._latest_stage_memory_stats: StageMemoryStats | None = None
 
     def schedule(self, throttle_prefills: bool = False) -> SchedulerOutput:
         """Diffusion fast path:
@@ -686,7 +687,14 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
 
         stats = self.make_stats(spec_decoding_stats, kv_connector_stats, cudagraph_stats, perf_stats)
         stage_memory_stats = getattr(model_runner_output, "stage_memory_stats", None)
-        emit_stage_memory_stats = stage_memory_stats if stats is not None or scheduler_output.finished_req_ids else None
+        if stage_memory_stats is not None:
+            self._latest_stage_memory_stats = stage_memory_stats
+        if stats is not None:
+            emit_stage_memory_stats = self._latest_stage_memory_stats
+        elif scheduler_output.finished_req_ids:
+            emit_stage_memory_stats = stage_memory_stats
+        else:
+            emit_stage_memory_stats = None
         if stats is not None or emit_stage_memory_stats is not None:
             # Return stage statistics to only one of the front-ends.
             if (eco := next(iter(engine_core_outputs.values()), None)) is None:
