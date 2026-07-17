@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import janus
 import pytest
@@ -23,7 +24,7 @@ from vllm.v1.engine import EngineCoreOutput, EngineCoreOutputs, EngineCoreReques
 from vllm.v1.engine.exceptions import EngineDeadError
 from vllm.v1.metrics.stats import IterationStats
 
-from vllm_omni.engine import OmniEngineCoreOutput
+from vllm_omni.engine import OmniEngineCoreOutput, OmniEngineCoreOutputs
 from vllm_omni.engine.errors import NativeKVHandoffError
 from vllm_omni.engine.messages import (
     AbortRequestMessage,
@@ -47,7 +48,7 @@ from vllm_omni.engine.serialization import deserialize_additional_information, s
 from vllm_omni.engine.stage_pool import StagePool, StageUnavailableError
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
 from vllm_omni.metrics.stats import StageRequestStats, StageStats
-from vllm_omni.outputs import OmniRequestOutput
+from vllm_omni.outputs import OmniRequestOutput, StageMemoryStats
 from vllm_omni.outputs.output_processor import MultimodalOutputProcessor
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
@@ -151,7 +152,7 @@ class FakeStageClient:
         try:
             return self._engine_core_outputs.get_nowait()
         except queue.Empty:
-            return SimpleNamespace(outputs=[], scheduler_stats=None, finished_requests=None)
+            return OmniEngineCoreOutputs()
 
     def get_diffusion_output_nowait(self):
         try:
@@ -3193,3 +3194,14 @@ async def test_interaction_backlog_is_bounded_without_blocking_dispatch() -> Non
     consumer = object.__new__(AsyncOmni)
     with pytest.raises(RuntimeError, match="Too many pending interactions"):
         consumer._handle_output_message(error)
+
+@pytest.mark.asyncio
+async def test_stage_pool_preserves_memory_only_outputs():
+    pool = object.__new__(StagePool)
+    memory_outputs = OmniEngineCoreOutputs(stage_memory_stats=StageMemoryStats(ref_context_cache_entries=0))
+    client = SimpleNamespace(get_output_async=AsyncMock(return_value=memory_outputs))
+
+    assert await pool.read_llm_raw_output(client) is memory_outputs
+
+    client.get_output_async.return_value = OmniEngineCoreOutputs()
+    assert await pool.read_llm_raw_output(client) is None

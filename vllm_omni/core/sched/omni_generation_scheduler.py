@@ -25,6 +25,7 @@ from vllm.v1.spec_decode.metrics import SpecDecodingStats
 
 from vllm_omni.core.sched.omni_scheduler_mixin import OmniSchedulerMixin
 from vllm_omni.core.sched.output import OmniCachedRequestData, OmniNewRequestData
+from vllm_omni.engine import OmniEngineCoreOutputs
 from vllm_omni.engine.serialization import deserialize_additional_information
 from vllm_omni.outputs import OmniModelRunnerOutput
 
@@ -1165,7 +1166,9 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
 
         # Create EngineCoreOutputs for all clients that have requests with
         # outputs in this step.
-        engine_core_outputs = {client_index: EngineCoreOutputs(outputs=outs) for client_index, outs in outputs.items()}
+        engine_core_outputs = {
+            client_index: OmniEngineCoreOutputs(outputs=outs) for client_index, outs in outputs.items()
+        }
 
         self._attach_finished_request_sets(
             engine_core_outputs,
@@ -1178,6 +1181,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
             kv_connector_stats,
             cudagraph_stats,
             perf_stats,
+            stage_memory_stats=model_runner_output.stage_memory_stats,
         )
 
         self._capture_omni_connector_output(model_runner_output)

@@ -47,9 +47,9 @@ from vllm_omni.distributed.omni_connectors.transfer_adapter.chunk_transfer_adapt
     OmniChunkTransferAdapter,
 )
 from vllm_omni.distributed.omni_connectors.utils.config import stage_receives_chunks
-from vllm_omni.engine import AdditionalInformationPayload, OmniEngineCoreOutput
+from vllm_omni.engine import AdditionalInformationPayload, OmniEngineCoreOutput, OmniEngineCoreOutputs
 from vllm_omni.engine.serialization import serialize_additional_information
-from vllm_omni.outputs import OmniConnectorOutput
+from vllm_omni.outputs import OmniConnectorOutput, StageMemoryStats
 
 logger = init_logger(__name__)
 
@@ -701,6 +701,11 @@ class OmniSchedulerMixin(_SchedulerMixinBase):
             data_plane_terminal_req_ids=data_plane_terminal_req_ids,
             input_terminal_req_ids=input_terminal_req_ids or set(),
             pending_request_prewarms=request_prewarms,
+            collect_stage_stats=bool(self.log_stats)
+            and (
+                bool(base.finished_req_ids)
+                or time.monotonic() - getattr(self, "_last_stats_time", 0.0) >= _STATS_INTERVAL_S
+            ),
         )
 
     def _rewrap_scheduled_new_reqs(self, scheduler_output: SchedulerOutput) -> None:
@@ -832,7 +837,7 @@ class OmniSchedulerMixin(_SchedulerMixinBase):
         pending = getattr(self, "_pending_input_timeout_outputs", None)
         if pending:
             for client_index, error_output in pending.values():
-                output = engine_core_outputs.setdefault(client_index, EngineCoreOutputs())
+                output = engine_core_outputs.setdefault(client_index, OmniEngineCoreOutputs())
                 if not any(item.request_id == error_output.request_id for item in output.outputs):
                     output.outputs.append(error_output)
             pending.clear()
@@ -842,7 +847,7 @@ class OmniSchedulerMixin(_SchedulerMixinBase):
         for client_index, finished_set in finished_req_ids.items():
             output = engine_core_outputs.get(client_index)
             if output is None:
-                output = EngineCoreOutputs()
+                output = OmniEngineCoreOutputs()
                 engine_core_outputs[client_index] = output
             if synthesize_abort_outputs:
                 emitted = {item.request_id for item in output.outputs}
@@ -984,6 +989,7 @@ class OmniSchedulerMixin(_SchedulerMixinBase):
         kv_connector_stats: KVConnectorStats | None,
         cudagraph_stats: CUDAGraphStat | None,
         perf_stats: PerfStats | None,
+        stage_memory_stats: StageMemoryStats | None = None,
     ) -> None:
         stats = self.make_stats(
             spec_decoding_stats,
@@ -991,11 +997,13 @@ class OmniSchedulerMixin(_SchedulerMixinBase):
             cudagraph_stats,
             perf_stats,
         )
-        if stats is None:
+        if stats is None and stage_memory_stats is None:
             return
         if (output := next(iter(engine_core_outputs.values()), None)) is None:
-            engine_core_outputs[0] = output = EngineCoreOutputs()
+            engine_core_outputs[0] = output = OmniEngineCoreOutputs()
         output.scheduler_stats = stats
+        if stage_memory_stats is not None:
+            output.stage_memory_stats = stage_memory_stats
 
     def add_request(self, request: Request) -> None:
         """Route a terminal streaming update that lands on a parked session.

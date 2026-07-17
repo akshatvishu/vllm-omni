@@ -978,6 +978,12 @@ class OrchestratorBase:
                 engine_idx=self._stage_replica_to_engine_idx[(stage_id, replica_id)],
             )
 
+        if self._stat_logger is not None and getattr(raw_outputs, "stage_memory_stats", None) is not None:
+            self._stat_logger.record_stage_memory(
+                raw_outputs.stage_memory_stats,
+                engine_idx=self._stage_replica_to_engine_idx[(stage_id, replica_id)],
+            )
+
         _sched_stats = raw_outputs.scheduler_stats
         if (
             self._prom_metrics is not None

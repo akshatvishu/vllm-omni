@@ -14,6 +14,17 @@ from vllm_omni.inputs.data import OmniPromptType
 
 
 @dataclass
+class StageMemoryStats:
+    """Optional model-owned memory snapshot for the engine stats path."""
+
+    allocated_bytes: int | None = None
+    reserved_bytes: int | None = None
+    ref_context_cache_bytes: int | None = None
+    ref_context_cache_entries: int | None = None
+    ref_context_cache_evictions: int | None = None
+
+
+@dataclass
 class OmniConnectorOutput:
     """Communication results from Model Runner to Scheduler.
 
@@ -61,6 +72,7 @@ class OmniModelRunnerOutput(ModelRunnerOutput):
     # The Scheduler can safely free the block tables for these requests.
     kv_extracted_req_ids: list[str] | None = None
     omni_connector_output: OmniConnectorOutput | None = None
+    stage_memory_stats: StageMemoryStats | None = None
     # True when sampled_token_ids has already been materialized on the host.
     # MRv2 consumers must treat the value as immutable and must not perform
     # another device-to-host conversion or rebuild it from sampler tensors.
