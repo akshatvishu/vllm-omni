@@ -153,9 +153,11 @@ The overhead with the flag on is small enough that an A/B benchmark on Qwen3-Omn
 
 Upstream vLLM's `Scheduler.make_stats()` runs on every AR generation step, returning a SchedulerStats object for the orchestrator. Under vLLM's architecture, this is fine. But since vLLM-Omni requires that the object be serialized and transferred over ZMQ, receiving a SchedulerStats object on every step can introduce unacceptable overhead to the system.
 
-`OmniSchedulerMixin.make_stats()` (in `vllm_omni/core/sched/omni_scheduler_mixin.py`) throttles stats emission to at most once per second **per scheduler** — i.e. per `(stage, replica)` since each replica owns its own scheduler instance. Between intervals it returns `None`, which the engine core skips serializing. This keeps gauges fresh enough for Prometheus scrapes (typically 15-30s intervals) while eliminating the per-step overhead.
+`OmniSchedulerMixin.make_stats()` (in `vllm_omni/core/sched/omni_scheduler_mixin.py`) throttles stats emission to at most once per second **per scheduler** — i.e. per `(stage, replica)` since each replica owns its own scheduler instance. Between intervals it returns `None`, which the engine core skips serializing. This keeps gauges fresh enough for Prometheus scrapes (typically 15-30s intervals) while eliminating the per-step serialization overhead.
 
-The orchestrator side does not add its own throttle on top: the per-replica recording loop gates only on `raw_outputs.scheduler_stats is not None` (i.e. this replica's scheduler passed its own 1 Hz gate). A previous global `_last_stats_ts` on the orchestrator was removed because it starved every replica other than the first to emit within each second.
+Generation stages read their lightweight memory snapshot after each model-execution step while statistics are enabled. The snapshot is attached to engine-core output only when the post-execution `make_stats()` call emits, so it follows the same per-scheduler cadence without predicting the interval before model execution. Request cleanup is emitted immediately to publish the final zero-valued cache state.
+
+The orchestrator side does not add its own throttle on top: normal per-replica recording follows `raw_outputs.scheduler_stats is not None` (i.e. this replica's scheduler passed its own 1 Hz gate), with the final generation-stage memory cleanup snapshot handled immediately. A previous global `_last_stats_ts` on the orchestrator was removed because it starved every replica other than the first to emit within each second.
 
 ## Metric Definitions
 

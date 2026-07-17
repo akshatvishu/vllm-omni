@@ -686,14 +686,15 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
 
         stats = self.make_stats(spec_decoding_stats, kv_connector_stats, cudagraph_stats, perf_stats)
         stage_memory_stats = getattr(model_runner_output, "stage_memory_stats", None)
-        if stats is not None or stage_memory_stats is not None:
+        emit_stage_memory_stats = stage_memory_stats if stats is not None or scheduler_output.finished_req_ids else None
+        if stats is not None or emit_stage_memory_stats is not None:
             # Return stage statistics to only one of the front-ends.
             if (eco := next(iter(engine_core_outputs.values()), None)) is None:
                 # We must return stage statistics even if there are no request
                 # outputs this step.
                 engine_core_outputs[0] = eco = OmniEngineCoreOutputs()
             eco.scheduler_stats = stats
-            eco.stage_memory_stats = stage_memory_stats
+            eco.stage_memory_stats = emit_stage_memory_stats
 
         self._capture_omni_connector_output(model_runner_output)
 
