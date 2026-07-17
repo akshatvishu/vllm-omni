@@ -20,6 +20,7 @@ from vllm.v1.core.sched.scheduler import Scheduler as VLLMScheduler
 from vllm.v1.core.sched.utils import remove_all
 from vllm.v1.engine import EngineCoreEventType, EngineCoreOutput, EngineCoreOutputs
 from vllm.v1.metrics.perf import PerfStats
+from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus, StreamingUpdate
 from vllm.v1.spec_decode.metrics import SpecDecodingStats
 
@@ -27,7 +28,6 @@ from vllm_omni.core.sched.omni_scheduler_mixin import OmniSchedulerMixin
 from vllm_omni.core.sched.output import OmniCachedRequestData, OmniNewRequestData
 from vllm_omni.engine import OmniEngineCoreOutputs
 from vllm_omni.engine.serialization import deserialize_additional_information
-from vllm_omni.outputs import OmniModelRunnerOutput
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.request_queue import RequestQueue
@@ -837,7 +837,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
     def update_from_output(
         self,
         scheduler_output: SchedulerOutput,
-        model_runner_output: OmniModelRunnerOutput,
+        model_runner_output: ModelRunnerOutput,
     ) -> dict[int, EngineCoreOutputs]:
         """Update scheduler state and finish completed one-shot work."""
         sampled_token_ids = model_runner_output.sampled_token_ids
@@ -1181,7 +1181,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
             kv_connector_stats,
             cudagraph_stats,
             perf_stats,
-            stage_memory_stats=model_runner_output.stage_memory_stats,
+            stage_memory_stats=getattr(model_runner_output, "stage_memory_stats", None),
         )
 
         self._capture_omni_connector_output(model_runner_output)
