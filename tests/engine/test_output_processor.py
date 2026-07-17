@@ -13,8 +13,8 @@ from vllm.v1.engine import EngineCoreEvent, EngineCoreEventType, FinishReason
 from vllm.v1.metrics.stats import IterationStats, PrefillStats
 
 from vllm_omni.engine import OmniEngineCoreOutput
-from vllm_omni.engine.output_modality import OutputModalityNames
-from vllm_omni.engine.output_processor import MultimodalOutputProcessor, OmniRequestState
+from vllm_omni.outputs.output_modality import OutputModalityNames
+from vllm_omni.outputs.output_processor import MultimodalOutputProcessor, OmniRequestState
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
