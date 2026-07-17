@@ -20,6 +20,7 @@ from vllm.v1.engine import (
     EngineCoreOutputs,
 )
 from vllm.v1.metrics.perf import PerfStats
+from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus, StreamingUpdate
 from vllm.v1.spec_decode.metrics import SpecDecodingStats
 
@@ -34,7 +35,7 @@ from vllm_omni.distributed.omni_connectors.transfer_adapter.chunk_transfer_adapt
     OmniChunkTransferAdapter,
 )
 from vllm_omni.engine import OmniEngineCoreOutput, OmniEngineCoreOutputs
-from vllm_omni.outputs import OmniConnectorOutput, OmniModelRunnerOutput
+from vllm_omni.outputs import OmniConnectorOutput
 
 logger = init_logger(__name__)
 
@@ -409,7 +410,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
     def update_from_output(
         self,
         scheduler_output: SchedulerOutput,
-        model_runner_output: OmniModelRunnerOutput,
+        model_runner_output: ModelRunnerOutput,
     ) -> dict[int, EngineCoreOutputs]:
         """Update the scheduler state based on the model runner output.
 
@@ -684,7 +685,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
             finished_req_ids.clear()
 
         stats = self.make_stats(spec_decoding_stats, kv_connector_stats, cudagraph_stats, perf_stats)
-        stage_memory_stats = model_runner_output.stage_memory_stats
+        stage_memory_stats = getattr(model_runner_output, "stage_memory_stats", None)
         if stats is not None or stage_memory_stats is not None:
             # Return stage statistics to only one of the front-ends.
             if (eco := next(iter(engine_core_outputs.values()), None)) is None:
