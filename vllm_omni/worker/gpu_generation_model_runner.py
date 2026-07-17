@@ -157,8 +157,10 @@ class GPUGenerationModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin
             # Notify stateful models of finished requests before the
             # zero-token early return. Request cleanup is a model lifecycle
             # concern and does not depend on the inter-stage transfer mode.
-            if scheduler_output.finished_req_ids and hasattr(self.model, "on_requests_finished"):
-                self.model.on_requests_finished(scheduler_output.finished_req_ids)
+            if scheduler_output.finished_req_ids:
+                model = self.get_model()
+                if hasattr(model, "on_requests_finished"):
+                    model.on_requests_finished(scheduler_output.finished_req_ids)
 
             if not scheduler_output.total_num_scheduled_tokens:
                 if (stage_memory_stats := self._collect_stage_memory_stats(scheduler_output)) is not None:
@@ -521,8 +523,10 @@ class GPUGenerationModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin
         )
 
     def _collect_stage_memory_stats(self, scheduler_output: SchedulerOutput) -> StageMemoryStats | None:
-        if scheduler_output.collect_stage_stats and hasattr(self.model, "get_stage_memory_stats"):
-            return self.model.get_stage_memory_stats()
+        if scheduler_output.collect_stage_stats:
+            model = self.get_model()
+            if hasattr(model, "get_stage_memory_stats"):
+                return model.get_stage_memory_stats()
         return None
 
     def _run_generation_model(

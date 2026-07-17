@@ -92,10 +92,10 @@ def test_sample_tokens_dict_output():
     assert output.multimodal_outputs[0]["audio"].shape == (1, 4)
 
 
-def test_sample_tokens_collects_stage_memory_only_on_stats_tick():
+def test_sample_tokens_collects_stage_memory_from_raw_model():
     runner = _make_runner(torch.randn(1, 2, 3), collect_stage_stats=True)
     expected = StageMemoryStats(allocated_bytes=1)
-    runner.model.get_stage_memory_stats = lambda: expected
+    runner.get_model = lambda: SimpleNamespace(get_stage_memory_stats=lambda: expected)
 
     output = GPUGenerationModelRunner.sample_tokens(runner)
 
@@ -135,10 +135,12 @@ def test_zero_token_cleanup_collects_stage_memory(monkeypatch):
         nonlocal cache_entries
         cache_entries = 0
 
-    runner.model = SimpleNamespace(
+    raw_model = SimpleNamespace(
         on_requests_finished=on_requests_finished,
         get_stage_memory_stats=lambda: StageMemoryStats(ref_context_cache_entries=cache_entries),
     )
+    runner.model = SimpleNamespace()
+    runner.get_model = lambda: raw_model
     scheduler_output = SimpleNamespace(
         total_num_scheduled_tokens=0,
         num_scheduled_tokens={},
