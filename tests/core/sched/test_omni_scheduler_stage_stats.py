@@ -1,5 +1,4 @@
 import time
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -50,7 +49,7 @@ def test_finished_requests_force_stage_stats_collection():
     assert not disabled.collect_stage_stats
 
 
-def _empty_generation_scheduler() -> MagicMock:
+def _update_from_empty_scheduler(model_runner_output: ModelRunnerOutput):
     scheduler = MagicMock()
     scheduler.chunk_transfer_adapter = None
     scheduler.connector = None
@@ -64,18 +63,8 @@ def _empty_generation_scheduler() -> MagicMock:
     scheduler._pending_finish_reqs = []
     scheduler.kv_cache_manager.take_events.return_value = None
     scheduler.make_stats.return_value = None
-    return scheduler
 
-
-def _update_from_empty_scheduler(model_runner_output: ModelRunnerOutput):
-    scheduler = _empty_generation_scheduler()
-    scheduler_output = SimpleNamespace(
-        num_scheduled_tokens={},
-        scheduled_spec_decode_tokens={},
-        num_invalid_spec_tokens=0,
-    )
-
-    return OmniGenerationScheduler.update_from_output(scheduler, scheduler_output, model_runner_output)
+    return OmniGenerationScheduler.update_from_output(scheduler, _scheduler_output(set()), model_runner_output)
 
 
 def test_update_from_output_accepts_upstream_output_without_stage_memory_stats():
