@@ -33,7 +33,7 @@ from vllm_omni.core.sched.utils import omni_routed_experts_for_request
 from vllm_omni.distributed.omni_connectors.transfer_adapter.chunk_transfer_adapter import (
     OmniChunkTransferAdapter,
 )
-from vllm_omni.engine import OmniEngineCoreOutput
+from vllm_omni.engine import OmniEngineCoreOutput, OmniEngineCoreOutputs
 from vllm_omni.outputs import OmniConnectorOutput, OmniModelRunnerOutput
 
 logger = init_logger(__name__)
@@ -667,7 +667,9 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
 
         # Create EngineCoreOutputs for all clients that have requests with
         # outputs in this step.
-        engine_core_outputs = {client_index: EngineCoreOutputs(outputs=outs) for client_index, outs in outputs.items()}
+        engine_core_outputs = {
+            client_index: OmniEngineCoreOutputs(outputs=outs) for client_index, outs in outputs.items()
+        }
 
         finished_req_ids = self.finished_req_ids_dict
         if finished_req_ids:
@@ -678,16 +680,19 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
                 if (eco := engine_core_outputs.get(client_index)) is not None:
                     eco.finished_requests = finished_set
                 else:
-                    engine_core_outputs[client_index] = EngineCoreOutputs(finished_requests=finished_set)
+                    engine_core_outputs[client_index] = OmniEngineCoreOutputs(finished_requests=finished_set)
             finished_req_ids.clear()
 
-        if (stats := self.make_stats(spec_decoding_stats, kv_connector_stats, cudagraph_stats, perf_stats)) is not None:
-            # Return stats to only one of the front-ends.
+        stats = self.make_stats(spec_decoding_stats, kv_connector_stats, cudagraph_stats, perf_stats)
+        stage_memory_stats = model_runner_output.stage_memory_stats
+        if stats is not None or stage_memory_stats is not None:
+            # Return stage statistics to only one of the front-ends.
             if (eco := next(iter(engine_core_outputs.values()), None)) is None:
-                # We must return the stats even if there are no request
+                # We must return stage statistics even if there are no request
                 # outputs this step.
-                engine_core_outputs[0] = eco = EngineCoreOutputs()
+                engine_core_outputs[0] = eco = OmniEngineCoreOutputs()
             eco.scheduler_stats = stats
+            eco.stage_memory_stats = stage_memory_stats
 
         self._capture_omni_connector_output(model_runner_output)
 

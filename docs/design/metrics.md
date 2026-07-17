@@ -91,6 +91,13 @@ Defensive fail-safe: if `transfer_emitter` or `replica_resolver` is missing, or 
 
 The Orchestrator instantiates `OmniPrometheusStatLogger` (a thin subclass of upstream `vllm.v1.metrics.loggers.PrometheusStatLogger`) and feeds it scheduler stats and iteration stats after processing each batch of engine outputs. This populates the standard ~37 vLLM metric families (TTFT, ITL, TPOT, KV cache usage, etc.) using the same upstream code path — but with the `engine` label reshaped into `stage` + `replica` so multi-replica deployments produce distinct series per replica. See the next section for the wrap mechanics.
 
+Generation models can additionally attach an optional typed memory snapshot to
+their model-runner output on the scheduler's existing stats tick and after
+finished-request cleanup. The snapshot travels with the engine-core output and
+is recorded by the same stat logger; it never enters a request or API payload.
+Code2Wav currently supplies its retained post-warmup allocator snapshot and
+ref-context cache accounting.
+
 ### Shared State Between Threads
 
 The Orchestrator runs in a background thread. The API server (OmniBase) runs in the asyncio event loop thread. `OmniRequestCounter` bridges them — a plain Python object with an `int` field. The Orchestrator increments/decrements it; the entrypoint reads it for gauge updates. No lock is needed because the counter is advisory (a stale read by one Prometheus scrape interval is acceptable). It is created by `AsyncOmniEngine.__init__()` and passed to the Orchestrator at construction time.
@@ -185,6 +192,21 @@ Labels: `{model_name, from_stage, from_replica, to_stage, to_replica}`.
 | `vllm:omni_transfer_tx_s` | Histogram | Sender-side time (serialize + submit to connector) |
 | `vllm:omni_transfer_rx_s` | Histogram | Receiver-side time (recv + deserialize) |
 | `vllm:omni_transfer_in_flight_s` | Histogram | Network in-flight time (TX done → RX recv start) |
+
+### Generation-stage memory (5)
+
+Labels: `{model_name, stage, replica}`. These `vllm_omni:` gauges are emitted
+only by stages that supply a memory snapshot and only when statistics are
+enabled. Values describe the reporting worker's device and are not aggregated
+across tensor- or pipeline-parallel ranks.
+
+| Metric | Description |
+|---|---|
+| `vllm_omni:stage_memory_allocated_bytes` | CUDA allocator bytes allocated after decoder CUDA-graph warmup |
+| `vllm_omni:stage_memory_reserved_bytes` | CUDA allocator bytes reserved after decoder CUDA-graph warmup |
+| `vllm_omni:stage_ref_context_cache_bytes` | Current bytes retained by the ref-context cache |
+| `vllm_omni:stage_ref_context_cache_entries` | Current ref-context cache entry count |
+| `vllm_omni:stage_ref_context_cache_evictions` | Cumulative entries evicted by ref-context cache capacity limits |
 
 ### LLM stage-level (wrapped `vllm:*`)
 

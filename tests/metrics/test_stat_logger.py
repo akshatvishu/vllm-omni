@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from prometheus_client import CollectorRegistry, generate_latest
 
+from vllm_omni.metrics import definitions as defs
 from vllm_omni.metrics.stat_logger import (
     _ENGINE_INDEX_MAP,
     OmniPrometheusStatLogger,
@@ -15,6 +16,7 @@ from vllm_omni.metrics.stat_logger import (
     _RelabelHistogram,
     _rewrite_labelnames,
 )
+from vllm_omni.outputs import StageMemoryStats
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
@@ -366,6 +368,56 @@ class TestOmniPrometheusStatLogger:
 
         assert dict(_ENGINE_INDEX_MAP) == srm
         assert 99 not in _ENGINE_INDEX_MAP  # old entry was cleared
+
+    def test_record_stage_memory_updates_present_values(self, registry):
+        sl = OmniPrometheusStatLogger.__new__(OmniPrometheusStatLogger)
+        sl._omni_per_engine_labelvalues = {3: ["m", "1", "0"]}
+        sl._init_stage_memory_families(registry)
+
+        sl.record_stage_memory(
+            StageMemoryStats(
+                allocated_bytes=11,
+                reserved_bytes=13,
+                ref_context_cache_bytes=17,
+                ref_context_cache_entries=19,
+                ref_context_cache_evictions=23,
+            ),
+            engine_idx=3,
+        )
+
+        labels = {"model_name": "m", "stage": "1", "replica": "0"}
+        assert registry.get_sample_value(defs.STAGE_MEMORY_ALLOCATED_BYTES, labels) == 11
+        assert registry.get_sample_value(defs.STAGE_MEMORY_RESERVED_BYTES, labels) == 13
+        assert registry.get_sample_value(defs.STAGE_REF_CONTEXT_CACHE_BYTES, labels) == 17
+        assert registry.get_sample_value(defs.STAGE_REF_CONTEXT_CACHE_ENTRIES, labels) == 19
+        assert registry.get_sample_value(defs.STAGE_REF_CONTEXT_CACHE_EVICTIONS, labels) == 23
+
+    def test_stage_memory_families_register_only_with_logger(self, registry):
+        metric_name = defs.STAGE_MEMORY_ALLOCATED_BYTES
+        assert metric_name not in generate_latest(registry).decode()
+
+        sl = OmniPrometheusStatLogger.__new__(OmniPrometheusStatLogger)
+        sl._init_stage_memory_families(registry)
+
+        assert f"# HELP {metric_name}" in generate_latest(registry).decode()
+
+    def test_record_stage_memory_preserves_partial_and_replica_values(self, registry):
+        sl = OmniPrometheusStatLogger.__new__(OmniPrometheusStatLogger)
+        sl._omni_per_engine_labelvalues = {
+            0: ["m", "1", "0"],
+            1: ["m", "1", "1"],
+        }
+        sl._init_stage_memory_families(registry)
+
+        sl.record_stage_memory(StageMemoryStats(allocated_bytes=11), engine_idx=0)
+        sl.record_stage_memory(StageMemoryStats(allocated_bytes=13), engine_idx=0)
+        sl.record_stage_memory(StageMemoryStats(allocated_bytes=17), engine_idx=1)
+
+        replica_0 = {"model_name": "m", "stage": "1", "replica": "0"}
+        replica_1 = {"model_name": "m", "stage": "1", "replica": "1"}
+        assert registry.get_sample_value(defs.STAGE_MEMORY_ALLOCATED_BYTES, replica_0) == 13
+        assert registry.get_sample_value(defs.STAGE_MEMORY_ALLOCATED_BYTES, replica_1) == 17
+        assert registry.get_sample_value(defs.STAGE_REF_CONTEXT_CACHE_BYTES, replica_0) is None
 
 
 # ---------------------------------------------------------------------------

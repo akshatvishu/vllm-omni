@@ -142,6 +142,16 @@ TRANSFER_IN_FLIGHT_S = METRIC_PREFIX + "transfer_in_flight_s"
 
 
 # ============================================================================
+# Generation-stage memory family (per-stage + per-replica)
+# ============================================================================
+STAGE_MEMORY_ALLOCATED_BYTES = METRIC_PREFIX + "stage_memory_allocated_bytes"
+STAGE_MEMORY_RESERVED_BYTES = METRIC_PREFIX + "stage_memory_reserved_bytes"
+STAGE_REF_CONTEXT_CACHE_BYTES = METRIC_PREFIX + "stage_ref_context_cache_bytes"
+STAGE_REF_CONTEXT_CACHE_ENTRIES = METRIC_PREFIX + "stage_ref_context_cache_entries"
+STAGE_REF_CONTEXT_CACHE_EVICTIONS = METRIC_PREFIX + "stage_ref_context_cache_evictions"
+
+
+# ============================================================================
 # Label sets
 # ============================================================================
 PIPELINE_LABELS = ("model_name",)

@@ -9,12 +9,14 @@ import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import janus
 import pytest
 from vllm.outputs import CompletionOutput, RequestOutput
 from vllm.sampling_params import SamplingParams
 
+from vllm_omni.engine import OmniEngineCoreOutputs
 from vllm_omni.engine.messages import (
     AbortRequestMessage,
     AddCompanionRequestMessage,
@@ -32,7 +34,7 @@ from vllm_omni.engine.orchestrator import (
 )
 from vllm_omni.engine.stage_pool import StagePool
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
-from vllm_omni.outputs import OmniRequestOutput
+from vllm_omni.outputs import OmniRequestOutput, StageMemoryStats
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
@@ -88,7 +90,7 @@ class FakeStageClient:
         try:
             return self._engine_core_outputs.get_nowait()
         except queue.Empty:
-            return SimpleNamespace(outputs=[])
+            return OmniEngineCoreOutputs()
 
     def get_diffusion_output_nowait(self):
         try:
@@ -1179,3 +1181,15 @@ def test_orchestrator_does_not_re_introduce_global_stats_throttle() -> None:
         "raw_outputs.scheduler_stats being non-None — the per-scheduler 1Hz "
         "throttle in OmniSchedulerMixin.make_stats() is the only gate needed."
     )
+
+
+@pytest.mark.asyncio
+async def test_stage_pool_preserves_memory_only_outputs():
+    pool = object.__new__(StagePool)
+    memory_outputs = OmniEngineCoreOutputs(stage_memory_stats=StageMemoryStats(ref_context_cache_entries=0))
+    client = SimpleNamespace(get_output_async=AsyncMock(return_value=memory_outputs))
+
+    assert await pool._poll_stage_raw(client) is memory_outputs
+
+    client.get_output_async.return_value = OmniEngineCoreOutputs()
+    assert await pool._poll_stage_raw(client) is None

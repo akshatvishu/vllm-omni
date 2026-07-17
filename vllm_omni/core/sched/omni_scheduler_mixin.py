@@ -149,6 +149,11 @@ class OmniSchedulerMixin:
             **base_data,
             finished_requests_needing_kv_transfer=finished_requests_needing_kv_transfer or {},
             pending_input_registrations=pending_input_registrations,
+            collect_stage_stats=bool(self.log_stats)
+            and (
+                bool(base.finished_req_ids)
+                or time.monotonic() - getattr(self, "_last_stats_time", 0.0) >= _STATS_INTERVAL_S
+            ),
         )
 
     def make_stats(self, *args, **kwargs) -> SchedulerStats | None:

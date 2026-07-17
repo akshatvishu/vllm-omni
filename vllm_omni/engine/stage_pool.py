@@ -1055,7 +1055,12 @@ class StagePool:
     async def _poll_stage_raw(self, client: StagePoolLLMClient) -> EngineCoreOutputs | None:
         """Pull raw EngineCoreOutputs from a stage replica without processing."""
         outputs = await client.get_output_async()
-        if not outputs.outputs:
+        if (
+            not outputs.outputs
+            and outputs.scheduler_stats is None
+            and getattr(outputs, "stage_memory_stats", None) is None
+            and not outputs.finished_requests
+        ):
             return None
         return outputs
 

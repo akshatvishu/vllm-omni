@@ -711,6 +711,11 @@ class Orchestrator:
                                     iteration_stats,
                                     engine_idx=self._stage_replica_to_engine_idx[(stage_id, replica_id)],
                                 )
+                            if self._stat_logger is not None and raw_outputs.stage_memory_stats is not None:
+                                self._stat_logger.record_stage_memory(
+                                    raw_outputs.stage_memory_stats,
+                                    engine_idx=self._stage_replica_to_engine_idx[(stage_id, replica_id)],
+                                )
                         except asyncio.CancelledError:
                             raise
                         except EngineDeadError as e:
