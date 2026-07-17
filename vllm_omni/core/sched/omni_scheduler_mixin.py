@@ -702,10 +702,7 @@ class OmniSchedulerMixin(_SchedulerMixinBase):
             input_terminal_req_ids=input_terminal_req_ids or set(),
             pending_request_prewarms=request_prewarms,
             collect_stage_stats=bool(self.log_stats)
-            and (
-                bool(base.finished_req_ids)
-                or time.monotonic() - getattr(self, "_last_stats_time", 0.0) >= _STATS_INTERVAL_S
-            ),
+            and (base.total_num_scheduled_tokens > 0 or bool(base.finished_req_ids)),
         )
 
     def _rewrap_scheduled_new_reqs(self, scheduler_output: SchedulerOutput) -> None:
@@ -990,6 +987,7 @@ class OmniSchedulerMixin(_SchedulerMixinBase):
         cudagraph_stats: CUDAGraphStat | None,
         perf_stats: PerfStats | None,
         stage_memory_stats: StageMemoryStats | None = None,
+        force_stage_memory_stats: bool = False,
     ) -> None:
         stats = self.make_stats(
             spec_decoding_stats,
@@ -997,6 +995,8 @@ class OmniSchedulerMixin(_SchedulerMixinBase):
             cudagraph_stats,
             perf_stats,
         )
+        if stats is None and not force_stage_memory_stats:
+            stage_memory_stats = None
         if stats is None and stage_memory_stats is None:
             return
         if (output := next(iter(engine_core_outputs.values()), None)) is None:
