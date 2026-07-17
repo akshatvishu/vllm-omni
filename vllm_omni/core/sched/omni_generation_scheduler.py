@@ -691,7 +691,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
             self._latest_stage_memory_stats = stage_memory_stats
         if stats is not None:
             emit_stage_memory_stats = self._latest_stage_memory_stats
-        elif scheduler_output.finished_req_ids:
+        elif scheduler_output.finished_req_ids or self.finished_req_ids:
             emit_stage_memory_stats = stage_memory_stats
         else:
             emit_stage_memory_stats = None
