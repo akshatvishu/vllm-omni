@@ -20,15 +20,13 @@ from vllm.v1.core.sched.scheduler import Scheduler as VLLMScheduler
 from vllm.v1.core.sched.utils import remove_all
 from vllm.v1.engine import EngineCoreEventType, EngineCoreOutput, EngineCoreOutputs
 from vllm.v1.metrics.perf import PerfStats
-from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus, StreamingUpdate
 from vllm.v1.spec_decode.metrics import SpecDecodingStats
 
 from vllm_omni.core.sched.omni_scheduler_mixin import OmniSchedulerMixin
 from vllm_omni.core.sched.output import OmniCachedRequestData, OmniNewRequestData
-from vllm_omni.engine import OmniEngineCoreOutputs
 from vllm_omni.engine.serialization import deserialize_additional_information
-from vllm_omni.outputs import StageMemoryStats
+from vllm_omni.outputs import OmniModelRunnerOutput
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.request_queue import RequestQueue
@@ -61,7 +59,6 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
         self._retains_state_across_chunks = bool(getattr(model_config, "retains_state_across_chunks", False))
         self._supports_pending_generation = bool(getattr(model_config, "supports_pending_generation", False))
         self._pending_finish_reqs: list[Request] = []
-        self._latest_stage_memory_stats: StageMemoryStats | None = None
         self._pending_chunk_error_outputs: list[tuple[int, EngineCoreOutput]] = []
         connector_config = getattr(model_config, "stage_connector_config", None)
         extra = (
@@ -839,7 +836,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
     def update_from_output(
         self,
         scheduler_output: SchedulerOutput,
-        model_runner_output: ModelRunnerOutput,
+        model_runner_output: OmniModelRunnerOutput,
     ) -> dict[int, EngineCoreOutputs]:
         """Update scheduler state and finish completed one-shot work."""
         sampled_token_ids = model_runner_output.sampled_token_ids
@@ -1168,9 +1165,7 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
 
         # Create EngineCoreOutputs for all clients that have requests with
         # outputs in this step.
-        engine_core_outputs = {
-            client_index: OmniEngineCoreOutputs(outputs=outs) for client_index, outs in outputs.items()
-        }
+        engine_core_outputs = {client_index: EngineCoreOutputs(outputs=outs) for client_index, outs in outputs.items()}
 
         self._attach_finished_request_sets(
             engine_core_outputs,
@@ -1183,8 +1178,6 @@ class OmniGenerationScheduler(OmniSchedulerMixin, VLLMScheduler):
             kv_connector_stats,
             cudagraph_stats,
             perf_stats,
-            stage_memory_stats=getattr(model_runner_output, "stage_memory_stats", None),
-            force_stage_memory_stats=bool(scheduler_output.finished_req_ids or self.finished_req_ids),
         )
 
         self._capture_omni_connector_output(model_runner_output)

@@ -139,4 +139,3 @@ class OmniSchedulerOutput(SchedulerOutput):
     data_plane_terminal_req_ids: set[str] = field(default_factory=set)
     input_terminal_req_ids: set[str] = field(default_factory=set)
     pending_request_prewarms: list[OmniRequestPrewarm] = field(default_factory=list)
-    collect_stage_stats: bool = False

@@ -15,8 +15,6 @@ from vllm.v1.engine import (
     EngineCoreRequest,
 )
 
-from vllm_omni.outputs import StageMemoryStats
-
 
 class PromptEmbedsPayload(msgspec.Struct):
     """Serialized prompt embeddings payload for direct transfer.
@@ -160,4 +158,3 @@ class OmniEngineCoreOutput(EngineCoreOutput):
 
 class OmniEngineCoreOutputs(EngineCoreOutputs):
     outputs: list[OmniEngineCoreOutput] = []
-    stage_memory_stats: StageMemoryStats | None = None

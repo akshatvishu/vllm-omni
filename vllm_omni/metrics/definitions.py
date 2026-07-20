@@ -27,12 +27,8 @@ METRIC_PREFIX = "vllm_omni:"
 logger = logging.getLogger(__name__)
 
 
-# =====================================================================
-
 # ============================================================================
 # Bench-side stems (also used as RequestFuncOutput attribute names)
-# =====================================================================
-
 # ============================================================================
 AUDIO_TTFP = "audio_ttfp"
 AUDIO_DURATION = "audio_duration"
@@ -146,12 +142,8 @@ NUM_TOKENS_OUT = "num_tokens_out"
 AUDIO_SAMPLE_RATE = "audio_sample_rate"
 
 
-# =====================================================================
-
 # ============================================================================
 # Pipeline-level metric families (request counts + e2e latency)
-# =====================================================================
-
 # ============================================================================
 NUM_REQUESTS_RUNNING = METRIC_PREFIX + "num_requests_running"
 NUM_REQUESTS_WAITING = METRIC_PREFIX + "num_requests_waiting"
@@ -172,12 +164,8 @@ DUPLEX_ADMISSION_REJECTED = METRIC_PREFIX + "duplex_admission_rejected"
 DUPLEX_ADMISSION_REJECT_REASONS = frozenset({"global_capacity_exhausted", "replica_capacity_exhausted", "unknown"})
 
 
-# =====================================================================
-
 # ============================================================================
 # Audio family (per-stage + per-replica audio path metrics)
-# =====================================================================
-
 # ============================================================================
 AUDIO_TTFP_S = METRIC_PREFIX + AUDIO_TTFP + "_s"
 AUDIO_DURATION_S = METRIC_PREFIX + AUDIO_DURATION + "_s"
@@ -196,12 +184,8 @@ REALTIME_VAD_ENDPOINT_DELAY_S = METRIC_PREFIX + "realtime_vad_endpoint_delay_s"
 REALTIME_VAD_ERRORS = METRIC_PREFIX + "realtime_vad_errors"
 
 
-# =====================================================================
-
 # ============================================================================
 # Diffusion family (per-stage + per-replica diffusion timing breakdowns)
-# =====================================================================
-
 # ============================================================================
 DIFFUSION_EXEC_S = METRIC_PREFIX + "diffusion_exec_s"
 DIFFUSION_EXEC_PER_STEP_S = METRIC_PREFIX + "diffusion_exec_per_step_s"
@@ -209,12 +193,8 @@ DIFFUSION_PREPROCESS_S = METRIC_PREFIX + "diffusion_preprocess_s"
 DIFFUSION_POSTPROCESS_S = METRIC_PREFIX + "diffusion_postprocess_s"
 
 
-# =====================================================================
-
 # ============================================================================
 # Cross-stage Transfer family (per-physical-hop TX/RX/in-flight timings)
-# =====================================================================
-
 # ============================================================================
 TRANSFER_SIZE_BYTES = METRIC_PREFIX + "transfer_size_bytes"
 TRANSFER_TX_S = METRIC_PREFIX + "transfer_tx_s"
@@ -222,12 +202,8 @@ TRANSFER_RX_S = METRIC_PREFIX + "transfer_rx_s"
 TRANSFER_IN_FLIGHT_S = METRIC_PREFIX + "transfer_in_flight_s"
 
 
-# =====================================================================
-
 # ============================================================================
 # Image / diffusion service-level families
-# =====================================================================
-
 # ============================================================================
 STAGE_GEN_TIME_S = METRIC_PREFIX + "stage_gen_time_s"
 REQUEST_QUEUE_WAIT_S = METRIC_PREFIX + "request_queue_wait_s"
@@ -251,23 +227,14 @@ STAGE_IN_QUEUE_S = METRIC_PREFIX + "stage_in_queue_s"
 
 
 # ============================================================================
-# Generation-stage memory family (per-stage + per-replica)
-# =====================================================================
-
+# Generation-stage post-warmup memory family (per-stage + per-replica)
 # ============================================================================
-STAGE_MEMORY_ALLOCATED_BYTES = METRIC_PREFIX + "stage_memory_allocated_bytes"
-STAGE_MEMORY_RESERVED_BYTES = METRIC_PREFIX + "stage_memory_reserved_bytes"
-STAGE_REF_CONTEXT_CACHE_BYTES = METRIC_PREFIX + "stage_ref_context_cache_bytes"
-STAGE_REF_CONTEXT_CACHE_ENTRIES = METRIC_PREFIX + "stage_ref_context_cache_entries"
-STAGE_REF_CONTEXT_CACHE_EVICTIONS = METRIC_PREFIX + "stage_ref_context_cache_evictions"
+STAGE_POST_WARMUP_MEMORY_ALLOCATED_BYTES = METRIC_PREFIX + "stage_post_warmup_memory_allocated_bytes"
+STAGE_POST_WARMUP_MEMORY_RESERVED_BYTES = METRIC_PREFIX + "stage_post_warmup_memory_reserved_bytes"
 
-
-# =====================================================================
 
 # ============================================================================
 # Label sets
-# =====================================================================
-
 # ============================================================================
 PIPELINE_LABELS = ("model_name",)
 SUCCESS_LABELS = ("model_name", "finished_reason")
@@ -303,12 +270,8 @@ TRANSFER_LABELS = (
 )
 
 
-# =====================================================================
-
 # ============================================================================
 # Histogram buckets
-# =====================================================================
-
 # ============================================================================
 # Seconds bucket for e2e / generation / TTFP-style metrics that range from
 # ~10 ms to several minutes.
@@ -376,12 +339,8 @@ BYTES_BUCKETS = (
 )
 
 
-# =====================================================================
-
 # ============================================================================
 # Audio defaults (shared by server-side observe and bench-side calculation)
-# =====================================================================
-
 # ============================================================================
 # Most common across vllm-omni talker variants (cosyvoice3, omnivoice,
 # qwen3_tts, mimo_audio). voxcpm2 uses 48000, stable_audio 44100,
@@ -437,12 +396,8 @@ def stage_modality_flags(
     )
 
 
-# =====================================================================
-
 # ============================================================================
 # Formula helpers (shared by server-side observe and bench-side calculation)
-# =====================================================================
-
 # ============================================================================
 def compute_audio_rtf(audio_generation_latency_s: float, audio_duration_s: float) -> float:
     """RTF = audio_generation_latency / audio_content_duration.
@@ -479,12 +434,8 @@ def compute_audio_frames(
     return pcm_nbytes // frame_width
 
 
-# =====================================================================
-
 # ============================================================================
 # Audio sample-rate resolution
-# =====================================================================
-
 # ============================================================================
 _SAMPLE_RATE_KEYS = ("output_sample_rate", "audio_sample_rate", "sample_rate", "sampling_rate", "sr")
 

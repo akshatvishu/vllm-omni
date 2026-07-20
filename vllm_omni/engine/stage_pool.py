@@ -1235,12 +1235,11 @@ class StagePool:
         it through ``poll_llm_raw_output``.
         """
         outputs = await client.get_output_async()
-        if (
-            not outputs.outputs
-            and outputs.scheduler_stats is None
-            and getattr(outputs, "stage_memory_stats", None) is None
-            and not outputs.finished_requests
-        ):
+        # Keep scheduler-only / finished-only batches. Omni schedulers mirror
+        # upstream by emitting SchedulerStats on throttled ticks even when no
+        # request output is produced, and dropping those batches loses KV/queue
+        # gauges for that interval.
+        if not outputs.outputs and outputs.scheduler_stats is None and not outputs.finished_requests:
             return None
         self._rehydrate_pooling_output_payloads(outputs)
         return outputs

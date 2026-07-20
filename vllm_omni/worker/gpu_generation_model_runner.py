@@ -40,7 +40,7 @@ from vllm.v1.worker.gpu_model_runner import (
 from vllm.v1.worker.ubatch_utils import maybe_create_ubatch_slices
 from vllm.v1.worker.utils import sanity_check_mm_encoder_outputs
 
-from vllm_omni.outputs import OmniModelRunnerOutput, StageMemoryStats
+from vllm_omni.outputs import OmniModelRunnerOutput
 from vllm_omni.utils.mm_outputs import partition_payload_list, split_mapping_outputs
 from vllm_omni.worker.gpu_ar_model_runner import (
     ExecuteModelState,
@@ -302,14 +302,6 @@ class GPUGenerationModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin
                 if prev_step_idle:
                     self._call_optional_model_hook("run_idle_prefetch")
                 if not has_kv_transfer_group():
-                    if (stage_memory_stats := self._collect_stage_memory_stats(scheduler_output)) is not None:
-                        return self.attach_omni_connector_output(
-                            OmniModelRunnerOutput(
-                                req_ids=[],
-                                req_id_to_index={},
-                                stage_memory_stats=stage_memory_stats,
-                            )
-                        )
                     # Return empty ModelRunnerOutput if no work to do.
                     return self.attach_omni_connector_output(EMPTY_MODEL_RUNNER_OUTPUT)
 
@@ -642,7 +634,6 @@ class GPUGenerationModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin
             num_nans_in_logits={},
             cudagraph_stats=cudagraph_stats,
             ec_connector_output=ec_connector_output if self.supports_mm_inputs else None,
-            stage_memory_stats=self._collect_stage_memory_stats(scheduler_output),
         )
         output.omni_connector_output = self.get_omni_connector_output()
 
@@ -666,13 +657,6 @@ class GPUGenerationModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin
             vocab_size=self.input_batch.vocab_size,
             logprobs_tensors=None,
         )
-
-    def _collect_stage_memory_stats(self, scheduler_output: SchedulerOutput) -> StageMemoryStats | None:
-        if getattr(scheduler_output, "collect_stage_stats", False):
-            model = self.get_model()
-            if hasattr(model, "get_stage_memory_stats"):
-                return model.get_stage_memory_stats()
-        return None
 
     def _run_generation_model(
         self,

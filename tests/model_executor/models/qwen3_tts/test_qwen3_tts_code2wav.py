@@ -1140,11 +1140,18 @@ def test_decode_autotune_restores_process_flags(mocker, monkeypatch, capture_fai
     assert torch.backends.cudnn.benchmark_limit == 5
 
 
-def test_stage_memory_stats_reads_retained_wrapper_accounting():
+def test_stage_post_warmup_memory_stats_reads_retained_wrapper():
     model = _make_model()
     model.decoder._cudagraph_wrapper = SimpleNamespace(post_warmup_memory_stats=(17, 23))
 
-    stats = model.get_stage_memory_stats()
+    stats = model.get_stage_post_warmup_memory_stats()
 
+    assert stats is not None
     assert stats.allocated_bytes == 17
     assert stats.reserved_bytes == 23
+
+
+def test_stage_post_warmup_memory_stats_omits_missing_snapshot():
+    model = _make_model()
+
+    assert model.get_stage_post_warmup_memory_stats() is None

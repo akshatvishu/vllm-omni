@@ -11,7 +11,6 @@ import torch
 from vllm.v1.serial_utils import MsgpackDecoder, MsgpackEncoder
 
 from vllm_omni.engine import OmniEngineCoreOutput, OmniEngineCoreOutputs
-from vllm_omni.outputs import StageMemoryStats
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
@@ -52,20 +51,6 @@ def test_empty_multimodal_roundtrip():
     )
     decoded = _roundtrip(OmniEngineCoreOutputs(outputs=[eco]))
     assert decoded.outputs[0].multimodal_output is None
-
-
-def test_stage_memory_stats_roundtrip():
-    expected = StageMemoryStats(
-        allocated_bytes=11,
-        reserved_bytes=13,
-        ref_context_cache_bytes=17,
-        ref_context_cache_entries=19,
-        ref_context_cache_evictions=23,
-    )
-
-    decoded = _roundtrip(OmniEngineCoreOutputs(stage_memory_stats=expected))
-
-    assert decoded.stage_memory_stats == expected
 
 
 def test_multiple_tensor_keys_roundtrip():
