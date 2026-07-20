@@ -14,7 +14,7 @@ from vllm.model_executor.model_loader import DefaultModelLoader
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
 from vllm_omni.model_executor.models.output_templates import OmniOutput
-from vllm_omni.outputs import StageMemoryStats
+from vllm_omni.outputs import StagePostWarmupMemoryStats
 
 from .tokenizer_12hz.configuration_qwen3_tts_tokenizer_v2 import (
     Qwen3TTSTokenizerV2Config,
@@ -106,7 +106,6 @@ class Qwen3TTSCode2Wav(nn.Module):
         self._decoder_sliding_window = int(getattr(dec_config, "sliding_window", 0) or 0)
         self._ref_context_cache: OrderedDict[str, torch.Tensor] = OrderedDict()
         self._ref_context_cache_bytes = 0
-        self._ref_context_cache_evictions = 0
         self._ref_context_cache_max_entries = _REF_CONTEXT_CACHE_MAX_ENTRIES
         self._ref_context_cache_max_bytes = _REF_CONTEXT_CACHE_MAX_BYTES
 
@@ -229,7 +228,6 @@ class Qwen3TTSCode2Wav(nn.Module):
             self._ref_context_cache_bytes -= self._tensor_nbytes(cached)
             evicted += 1
         if evicted:
-            self._ref_context_cache_evictions += evicted
             logger.debug(
                 "Evicted %d Qwen3-TTS ref context cache entries; entries=%d bytes=%d",
                 evicted,
@@ -237,18 +235,13 @@ class Qwen3TTSCode2Wav(nn.Module):
                 self._ref_context_cache_bytes,
             )
 
-    def get_stage_memory_stats(self) -> StageMemoryStats:
-        """Return the model-owned memory values for the engine stats path."""
+    def get_stage_post_warmup_memory_stats(self) -> StagePostWarmupMemoryStats | None:
+        """Return the allocator snapshot retained after decoder warmup."""
         wrapper = getattr(self.decoder, "_cudagraph_wrapper", None)
         memory_stats = getattr(wrapper, "post_warmup_memory_stats", None)
-        allocated_bytes, reserved_bytes = memory_stats or (None, None)
-        return StageMemoryStats(
-            allocated_bytes=allocated_bytes,
-            reserved_bytes=reserved_bytes,
-            ref_context_cache_bytes=self._ref_context_cache_bytes,
-            ref_context_cache_entries=len(self._ref_context_cache),
-            ref_context_cache_evictions=self._ref_context_cache_evictions,
-        )
+        if memory_stats is None:
+            return None
+        return StagePostWarmupMemoryStats(*memory_stats)
 
     def _cache_ref_context(self, request_id: str, tensor: torch.Tensor) -> None:
         previous = self._ref_context_cache.pop(request_id, None)

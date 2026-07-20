@@ -446,6 +446,7 @@ class AsyncOmniEngine:
                 log_stats=self._log_stats,
                 enable_orch_monitor=self._enable_orch_monitor,
             )
+            await orchestrator.publish_stage_post_warmup_memory()
             if not startup_future.done():
                 startup_future.set_result(asyncio.get_running_loop())
             await orchestrator.run()

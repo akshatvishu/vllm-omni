@@ -5,7 +5,6 @@ import pytest
 import torch
 
 import vllm_omni.worker.gpu_generation_model_runner as generation_runner
-from vllm_omni.outputs import StageMemoryStats
 from vllm_omni.worker.gpu_generation_model_runner import (
     ExecuteModelState,
     GPUGenerationModelRunner,
@@ -22,10 +21,10 @@ class _DummyInputBatch:
         self.vocab_size = 10
 
 
-def _make_runner(multimodal_outputs, *, collect_stage_stats: bool = False):
+def _make_runner(multimodal_outputs):
     runner = object.__new__(GPUGenerationModelRunner)
     runner.execute_model_state = ExecuteModelState(
-        SimpleNamespace(collect_stage_stats=collect_stage_stats),
+        None,
         None,
         None,
         None,
@@ -92,34 +91,7 @@ def test_sample_tokens_dict_output():
     assert output.multimodal_outputs[0]["audio"].shape == (1, 4)
 
 
-def test_sample_tokens_collects_stage_memory_from_raw_model():
-    runner = _make_runner(torch.randn(1, 2, 3), collect_stage_stats=True)
-    expected = StageMemoryStats(allocated_bytes=1)
-    runner.get_model = lambda: SimpleNamespace(get_stage_memory_stats=lambda: expected)
-
-    output = GPUGenerationModelRunner.sample_tokens(runner)
-
-    assert output.stage_memory_stats is expected
-
-
-def test_sample_tokens_skips_stage_memory_hook_without_stats_tick():
-    runner = _make_runner(torch.randn(1, 2, 3))
-    runner.model.get_stage_memory_stats = lambda: pytest.fail("stats hook must not be called")
-
-    output = GPUGenerationModelRunner.sample_tokens(runner)
-
-    assert output.stage_memory_stats is None
-
-
-def test_sample_tokens_without_stage_memory_hook():
-    runner = _make_runner(torch.randn(1, 2, 3), collect_stage_stats=True)
-
-    output = GPUGenerationModelRunner.sample_tokens(runner)
-
-    assert output.stage_memory_stats is None
-
-
-def test_zero_token_cleanup_collects_stage_memory(monkeypatch):
+def test_zero_token_cleanup_notifies_model(monkeypatch):
     runner = object.__new__(GPUGenerationModelRunner)
     runner.execute_model_state = None
     runner.routed_experts_initialized = False
@@ -137,7 +109,6 @@ def test_zero_token_cleanup_collects_stage_memory(monkeypatch):
 
     raw_model = SimpleNamespace(
         on_requests_finished=on_requests_finished,
-        get_stage_memory_stats=lambda: StageMemoryStats(ref_context_cache_entries=cache_entries),
     )
     runner.model = SimpleNamespace()
     runner.get_model = lambda: raw_model
@@ -145,10 +116,9 @@ def test_zero_token_cleanup_collects_stage_memory(monkeypatch):
         total_num_scheduled_tokens=0,
         num_scheduled_tokens={},
         finished_req_ids={"req-1"},
-        collect_stage_stats=True,
     )
     monkeypatch.setattr(generation_runner, "has_kv_transfer_group", lambda: False)
 
-    output = GPUGenerationModelRunner.execute_model(runner, scheduler_output)
+    GPUGenerationModelRunner.execute_model(runner, scheduler_output)
 
-    assert output.stage_memory_stats.ref_context_cache_entries == 0
+    assert cache_entries == 0

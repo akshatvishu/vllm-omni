@@ -286,10 +286,9 @@ def test_ref_context_cache_evicts_lru_entries_at_entry_cap():
 
     assert list(model._ref_context_cache) == ["b", "c"]
     assert model._ref_context_cache_bytes == sum(model._tensor_nbytes(t) for t in model._ref_context_cache.values())
-    assert model._ref_context_cache_evictions == 1
 
 
-def test_finished_request_cleanup_is_not_a_capacity_eviction():
+def test_finished_request_cleanup_removes_cached_context():
     model = _make_model()
     model._cache_ref_context("a", torch.ones(4))
     model._cache_ref_context("b", torch.ones(8))
@@ -298,7 +297,6 @@ def test_finished_request_cleanup_is_not_a_capacity_eviction():
 
     assert list(model._ref_context_cache) == ["b"]
     assert model._ref_context_cache_bytes == 32
-    assert model._ref_context_cache_evictions == 0
 
 
 def test_ref_context_cache_evicts_to_byte_cap():
@@ -324,22 +322,23 @@ def test_ref_context_cache_evicts_to_byte_cap():
 
     assert list(model._ref_context_cache) == ["b"]
     assert model._ref_context_cache_bytes == 32
-    assert model._ref_context_cache_evictions == 1
 
 
-def test_stage_memory_stats_reads_retained_wrapper_and_cache_accounting():
+def test_stage_post_warmup_memory_stats_reads_retained_wrapper():
     model = _make_model()
     model.decoder._cudagraph_wrapper = SimpleNamespace(post_warmup_memory_stats=(17, 23))
-    model._cache_ref_context("rid", torch.ones(4))
-    model._ref_context_cache_evictions = 7
 
-    stats = model.get_stage_memory_stats()
+    stats = model.get_stage_post_warmup_memory_stats()
 
+    assert stats is not None
     assert stats.allocated_bytes == 17
     assert stats.reserved_bytes == 23
-    assert stats.ref_context_cache_bytes == 16
-    assert stats.ref_context_cache_entries == 1
-    assert stats.ref_context_cache_evictions == 7
+
+
+def test_stage_post_warmup_memory_stats_omits_missing_snapshot():
+    model = _make_model()
+
+    assert model.get_stage_post_warmup_memory_stats() is None
 
 
 def test_connector_codec_chunking_does_not_override_decode_chunking():

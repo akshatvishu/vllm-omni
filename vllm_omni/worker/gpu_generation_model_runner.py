@@ -36,7 +36,7 @@ from vllm.v1.worker.gpu_model_runner import (
 from vllm.v1.worker.ubatch_utils import maybe_create_ubatch_slices
 from vllm.v1.worker.utils import sanity_check_mm_encoder_outputs
 
-from vllm_omni.outputs import OmniModelRunnerOutput, StageMemoryStats
+from vllm_omni.outputs import OmniModelRunnerOutput
 from vllm_omni.utils.mm_outputs import partition_payload_list
 from vllm_omni.worker.gpu_ar_model_runner import ExecuteModelState, _ensure_tensor_values
 from vllm_omni.worker.gpu_model_runner import OmniGPUModelRunner
@@ -163,14 +163,6 @@ class GPUGenerationModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin
                     model.on_requests_finished(scheduler_output.finished_req_ids)
 
             if not scheduler_output.total_num_scheduled_tokens:
-                if (stage_memory_stats := self._collect_stage_memory_stats(scheduler_output)) is not None:
-                    return self.attach_omni_connector_output(
-                        OmniModelRunnerOutput(
-                            req_ids=[],
-                            req_id_to_index={},
-                            stage_memory_stats=stage_memory_stats,
-                        )
-                    )
                 return self.attach_omni_connector_output(EMPTY_MODEL_RUNNER_OUTPUT)
 
             if has_ec_transfer() and not get_ec_transfer().is_consumer:
@@ -505,7 +497,6 @@ class GPUGenerationModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin
             num_nans_in_logits={},
             cudagraph_stats=cudagraph_stats,
             ec_connector_output=ec_connector_output if self.supports_mm_inputs else None,
-            stage_memory_stats=self._collect_stage_memory_stats(scheduler_output),
         )
         output.omni_connector_output = self.get_omni_connector_output()
         output.routed_experts = routed_experts_lists
@@ -521,13 +512,6 @@ class GPUGenerationModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin
             vocab_size=self.input_batch.vocab_size,
             logprobs_tensors=None,
         )
-
-    def _collect_stage_memory_stats(self, scheduler_output: SchedulerOutput) -> StageMemoryStats | None:
-        if scheduler_output.collect_stage_stats:
-            model = self.get_model()
-            if hasattr(model, "get_stage_memory_stats"):
-                return model.get_stage_memory_stats()
-        return None
 
     def _run_generation_model(
         self,
