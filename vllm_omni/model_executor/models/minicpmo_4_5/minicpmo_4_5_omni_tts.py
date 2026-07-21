@@ -290,7 +290,22 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
 
         inputs_embeds = torch.cat([spk_embeds, tts_embeds, text_eos, audio_bos], dim=0).unsqueeze(0)
         inputs_embeds = inputs_embeds.to(dtype=ar_dtype)
-        logger.info("generate_speech: inputs_embeds shape=%s", list(inputs_embeds.shape))
+        logger.info(
+            "[DIAGNOSTIC][talker] implementation=%s.%s device=%s dtype=%s "
+            "tts_tokens_shape=%s hidden_states_shape=%s inputs_embeds_shape=%s "
+            "sampling_config={temperature:%s, top_p:%s, top_k:%s, repetition_penalty:%s}",
+            type(tts).__module__,
+            type(tts).__name__,
+            device,
+            inputs_embeds.dtype,
+            list(tts_token_ids.shape),
+            list(tts_hidden_states.shape),
+            list(inputs_embeds.shape),
+            getattr(tts.config, "temperature", None),
+            getattr(tts.config, "top_p", None),
+            getattr(tts.config, "top_k", None),
+            getattr(tts.config, "repetition_penalty", None),
+        )
 
         # Scale max_new_token with input text length to avoid mid-stream truncation on long
         # responses (default 2048 can only cover ~300 text tokens at ~6x audio/text ratio).
@@ -307,12 +322,31 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             show_tqdm=False,
         )
         generated_tokens = outputs.new_ids.squeeze(-1)
+        flat_generated_tokens = generated_tokens.detach().reshape(-1)
         talker_finished = getattr(outputs, "finished", None)
         if isinstance(talker_finished, torch.Tensor):
             talker_finished = bool(torch.all(talker_finished).item())
         elif talker_finished is not None:
             talker_finished = bool(talker_finished)
         talker_cap_reached = generated_tokens.shape[-1] >= max_new_token
+        eos_positions = torch.where(flat_generated_tokens == eos_token.item())[0]
+        eos_count = int(eos_positions.numel())
+        last_token = int(flat_generated_tokens[-1].item()) if flat_generated_tokens.numel() else None
+        logger.info(
+            "[DIAGNOSTIC][talker] output_shape=%s output_attrs=%s "
+            "eos_id=%d eos_count=%d first_eos_position=%s last_eos_position=%s "
+            "last_token=%s last_token_is_eos=%s first_tokens=%s last_tokens=%s",
+            list(outputs.new_ids.shape),
+            sorted(vars(outputs).keys()) if hasattr(outputs, "__dict__") else [],
+            eos_token.item(),
+            eos_count,
+            int(eos_positions[0].item()) if eos_count else None,
+            int(eos_positions[-1].item()) if eos_count else None,
+            last_token,
+            last_token == eos_token.item() if last_token is not None else False,
+            [int(token) for token in flat_generated_tokens[:16].tolist()],
+            [int(token) for token in flat_generated_tokens[-16:].tolist()],
+        )
         logger.info(
             "[DIAGNOSTIC][talker] generated %d audio tokens (cap=%d, text_tokens=%d, finished=%s, cap_reached=%s)",
             generated_tokens.shape[-1],
@@ -370,6 +404,20 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 STREAM_THRESHOLD = int(os.environ.get("MINICPMO45_TTS_STREAM_THRESHOLD", "2500"))  # ~100s @ 25Hz
                 CHUNK_SIZE = int(os.environ.get("MINICPMO45_TTS_STREAM_CHUNK", "50"))  # ~2s per chunk
 
+                logger.info(
+                    "[DIAGNOSTIC][vocoder] backend=%s mode=%s token_count=%d "
+                    "stream_threshold=%d chunk_size=%d prompt_wav=%s "
+                    "input_has_eos=%s input_last_tokens=%s",
+                    _token2wav_backend,
+                    "oneshot" if num_tokens <= STREAM_THRESHOLD else "stream",
+                    num_tokens,
+                    STREAM_THRESHOLD,
+                    CHUNK_SIZE,
+                    prompt_wav_path,
+                    bool(token_list and token_list[-1] == int(eos_token.item())),
+                    token_list[-16:],
+                )
+
                 if num_tokens <= STREAM_THRESHOLD:
                     wav_bytes = self.audio_tokenizer(token_list, prompt_wav_path)
                     waveform, sr = sf.read(io.BytesIO(wav_bytes))
@@ -378,11 +426,13 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     chunks = _build_stream_chunks(token_list, CHUNK_SIZE)
 
                     logger.info(
-                        "generate_speech: streaming vocoder, %d tokens -> %d chunks (chunk=%d, lookahead=%d)",
+                        "[DIAGNOSTIC][vocoder] streaming_start input_tokens=%d chunks=%d "
+                        "chunk_size=%d lookahead=%d expected_samples_at_25hz=%d",
                         num_tokens,
                         len(chunks),
                         CHUNK_SIZE,
                         _MINICPMO45_STREAM_LOOKAHEAD,
+                        num_tokens * 24000 // 25,
                     )
 
                     stream_cache, hift_cache_dict = self.audio_tokenizer.set_stream_cache(prompt_wav_path)
@@ -391,16 +441,40 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
 
                     try:
                         pieces = []
-                        for token_chunk, is_last in chunks:
+                        cumulative_samples = 0
+                        for chunk_index, (token_chunk, is_last) in enumerate(chunks):
                             wav_np = self.audio_tokenizer.stream(
                                 token_chunk,
                                 prompt_wav_path,
                                 last_chunk=is_last,
                                 return_waveform=True,
                             )
-                            pieces.append(np.asarray(wav_np).reshape(-1))
+                            piece = np.asarray(wav_np).reshape(-1).astype(np.float32, copy=False)
+                            pieces.append(piece)
+                            cumulative_samples += int(piece.shape[0])
+                            logger.info(
+                                "[DIAGNOSTIC][vocoder_chunk] index=%d input_tokens=%d "
+                                "first_token=%s last_token=%s last_chunk=%s output_samples=%d "
+                                "cumulative_samples=%d cumulative_duration_sec=%.3f",
+                                chunk_index,
+                                len(token_chunk),
+                                token_chunk[0] if token_chunk else None,
+                                token_chunk[-1] if token_chunk else None,
+                                is_last,
+                                piece.shape[0],
+                                cumulative_samples,
+                                cumulative_samples / 24000.0,
+                            )
                         waveform = np.concatenate(pieces, axis=0).astype(np.float32)
                         sr = 24000
+                        logger.info(
+                            "[DIAGNOSTIC][vocoder] streaming_end input_tokens=%d "
+                            "actual_samples=%d expected_samples_at_25hz=%d sample_delta=%d",
+                            num_tokens,
+                            waveform.shape[0],
+                            num_tokens * 24000 // 25,
+                            waveform.shape[0] - (num_tokens * 24000 // 25),
+                        )
                     finally:
                         # Free per-request streaming state so the next request starts clean
                         self.audio_tokenizer.stream_cache = None
@@ -409,7 +483,24 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             torch.set_default_dtype(prev_dtype)
             torchaudio.save = _orig_save
 
-        logger.info("generate_speech: waveform %d samples, sr=%d", waveform.shape[0], sr)
+        waveform_flat = np.asarray(waveform).reshape(-1)
+        logger.info(
+            "[DIAGNOSTIC][vocoder] waveform_samples=%d sample_rate=%d duration_sec=%.3f finite=%s peak=%.6f rms=%.6f",
+            waveform_flat.shape[0],
+            sr,
+            waveform_flat.shape[0] / max(sr, 1),
+            bool(np.isfinite(waveform_flat).all()),
+            float(np.max(np.abs(waveform_flat))) if waveform_flat.size else 0.0,
+            float(np.sqrt(np.mean(np.square(waveform_flat)))) if waveform_flat.size else 0.0,
+        )
+        logger.info(
+            "[DIAGNOSTIC][vocoder] duration_check token_count=%d expected_samples_at_25hz=%d "
+            "actual_samples=%d sample_delta=%d",
+            num_tokens,
+            num_tokens * 24000 // 25,
+            waveform_flat.shape[0],
+            waveform_flat.shape[0] - (num_tokens * 24000 // 25),
+        )
         return waveform
 
     def _generate_tokens(self, inputs_embeds: torch.Tensor, max_new_token: int = 2048) -> torch.Tensor | None:

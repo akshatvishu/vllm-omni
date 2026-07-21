@@ -118,7 +118,8 @@ def llm2tts(
                 logger.warning(
                     "[DIAGNOSTIC][llm2tts] Missing <|tts_eos|>: request_finished=%s "
                     "finish_reason=%s stop_reason=%s tts_bos_idx=%s total_seq_len=%d "
-                    "total_gen_tokens=%d extracted_slice_len=%d",
+                    "total_gen_tokens=%d extracted_slice_len=%d thinker_text_chars=%d "
+                    "text_tail=%r token_tail=%s",
                     request_finished,
                     finish_reason,
                     stop_reason,
@@ -126,13 +127,17 @@ def llm2tts(
                     total_len,
                     total_gen_len,
                     slice_len,
+                    len(thinker_text),
+                    thinker_text[-160:],
+                    full_token_ids[-8:],
                 )
             elif tts_eos_idx < total_len - 5:
                 logger.warning(
                     "[DIAGNOSTIC][llm2tts] EARLY <|tts_eos|> TAG DETECTED! "
                     "request_finished=%s finish_reason=%s stop_reason=%s "
                     "tts_eos_idx=%d < total_seq_len=%d (total_gen_tokens=%d). "
-                    "end_idx line `end_idx = tts_eos_idx` is cutting off %d text tokens from speech synthesis!",
+                    "end_idx line `end_idx = tts_eos_idx` is cutting off %d text tokens from speech synthesis! "
+                    "thinker_text_chars=%d text_tail=%r token_tail=%s",
                     request_finished,
                     finish_reason,
                     stop_reason,
@@ -140,12 +145,17 @@ def llm2tts(
                     total_len,
                     total_gen_len,
                     total_len - tts_eos_idx,
+                    len(thinker_text),
+                    thinker_text[-160:],
+                    full_token_ids[-8:],
                 )
             else:
+                tts_slice_ids = full_token_ids[tts_bos_idx:end_idx]
                 logger.info(
                     "[DIAGNOSTIC][llm2tts] Sequence slicing info: tts_bos_idx=%s, tts_eos_idx=%s, "
                     "request_finished=%s finish_reason=%s stop_reason=%s total_len=%d, "
-                    "total_gen_tokens=%d, extracted_slice_len=%d",
+                    "total_gen_tokens=%d, extracted_slice_len=%d, thinker_text_chars=%d, "
+                    "tts_token_head=%s, tts_token_tail=%s, text_tail=%r",
                     tts_bos_idx,
                     tts_eos_idx,
                     request_finished,
@@ -154,6 +164,10 @@ def llm2tts(
                     total_len,
                     total_gen_len,
                     slice_len,
+                    len(thinker_text),
+                    tts_slice_ids[:8],
+                    tts_slice_ids[-8:],
+                    thinker_text[-160:],
                 )
 
             tts_token_ids_slice = torch.tensor(full_token_ids[tts_bos_idx:end_idx], dtype=torch.long)
