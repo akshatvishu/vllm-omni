@@ -66,6 +66,37 @@ _stepaudio2_available = _Token2wav is not None
 
 logger = logging.getLogger(__name__)
 
+_MINICPMO45_STREAM_LOOKAHEAD = 3
+_MINICPMO45_STREAM_PREFIX_TOKEN = 4218
+
+
+def _build_stream_chunks(
+    token_ids: list[int],
+    chunk_size: int,
+    lookahead: int = _MINICPMO45_STREAM_LOOKAHEAD,
+) -> list[tuple[list[int], bool]]:
+    """Build overlapping Token2Wav chunks with an explicit terminal flush.
+
+    MiniCPM-o's reference streamer gives each non-final chunk ``lookahead``
+    future tokens, but advances the input by only ``chunk_size`` tokens. The
+    final residual buffer is sent with ``last_chunk=True`` so the vocoder can
+    emit its right-edge tail.
+    """
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    if lookahead < 0:
+        raise ValueError(f"lookahead must be non-negative, got {lookahead}")
+
+    buffer = [_MINICPMO45_STREAM_PREFIX_TOKEN] * lookahead + list(token_ids)
+    chunks: list[tuple[list[int], bool]] = []
+    chunk_trigger = chunk_size + lookahead
+    while len(buffer) >= chunk_trigger:
+        chunks.append((buffer[:chunk_trigger], False))
+        del buffer[:chunk_size]
+    if buffer:
+        chunks.append((buffer, True))
+    return chunks
+
 
 def _install_torchaudio_soundfile_shim() -> None:
     """Monkey-patch torchaudio.load to use soundfile instead of the default
@@ -338,29 +369,20 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 # keeping peak memory bounded regardless of total length.
                 STREAM_THRESHOLD = int(os.environ.get("MINICPMO45_TTS_STREAM_THRESHOLD", "2500"))  # ~100s @ 25Hz
                 CHUNK_SIZE = int(os.environ.get("MINICPMO45_TTS_STREAM_CHUNK", "50"))  # ~2s per chunk
-                MIN_TAIL = 6  # must exceed flow.pre_lookahead_len (typically 3)
 
                 if num_tokens <= STREAM_THRESHOLD:
                     wav_bytes = self.audio_tokenizer(token_list, prompt_wav_path)
                     waveform, sr = sf.read(io.BytesIO(wav_bytes))
                     waveform = waveform.astype(np.float32)
                 else:
-                    # Build chunk boundaries, merging a too-small tail into the
-                    # previous chunk so every chunk satisfies MIN_TAIL.
-                    boundaries = []
-                    i = 0
-                    while i < num_tokens:
-                        end = min(i + CHUNK_SIZE, num_tokens)
-                        if 0 < num_tokens - end < MIN_TAIL:
-                            end = num_tokens
-                        boundaries.append((i, end))
-                        i = end
+                    chunks = _build_stream_chunks(token_list, CHUNK_SIZE)
 
                     logger.info(
-                        "generate_speech: streaming vocoder, %d tokens -> %d chunks (chunk=%d)",
+                        "generate_speech: streaming vocoder, %d tokens -> %d chunks (chunk=%d, lookahead=%d)",
                         num_tokens,
-                        len(boundaries),
+                        len(chunks),
                         CHUNK_SIZE,
+                        _MINICPMO45_STREAM_LOOKAHEAD,
                     )
 
                     stream_cache, hift_cache_dict = self.audio_tokenizer.set_stream_cache(prompt_wav_path)
@@ -369,10 +391,9 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
 
                     try:
                         pieces = []
-                        for idx, (s, e) in enumerate(boundaries):
-                            is_last = idx == len(boundaries) - 1
+                        for token_chunk, is_last in chunks:
                             wav_np = self.audio_tokenizer.stream(
-                                token_list[s:e],
+                                token_chunk,
                                 prompt_wav_path,
                                 last_chunk=is_last,
                                 return_waveform=True,
