@@ -11,8 +11,6 @@ on vllm_omni/model_executor/models/minicpmo_4_5/*.py).
 from typing import Any
 
 import torch
-import logging
-
 from vllm.inputs import TextPrompt
 from vllm.logger import init_logger
 
@@ -107,17 +105,37 @@ def llm2tts(
                 tts_eos_idx = idx_t
 
         total_len = full_hidden.shape[0]
+        request_finished = bool(getattr(llm_output, "finished", False))
+        finish_reason = getattr(output, "finish_reason", None)
+        stop_reason = getattr(output, "stop_reason", None)
         tts_token_ids_slice = tts_hidden_slice = None
         if tts_bos_idx is not None and total_len > tts_bos_idx:
             end_idx = tts_eos_idx if tts_eos_idx is not None else total_len
             slice_len = end_idx - tts_bos_idx
             total_gen_len = len(llm_output_ids) if isinstance(llm_output_ids, list) else len(list(llm_output_ids))
 
-            if tts_eos_idx is not None and tts_eos_idx < total_len - 5:
+            if tts_eos_idx is None:
+                logger.warning(
+                    "[DIAGNOSTIC][llm2tts] Missing <|tts_eos|>: request_finished=%s "
+                    "finish_reason=%s stop_reason=%s tts_bos_idx=%s total_seq_len=%d "
+                    "total_gen_tokens=%d extracted_slice_len=%d",
+                    request_finished,
+                    finish_reason,
+                    stop_reason,
+                    tts_bos_idx,
+                    total_len,
+                    total_gen_len,
+                    slice_len,
+                )
+            elif tts_eos_idx < total_len - 5:
                 logger.warning(
                     "[DIAGNOSTIC][llm2tts] EARLY <|tts_eos|> TAG DETECTED! "
+                    "request_finished=%s finish_reason=%s stop_reason=%s "
                     "tts_eos_idx=%d < total_seq_len=%d (total_gen_tokens=%d). "
                     "end_idx line `end_idx = tts_eos_idx` is cutting off %d text tokens from speech synthesis!",
+                    request_finished,
+                    finish_reason,
+                    stop_reason,
                     tts_eos_idx,
                     total_len,
                     total_gen_len,
@@ -126,9 +144,13 @@ def llm2tts(
             else:
                 logger.info(
                     "[DIAGNOSTIC][llm2tts] Sequence slicing info: tts_bos_idx=%s, tts_eos_idx=%s, "
-                    "total_len=%d, total_gen_tokens=%d, extracted_slice_len=%d",
+                    "request_finished=%s finish_reason=%s stop_reason=%s total_len=%d, "
+                    "total_gen_tokens=%d, extracted_slice_len=%d",
                     tts_bos_idx,
                     tts_eos_idx,
+                    request_finished,
+                    finish_reason,
+                    stop_reason,
                     total_len,
                     total_gen_len,
                     slice_len,

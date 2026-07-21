@@ -30,6 +30,7 @@ from vllm_omni.platforms import current_omni_platform
 
 # Preserve the established external vocoder on CUDA. Ascend uses the in-tree
 # adapter because ``stepaudio2-minicpmo`` hard-codes CUDA device placement.
+# Fall back to the in-tree adapter on other platforms if stepaudio2 package is missing.
 if current_omni_platform.is_npu():
     try:
         from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_token2wav import (
@@ -51,8 +52,15 @@ else:
 
         _token2wav_backend = "stepaudio2_pkg"
     except ImportError:
-        _Token2wav = None
-        _token2wav_backend = None
+        try:
+            from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_token2wav import (
+                MiniCPMO45Token2wav as _Token2wav,
+            )
+
+            _token2wav_backend = "step_audio2_core"
+        except ImportError:
+            _Token2wav = None
+            _token2wav_backend = None
 
 _stepaudio2_available = _Token2wav is not None
 
@@ -121,7 +129,9 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         if self._assets_loaded or self._tts_config is None:
             return
         try:
-            model_path = self.vllm_config.model_config.model
+            from vllm_omni.engine.stage_init_utils import _resolve_model_to_local_path
+
+            model_path = _resolve_model_to_local_path(self.vllm_config.model_config.model)
 
             if model_path not in sys.path:
                 sys.path.insert(0, model_path)
@@ -266,11 +276,19 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             show_tqdm=False,
         )
         generated_tokens = outputs.new_ids.squeeze(-1)
+        talker_finished = getattr(outputs, "finished", None)
+        if isinstance(talker_finished, torch.Tensor):
+            talker_finished = bool(torch.all(talker_finished).item())
+        elif talker_finished is not None:
+            talker_finished = bool(talker_finished)
+        talker_cap_reached = generated_tokens.shape[-1] >= max_new_token
         logger.info(
-            "generate_speech: generated %d audio tokens (cap=%d, text_tokens=%d)",
+            "[DIAGNOSTIC][talker] generated %d audio tokens (cap=%d, text_tokens=%d, finished=%s, cap_reached=%s)",
             generated_tokens.shape[-1],
             max_new_token,
             num_text,
+            talker_finished,
+            talker_cap_reached,
         )
 
         if self.audio_tokenizer is None:
@@ -279,7 +297,9 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
 
         import torchaudio
 
-        model_path = self.vllm_config.model_config.model
+        from vllm_omni.engine.stage_init_utils import _resolve_model_to_local_path
+
+        model_path = _resolve_model_to_local_path(self.vllm_config.model_config.model)
         default_ref = os.path.join(model_path, "assets", "HT_ref_audio.wav")
         prompt_wav_path = default_ref if os.path.exists(default_ref) else None
 
