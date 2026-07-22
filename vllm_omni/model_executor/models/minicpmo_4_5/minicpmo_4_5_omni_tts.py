@@ -124,6 +124,18 @@ def _iter_tts_condition_chunks(
         yield tts_embeds[:, :0], True
 
 
+def _ensure_legacy_rope_theta(tts) -> None:
+    """Expose the legacy RoPE field required by the official TTS streamer."""
+    model_config = tts.model.config
+    if hasattr(model_config, "rope_theta"):
+        return
+
+    # Transformers stores this value in ``rope_parameters`` now, while the
+    # official TTSStreamingGenerator still reads ``config.rope_theta``.
+    rope_parameters = getattr(model_config, "rope_parameters", {}) or {}
+    model_config.rope_theta = rope_parameters.get("rope_theta", 10000.0)
+
+
 def _generate_reference_tts_tokens(tts, tts_embeds: torch.Tensor, tts_module=None) -> torch.Tensor:
     """Run MiniCPM-o's stateful 10-token Talker generation protocol.
 
@@ -307,6 +319,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 self.tts_obj = MiniCPMTTS(config=self._tts_config, audio_tokenizer=None)
             finally:
                 torch.set_default_dtype(prev_dtype)
+            _ensure_legacy_rope_theta(self.tts_obj)
             self.emb_text = self.tts_obj.emb_text
             self.projector_semantic = self.tts_obj.projector_semantic
 

@@ -9,6 +9,7 @@ import torch
 
 from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni_tts import (
     _build_stream_chunks,
+    _ensure_legacy_rope_theta,
     _generate_reference_tts_tokens,
     _iter_tts_condition_chunks,
 )
@@ -32,6 +33,21 @@ def test_tts_condition_chunks_mark_empty_text_finished() -> None:
     assert len(chunks) == 1
     assert chunks[0][0].shape == (1, 0, 2)
     assert chunks[0][1] is True
+
+
+@pytest.mark.parametrize(
+    ("model_config", "expected"),
+    [
+        (SimpleNamespace(rope_parameters={"rope_theta": 123.0}), 123.0),
+        (SimpleNamespace(rope_parameters={}), 10000.0),
+    ],
+)
+def test_legacy_rope_theta_alias_supports_official_streamer(model_config, expected: float) -> None:
+    tts = SimpleNamespace(model=SimpleNamespace(config=model_config))
+
+    _ensure_legacy_rope_theta(tts)
+
+    assert model_config.rope_theta == expected
 
 
 def test_reference_tts_tokens_preserve_generator_state_and_flush_buffer() -> None:
