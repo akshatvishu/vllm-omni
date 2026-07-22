@@ -73,6 +73,7 @@ _MINICPMO45_STREAM_PREFIX_TOKEN = 4218
 # condition on 10 text tokens, then release audio in 25-token chunks.
 _MINICPMO45_TTS_TEXT_CHUNK_SIZE = 10
 _MINICPMO45_TTS_AUDIO_CHUNK_SIZE = 25
+_MINICPMO45_TTS_MAX_AUDIO_TOKENS_PER_TEXT_CHUNK = 500
 
 
 def _build_stream_chunks(
@@ -106,6 +107,7 @@ def _build_stream_chunks(
 def _iter_tts_condition_chunks(
     tts_embeds: torch.Tensor,
     chunk_size: int = _MINICPMO45_TTS_TEXT_CHUNK_SIZE,
+    text_finished: bool = True,
 ) -> Iterable[tuple[torch.Tensor, bool]]:
     """Yield reference-style TTS conditions and their final-text marker."""
     if chunk_size <= 0:
@@ -118,10 +120,10 @@ def _iter_tts_condition_chunks(
     total_tokens = tts_embeds.shape[1]
     for start in range(0, total_tokens, chunk_size):
         end = min(start + chunk_size, total_tokens)
-        yield tts_embeds[:, start:end], end == total_tokens
+        yield tts_embeds[:, start:end], text_finished and end == total_tokens
 
     if total_tokens == 0:
-        yield tts_embeds[:, :0], True
+        yield tts_embeds[:, :0], text_finished
 
 
 def _ensure_legacy_rope_theta(tts) -> None:
@@ -136,7 +138,23 @@ def _ensure_legacy_rope_theta(tts) -> None:
     model_config.rope_theta = rope_parameters.get("rope_theta", 10000.0)
 
 
-def _generate_reference_tts_tokens(tts, tts_embeds: torch.Tensor, tts_module=None) -> torch.Tensor:
+def _get_kv_cache_length(cache) -> int | None:
+    if cache is None:
+        return 0
+    if hasattr(cache, "get_seq_length"):
+        return int(cache.get_seq_length())
+    try:
+        return int(cache[0][0].shape[-2])
+    except (IndexError, TypeError, AttributeError):
+        return None
+
+
+def _generate_reference_tts_tokens(
+    tts,
+    tts_embeds: torch.Tensor,
+    tts_module=None,
+    text_finished: bool = True,
+) -> torch.Tensor:
     """Run MiniCPM-o's stateful 10-token Talker generation protocol.
 
     The official implementation keeps the Talker KV cache across condition
@@ -191,25 +209,84 @@ def _generate_reference_tts_tokens(tts, tts_embeds: torch.Tensor, tts_module=Non
     )
 
     generated_chunks = []
-    for condition, text_finished in _iter_tts_condition_chunks(tts_embeds):
+    eos_chunks = 0
+    capped_chunks = 0
+    text_offset = 0
+    chunk_count = 0
+    for chunk_index, (condition, chunk_text_finished) in enumerate(
+        _iter_tts_condition_chunks(tts_embeds, text_finished=text_finished)
+    ):
+        chunk_count += 1
+        generated_before = len(generator.all_generated_tokens)
+        buffered_before = len(generator._token_buffer)
+        kv_before = _get_kv_cache_length(generator.past_key_values)
+        yielded_tokens = 0
         # ``text_finished`` makes the official helper append text-EOS only to
         # the final condition; every chunk still receives audio-BOS.
         for audio_chunk, _ in generator.generate_with_buffer(
             condition=condition,
-            text_finished=text_finished,
+            text_finished=chunk_text_finished,
+            max_new_token=_MINICPMO45_TTS_MAX_AUDIO_TOKENS_PER_TEXT_CHUNK,
         ):
             if audio_chunk.numel() > 0:
                 generated_chunks.append(audio_chunk)
+                yielded_tokens += int(audio_chunk.numel())
+
+        generated_in_chunk = len(generator.all_generated_tokens) - generated_before
+        cap_reached = generated_in_chunk == _MINICPMO45_TTS_MAX_AUDIO_TOKENS_PER_TEXT_CHUNK
+        capped_chunks += int(cap_reached)
+        eos_chunks += int(not cap_reached)
+        text_tokens = int(condition.shape[1])
+        log = logger.warning if cap_reached else logger.info
+        log(
+            "[DIAGNOSTIC][talker_chunk] index=%d text_range=%d:%d text_tokens=%d "
+            "text_finished=%s generated_audio_tokens=%d yielded_audio_tokens=%d "
+            "buffered_before=%d buffered_after=%d kv_before=%s kv_after=%s "
+            "audio_eos_observed=%s cap_reached=%s",
+            chunk_index,
+            text_offset,
+            text_offset + text_tokens,
+            text_tokens,
+            chunk_text_finished,
+            generated_in_chunk,
+            yielded_tokens,
+            buffered_before,
+            len(generator._token_buffer),
+            kv_before,
+            _get_kv_cache_length(generator.past_key_values),
+            not cap_reached,
+            cap_reached,
+        )
+        text_offset += text_tokens
 
     # The official outer generator flushes the residual buffer after the last
     # text chunk. This is distinct from the Token2Wav tail flush below.
+    residual_tokens = len(generator._token_buffer)
     if generator._token_buffer:
         generated_chunks.append(torch.cat(generator._token_buffer, dim=1))
         generator._token_buffer = []
 
     if not generated_chunks:
-        return torch.empty((1, 0), dtype=torch.long, device=tts_embeds.device)
-    return torch.cat(generated_chunks, dim=1)
+        generated = torch.empty((1, 0), dtype=torch.long, device=tts_embeds.device)
+    else:
+        generated = torch.cat(generated_chunks, dim=1)
+    if generated.shape[-1] != len(generator.all_generated_tokens):
+        raise RuntimeError(
+            "MiniCPM-o Talker buffer accounting mismatch: "
+            f"generated={len(generator.all_generated_tokens)}, returned={generated.shape[-1]}"
+        )
+    logger.info(
+        "[DIAGNOSTIC][talker_summary] text_tokens=%d text_finished=%s chunks=%d "
+        "audio_tokens=%d eos_chunks=%d capped_chunks=%d residual_flush_tokens=%d",
+        text_offset,
+        text_finished,
+        chunk_count,
+        generated.shape[-1],
+        eos_chunks,
+        capped_chunks,
+        residual_tokens,
+    )
+    return generated
 
 
 def _install_torchaudio_soundfile_shim() -> None:
@@ -377,6 +454,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         self,
         tts_token_ids: torch.Tensor,
         tts_hidden_states: torch.Tensor,
+        text_finished: bool = True,
     ) -> np.ndarray | None:
         """Run the reference 4.5 TTS streaming protocol and vocoder."""
         self._lazy_init_tts()
@@ -404,7 +482,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         logger.info(
             "[DIAGNOSTIC][talker] implementation=%s.%s device=%s dtype=%s "
             "tts_tokens_shape=%s hidden_states_shape=%s condition_shape=%s "
-            "mode=reference_streaming text_chunk_size=%d audio_chunk_size=%d",
+            "mode=reference_streaming text_finished=%s text_chunk_size=%d audio_chunk_size=%d",
             type(tts).__module__,
             type(tts).__name__,
             device,
@@ -412,27 +490,24 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             list(tts_token_ids.shape),
             list(tts_hidden_states.shape),
             list(tts_embeds.shape),
+            text_finished,
             _MINICPMO45_TTS_TEXT_CHUNK_SIZE,
             _MINICPMO45_TTS_AUDIO_CHUNK_SIZE,
         )
 
-        generated_tokens = _generate_reference_tts_tokens(tts, tts_embeds, tts_module=tts_module)
+        generated_tokens = _generate_reference_tts_tokens(
+            tts,
+            tts_embeds,
+            tts_module=tts_module,
+            text_finished=text_finished,
+        )
         flat_generated_tokens = generated_tokens.detach().reshape(-1)
         eos_token_id = tts.config.num_audio_tokens - 1
-        eos_positions = torch.where(flat_generated_tokens == eos_token_id)[0]
-        eos_count = int(eos_positions.numel())
-        last_token = int(flat_generated_tokens[-1].item()) if flat_generated_tokens.numel() else None
         logger.info(
-            "[DIAGNOSTIC][talker] output_shape=%s "
-            "eos_id=%d eos_count=%d first_eos_position=%s last_eos_position=%s "
-            "last_token=%s last_token_is_eos=%s first_tokens=%s last_tokens=%s",
+            "[DIAGNOSTIC][talker] output_shape=%s eos_id=%d eos_excluded_by_reference=True "
+            "first_tokens=%s last_tokens=%s",
             list(generated_tokens.shape),
             eos_token_id,
-            eos_count,
-            int(eos_positions[0].item()) if eos_count else None,
-            int(eos_positions[-1].item()) if eos_count else None,
-            last_token,
-            last_token == eos_token_id if last_token is not None else False,
             [int(token) for token in flat_generated_tokens[:16].tolist()],
             [int(token) for token in flat_generated_tokens[-16:].tolist()],
         )
@@ -488,7 +563,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 # attention caches to prompt_len + 100 steps on every chunk,
                 # keeping peak memory bounded regardless of total length.
                 STREAM_THRESHOLD = int(os.environ.get("MINICPMO45_TTS_STREAM_THRESHOLD", "2500"))  # ~100s @ 25Hz
-                CHUNK_SIZE = int(os.environ.get("MINICPMO45_TTS_STREAM_CHUNK", "50"))  # ~2s per chunk
+                CHUNK_SIZE = int(os.environ.get("MINICPMO45_TTS_STREAM_CHUNK", str(_MINICPMO45_TTS_AUDIO_CHUNK_SIZE)))
 
                 logger.info(
                     "[DIAGNOSTIC][vocoder] backend=%s mode=%s token_count=%d "
@@ -672,6 +747,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
 
         tts_token_ids = additional_information.get("tts_token_ids")
         tts_hidden_states = additional_information.get("tts_hidden_states")
+        text_finished = bool(additional_information.get("tts_text_finished", True))
         tts_text = additional_information.get("llm_output_text", [""])
         if isinstance(tts_text, list):
             tts_text = tts_text[0] if tts_text else ""
@@ -681,8 +757,16 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             logger.debug("4.5 Talker: dummy forward (missing tts_token_ids/tts_hidden_states)")
             return self._dummy_hidden_states(input_ids, positions, inputs_embeds)
 
-        logger.info("4.5 Talker: generating speech for %d tokens", tts_token_ids.shape[0])
-        waveform = self.generate_speech(tts_token_ids, tts_hidden_states)
+        logger.info(
+            "4.5 Talker: generating speech for %d tokens (text_finished=%s)",
+            tts_token_ids.shape[0],
+            text_finished,
+        )
+        waveform = self.generate_speech(
+            tts_token_ids,
+            tts_hidden_states,
+            text_finished=text_finished,
+        )
         # Tuple layout: (mel_spec, waveform). 4.5 talker emits only waveform,
         # so mel_spec stays None; the wrapper unpacks in this order and
         # packages the waveform into ``multimodal_outputs["model_outputs"]``.

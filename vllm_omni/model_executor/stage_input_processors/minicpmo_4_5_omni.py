@@ -101,77 +101,75 @@ def llm2tts(
         for idx_t, tid in enumerate(full_token_ids):
             if tid == tts_bos_id:
                 tts_bos_idx = idx_t + 1
-            elif tid == tts_eos_id:
+                # A later turn starts a new TTS region. Do not reuse an EOS
+                # marker from earlier conversation history if this turn is
+                # truncated before producing its own marker.
+                tts_eos_idx = None
+            elif tid == tts_eos_id and tts_bos_idx is not None:
                 tts_eos_idx = idx_t
 
         total_len = full_hidden.shape[0]
         request_finished = bool(getattr(llm_output, "finished", False))
         finish_reason = getattr(output, "finish_reason", None)
         stop_reason = getattr(output, "stop_reason", None)
+        marker_finished = tts_eos_idx is not None
+        normal_stop = request_finished and finish_reason == "stop"
+        # vLLM uses finish_reason="length" for a max-token cutoff.  That is a
+        # terminal request state, but not a completed text condition: the
+        # official MiniCPM streamer passes output.finished=False in this case
+        # and therefore does not append text EOS to the Talker condition.
+        tts_text_finished = marker_finished or normal_stop
+        completion_source = "tts_eos" if marker_finished else ("normal_stop" if normal_stop else "truncated")
         tts_token_ids_slice = tts_hidden_slice = None
         if tts_bos_idx is not None and total_len > tts_bos_idx:
             end_idx = tts_eos_idx if tts_eos_idx is not None else total_len
-            slice_len = end_idx - tts_bos_idx
-            total_gen_len = len(llm_output_ids) if isinstance(llm_output_ids, list) else len(list(llm_output_ids))
 
-            if tts_eos_idx is None:
+            if tts_eos_idx is None and not tts_text_finished:
                 logger.warning(
-                    "[DIAGNOSTIC][llm2tts] Missing <|tts_eos|>: request_finished=%s "
-                    "finish_reason=%s stop_reason=%s tts_bos_idx=%s total_seq_len=%d "
-                    "total_gen_tokens=%d extracted_slice_len=%d thinker_text_chars=%d "
-                    "text_tail=%r token_tail=%s",
+                    "[DIAGNOSTIC][llm2tts] truncated_tts_region: request_finished=%s "
+                    "finish_reason=%s stop_reason=%s; forwarding available text without text EOS",
                     request_finished,
                     finish_reason,
                     stop_reason,
-                    tts_bos_idx,
-                    total_len,
-                    total_gen_len,
-                    slice_len,
-                    len(thinker_text),
-                    thinker_text[-160:],
-                    full_token_ids[-8:],
                 )
-            elif tts_eos_idx < total_len - 5:
+            elif tts_eos_idx is None:
                 logger.warning(
-                    "[DIAGNOSTIC][llm2tts] EARLY <|tts_eos|> TAG DETECTED! "
-                    "request_finished=%s finish_reason=%s stop_reason=%s "
-                    "tts_eos_idx=%d < total_seq_len=%d (total_gen_tokens=%d). "
-                    "end_idx line `end_idx = tts_eos_idx` is cutting off %d text tokens from speech synthesis! "
-                    "thinker_text_chars=%d text_tail=%r token_tail=%s",
-                    request_finished,
-                    finish_reason,
-                    stop_reason,
-                    tts_eos_idx,
-                    total_len,
-                    total_gen_len,
-                    total_len - tts_eos_idx,
-                    len(thinker_text),
-                    thinker_text[-160:],
-                    full_token_ids[-8:],
+                    "[DIAGNOSTIC][llm2tts] normal stop without <|tts_eos|>; "
+                    "treating the available TTS region as complete"
                 )
-            else:
-                tts_slice_ids = full_token_ids[tts_bos_idx:end_idx]
-                logger.info(
-                    "[DIAGNOSTIC][llm2tts] Sequence slicing info: tts_bos_idx=%s, tts_eos_idx=%s, "
-                    "request_finished=%s finish_reason=%s stop_reason=%s total_len=%d, "
-                    "total_gen_tokens=%d, extracted_slice_len=%d, thinker_text_chars=%d, "
-                    "tts_token_head=%s, tts_token_tail=%s, text_tail=%r",
-                    tts_bos_idx,
-                    tts_eos_idx,
-                    request_finished,
-                    finish_reason,
-                    stop_reason,
-                    total_len,
-                    total_gen_len,
-                    slice_len,
-                    len(thinker_text),
-                    tts_slice_ids[:8],
-                    tts_slice_ids[-8:],
-                    thinker_text[-160:],
-                )
-
             tts_token_ids_slice = torch.tensor(full_token_ids[tts_bos_idx:end_idx], dtype=torch.long)
             tts_hidden_slice = full_hidden[tts_bos_idx:end_idx]
+            if tts_token_ids_slice.numel() != tts_hidden_slice.shape[0]:
+                raise RuntimeError(
+                    "MiniCPM-o TTS token/hidden alignment mismatch: "
+                    f"tokens={tts_token_ids_slice.numel()}, hidden_rows={tts_hidden_slice.shape[0]}"
+                )
+            logger.info(
+                "[DIAGNOSTIC][llm2tts] tts_region: bos_idx=%s eos_idx=%s "
+                "request_id=%s request_finished=%s finish_reason=%s stop_reason=%s "
+                "text_finished=%s completion_source=%s "
+                "source_tokens=%d hidden_rows=%d token_hidden_delta=%d post_tts_eos_tokens=%d "
+                "tts_tokens=%d tts_hidden_rows=%d thinker_text_chars=%d "
+                "tts_token_head=%s tts_token_tail=%s text_tail=%r",
+                tts_bos_idx,
+                tts_eos_idx,
+                llm_output.request_id,
+                request_finished,
+                finish_reason,
+                stop_reason,
+                tts_text_finished,
+                completion_source,
+                len(full_token_ids),
+                total_len,
+                len(full_token_ids) - total_len,
+                max(total_len - tts_eos_idx - 1, 0) if tts_eos_idx is not None else 0,
+                tts_token_ids_slice.numel(),
+                tts_hidden_slice.shape[0],
+                len(thinker_text),
+                tts_token_ids_slice[:8].tolist(),
+                tts_token_ids_slice[-8:].tolist(),
+                thinker_text[-160:],
+            )
 
         additional_information = {
             "prompt_embeds": prompt_hidden,
@@ -183,6 +181,7 @@ def llm2tts(
             additional_information["tts_token_ids"] = tts_token_ids_slice
         if tts_hidden_slice is not None:
             additional_information["tts_hidden_states"] = tts_hidden_slice
+            additional_information["tts_text_finished"] = tts_text_finished
 
         # Minimal prompt token IDs: the talker's AR framework needs *some* tokens
         # to do a single prefill step. We use [BOS, PAD, EOS] as a dummy.

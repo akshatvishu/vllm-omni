@@ -40,6 +40,9 @@ def _make_thinker_output(
     request_id: str = "req-0",
     latent: torch.Tensor | None = None,
     hidden_states: torch.Tensor | None = None,
+    finished: bool = True,
+    finish_reason: str | None = "stop",
+    stop_reason: int | str | None = None,
 ):
     """Construct a minimal mock of a thinker engine output entry.
 
@@ -52,6 +55,8 @@ def _make_thinker_output(
         multimodal_output={"latent": latent} if latent is not None else {},
         token_ids=output_token_ids,
         text=text,
+        finish_reason=finish_reason,
+        stop_reason=stop_reason,
     )
     if hidden_states is not None:
         output.hidden_states = hidden_states
@@ -59,6 +64,7 @@ def _make_thinker_output(
         request_id=request_id,
         prompt_token_ids=prompt_token_ids,
         outputs=[output],
+        finished=finished,
     )
 
 
@@ -160,7 +166,7 @@ class TestTtsRegionDetection:
     slice and emit silent audio.
     """
 
-    def _run(self, prompt_token_ids, output_token_ids):
+    def _run(self, prompt_token_ids, output_token_ids, *, finish_reason="stop"):
         total = len(prompt_token_ids) + len(output_token_ids)
         hidden = torch.arange(total * _HIDDEN_DIM, dtype=torch.float32).reshape(total, _HIDDEN_DIM)
         result = llm2tts(
@@ -169,6 +175,7 @@ class TestTtsRegionDetection:
                     prompt_token_ids=prompt_token_ids,
                     output_token_ids=output_token_ids,
                     hidden_states=hidden,
+                    finish_reason=finish_reason,
                 )
             ],
             prompt=None,
@@ -209,9 +216,30 @@ class TestTtsRegionDetection:
         # truncated decode), the slice should extend to the end of the
         # hidden-state matrix instead of being dropped.
         # sequence: [10, 11, 151703, 30, 31]
-        ai, hidden = self._run([10, 11], [151703, 30, 31])
+        ai, hidden = self._run([10, 11], [151703, 30, 31], finish_reason="length")
         assert ai["tts_token_ids"].tolist() == [30, 31]
         assert torch.equal(ai["tts_hidden_states"], hidden[3:5])
+        assert ai["tts_text_finished"] is False
+
+    def test_tts_eos_marks_text_finished(self) -> None:
+        ai, _ = self._run([10], [151703, 30, 151704], finish_reason="stop")
+
+        assert ai["tts_text_finished"] is True
+
+    def test_normal_stop_without_tts_eos_marks_text_finished(self) -> None:
+        ai, _ = self._run([10], [151703, 30], finish_reason="stop")
+
+        assert ai["tts_text_finished"] is True
+
+    def test_current_tts_bos_does_not_reuse_prior_turn_eos(self) -> None:
+        ai, _ = self._run(
+            [10, 151703, 20, 151704],
+            [151703, 30],
+            finish_reason="length",
+        )
+
+        assert ai["tts_token_ids"].tolist() == [30]
+        assert ai["tts_text_finished"] is False
 
     def test_no_tts_markers_omits_slice_keys(self) -> None:
         # If neither marker pair is present, the bridge should NOT populate
