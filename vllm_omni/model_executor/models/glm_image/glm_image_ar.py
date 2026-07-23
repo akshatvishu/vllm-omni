@@ -2414,6 +2414,10 @@ class GlmImageForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP
     # linear increments during decode.
     precomputed_mrope_decode = True
 
+    # The diffusion stage consumes generated token IDs and optional VQ-VAE
+    # image IDs, not the AR hidden-state payload.
+    omni_pooler_payload_include_hidden = False
+
     packed_modules_mapping = {
         "qkv_proj": [
             "q_proj",

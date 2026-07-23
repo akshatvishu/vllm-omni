@@ -120,6 +120,12 @@ class _AsyncCPUPayloadSnapshot:
     def wait(self) -> None:
         if self._waited:
             return
+        if _PAYLOAD_SYNC_DEBUG:
+            logger.info_once(
+                "[omni-payload-sync] payload wait: ready_event=%s cuda_sources=%d",
+                self._ready_event is not None,
+                len(self._cuda_sources),
+            )
         if self._ready_event is not None:
             self._ready_event.synchronize()
         self._cuda_sources.clear()
@@ -134,17 +140,20 @@ def _snapshot_tensor_payload_to_cpu_async(
 ) -> _AsyncCPUPayloadSnapshot:
     cuda_sources: list[torch.Tensor] = []
     cloned = _clone_cuda_tensor_payload(value, cuda_sources)
+    source_stream = torch.cuda.current_stream()
+    ready_event = torch.cuda.Event()
     if not cuda_sources:
+        with torch.cuda.stream(copy_stream):
+            copy_stream.wait_stream(source_stream)
+            ready_event.record(copy_stream)
         if _PAYLOAD_SYNC_DEBUG:
-            logger.info_once("[omni-payload-sync] async snapshot helper reached: cuda_sources=0 ready_event=none")
-        return _AsyncCPUPayloadSnapshot(cloned, None, cuda_sources)
+            logger.info_once("[omni-payload-sync] async snapshot helper reached: cuda_sources=0 ready_event=sentinel")
+        return _AsyncCPUPayloadSnapshot(cloned, ready_event, cuda_sources)
 
     if _PAYLOAD_SYNC_DEBUG:
         logger.info_once(
             "[omni-payload-sync] async snapshot helper reached: cuda_sources>0 ready_event=payload-copy-event"
         )
-    source_stream = torch.cuda.current_stream()
-    ready_event = torch.cuda.Event()
     with torch.cuda.stream(copy_stream):
         copy_stream.wait_stream(source_stream)
         cpu_payload = _copy_tensor_payload_to_cpu(cloned, pin_memory)
