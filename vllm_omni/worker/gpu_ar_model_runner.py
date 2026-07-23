@@ -7,6 +7,7 @@ and also outputs sampled tokens.
 from __future__ import annotations
 
 import gc
+import os
 import threading
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
@@ -50,6 +51,13 @@ from vllm_omni.worker.runner_assisted_metadata import RunnerAssistedFullAttentio
 from vllm_omni.worker.sampling_utils import sanitize_min_tokens_stop_ids
 
 logger = init_logger(__name__)
+
+_PAYLOAD_SYNC_DEBUG = os.environ.get("VLLM_OMNI_PAYLOAD_SYNC_DEBUG", "").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 def _to_cpu_contiguous(tensor: torch.Tensor) -> torch.Tensor:
@@ -127,8 +135,14 @@ def _snapshot_tensor_payload_to_cpu_async(
     cuda_sources: list[torch.Tensor] = []
     cloned = _clone_cuda_tensor_payload(value, cuda_sources)
     if not cuda_sources:
+        if _PAYLOAD_SYNC_DEBUG:
+            logger.info_once("[omni-payload-sync] async snapshot helper reached: cuda_sources=0 ready_event=none")
         return _AsyncCPUPayloadSnapshot(cloned, None, cuda_sources)
 
+    if _PAYLOAD_SYNC_DEBUG:
+        logger.info_once(
+            "[omni-payload-sync] async snapshot helper reached: cuda_sources>0 ready_event=payload-copy-event"
+        )
     source_stream = torch.cuda.current_stream()
     ready_event = torch.cuda.Event()
     with torch.cuda.stream(copy_stream):
@@ -1712,6 +1726,16 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
             and needs_pooler_payload
             and (self.omni_prefix_cache is None or not self._model_needs_full_prefix_hidden_states())
         )
+        if _PAYLOAD_SYNC_DEBUG:
+            logger.info_once(
+                "[omni-payload-sync] pooler path: include_hidden=%s "
+                "needs_pooler_payload=%s needs_scheduled_hidden_payload=%s "
+                "prefix_cache=%s",
+                include_hidden_payload,
+                needs_pooler_payload,
+                needs_scheduled_hidden_payload,
+                self.omni_prefix_cache is not None,
+            )
         self._stage_deferred_prefix_cache_mm_outputs(
             scheduler_output=scheduler_output,
             multimodal_outputs=multimodal_outputs,
@@ -2024,6 +2048,22 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
         )
 
         use_async_omni_output = self._should_use_async_omni_output()
+        if _PAYLOAD_SYNC_DEBUG:
+            model_config = getattr(self, "model_config", None)
+            if model_config is None:
+                model_config = getattr(getattr(self, "vllm_config", None), "model_config", None)
+            model = getattr(self, "model", None)
+            logger.info_once(
+                "[omni-payload-sync] async output gate: enabled=%s "
+                "async_scheduling=%s async_chunk=%s model_opt_in=%s "
+                "prefix_cache=%s speculative=%s",
+                use_async_omni_output,
+                self.use_async_scheduling,
+                bool(getattr(model_config, "async_chunk", False)),
+                self._model_omni_flag(model, "use_async_omni_output"),
+                self.omni_prefix_cache is not None,
+                self.speculative_config is not None,
+            )
         omni_postprocess_already_applied = False
         if use_async_omni_output:
             omni_postprocess_already_applied = self._maybe_run_eager_omni_postprocess_before_async_output(
@@ -2073,6 +2113,12 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
                 return output
         with record_function_or_nullcontext("gpu_model_runner: AsyncGPUModelRunnerOutput"):
             async_output_cls = OmniAsyncGPUModelRunnerOutput if use_async_omni_output else AsyncGPUModelRunnerOutput
+            if _PAYLOAD_SYNC_DEBUG:
+                logger.info_once(
+                    "[omni-payload-sync] output wrapper: class=%s async_payload_snapshot=%s",
+                    async_output_cls.__name__,
+                    output_tensor_snapshot.async_payload is not None,
+                )
             async_output_kwargs = dict(
                 sampled_token_ids=sampler_output.sampled_token_ids,
                 logprobs_tensors=sampler_output.logprobs_tensors,
