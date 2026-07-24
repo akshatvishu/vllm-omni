@@ -16,6 +16,7 @@ from vllm.outputs import CompletionOutput, RequestOutput
 from vllm.sampling_params import SamplingParams
 from vllm.v1.engine.exceptions import EngineDeadError
 
+from vllm_omni.data_entry_keys import MetaStruct, OmniPayloadStruct
 from vllm_omni.engine.messages import (
     AbortRequestMessage,
     AddCompanionRequestMessage,
@@ -30,6 +31,7 @@ from vllm_omni.engine.orchestrator import (
     Orchestrator,
     OrchestratorRequestState,
     _build_terminal_empty_output,
+    _next_stage_resumable_override,
 )
 from vllm_omni.engine.stage_pool import StagePool
 from vllm_omni.experimental.fullduplex.engine.duplex_control_plane import DuplexControlPlane
@@ -209,6 +211,18 @@ def test_terminal_empty_audio_output_uses_stage_sample_rate() -> None:
     )
 
     assert terminal_output.outputs[0].multimodal_output["sr"] == 44100
+
+
+@pytest.mark.parametrize(
+    ("next_input", "expected"),
+    [
+        ({"_minicpmo45_resumable": False}, False),
+        (OmniPayloadStruct(meta=MetaStruct(last_chunk=True)), False),
+        (OmniPayloadStruct(meta=MetaStruct(last_chunk=False)), True),
+    ],
+)
+def test_bridge_terminal_metadata_overrides_downstream_resumability(next_input, expected: bool) -> None:
+    assert _next_stage_resumable_override(next_input) is expected
 
 
 class FakeCollectiveRpcStageClient(FakeStageClient):
@@ -730,6 +744,54 @@ async def test_run_async_chunk(orchestrator_factory) -> None:
         assert "req-async" not in orchestrator_fixture.orchestrator.request_states
     finally:
         await _shutdown_orchestrator(orchestrator_fixture)
+
+
+@pytest.mark.asyncio
+async def test_bridge_owned_terminal_handoff_is_not_forwarded_twice() -> None:
+    stage0 = FakeStageClient(stage_type="llm", final_output=True)
+    stage1 = FakeStageClient(
+        stage_type="llm",
+        next_inputs=[{"prompt_token_ids": [0], "_minicpmo45_resumable": False}],
+    )
+    stage2 = FakeStageClient(stage_type="llm", final_output=True, final_output_type="audio")
+    stage_pools = _build_stage_pools(
+        [[stage0], [stage1], [stage2]],
+        stage_vllm_configs=[
+            SimpleNamespace(model_config=SimpleNamespace(max_model_len=64)),
+            SimpleNamespace(
+                model_config=SimpleNamespace(
+                    max_model_len=64,
+                    stage_connector_config={"extra": {"role": "sender"}},
+                )
+            ),
+            SimpleNamespace(model_config=SimpleNamespace(max_model_len=64)),
+        ],
+    )
+    orchestrator = Orchestrator(
+        request_async_queue=asyncio.Queue(),
+        output_async_queue=asyncio.Queue(),
+        rpc_async_queue=asyncio.Queue(),
+        stage_pools=stage_pools,
+        async_chunk=True,
+    )
+    req_state = OrchestratorRequestState(
+        request_id="req-minicpmo-terminal",
+        sampling_params_list=[_sampling_params(), _sampling_params(), _sampling_params()],
+        final_stage_id=2,
+    )
+    req_state.streaming.enabled = True
+    req_state.stage_submit_ts[0] = time.time()
+
+    await orchestrator._route_output(
+        stage_id=0,
+        replica_id=0,
+        output=_build_request_output("req-minicpmo-terminal", finished=True),
+        req_state=req_state,
+        stage_metrics=None,
+    )
+
+    assert len(stage1.add_request_calls) == 1
+    assert stage1.add_request_calls[0][0].resumable is False
 
 
 @pytest.mark.asyncio

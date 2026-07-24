@@ -65,6 +65,29 @@ def _is_minicpmo45_model_config(model_config: Any) -> bool:
     )
 
 
+def _next_stage_resumable_override(next_input: Any) -> bool | None:
+    """Return a bridge-owned resumable value, if the input carries one.
+
+    MiniCPM's thinker-to-talker bridge marks its final condition directly on
+    the token prompt. Its talker-to-Code2Wav bridge carries the same terminal
+    state as ``meta.last_chunk`` on the structured payload. In both cases the
+    bridge has already supplied the terminal update and the orchestrator must
+    not append the generic duplicate terminal update.
+    """
+    if isinstance(next_input, dict) and _MINICPMO45_RESUMABLE_KEY in next_input:
+        return bool(next_input[_MINICPMO45_RESUMABLE_KEY])
+
+    meta = next_input.get("meta") if isinstance(next_input, dict) else getattr(next_input, "meta", None)
+    last_chunk = meta.get("last_chunk") if isinstance(meta, dict) else getattr(meta, "last_chunk", None)
+    if last_chunk is None:
+        return None
+    if isinstance(last_chunk, torch.Tensor):
+        if last_chunk.numel() != 1:
+            return None
+        last_chunk = bool(last_chunk.item())
+    return not bool(last_chunk)
+
+
 if TYPE_CHECKING:
     from vllm_omni.experimental.fullduplex.engine.contracts import (
         DuplexControlPlanePort,
@@ -1269,7 +1292,7 @@ class Orchestrator:
                     and finished
                     and getattr(stage_params, "output_kind", None) == RequestOutputKind.FINAL_ONLY
                 )
-                await self._forward_to_next_stage(
+                downstream_terminal_submitted = await self._forward_to_next_stage(
                     req_id,
                     stage_id,
                     output,
@@ -1282,6 +1305,7 @@ class Orchestrator:
                     req_state.streaming.enabled
                     and finished
                     and not final_only_finished
+                    and not downstream_terminal_submitted
                     and not self._is_duplex_session_request(req_state)
                 ):
                     # For streaming sessions, send the terminal (resumable=False) update only on a finish
@@ -1655,7 +1679,7 @@ class Orchestrator:
         src_replica_id: int | None = None,
         is_streaming_session: bool = False,
         is_final_update: bool = False,
-    ) -> None:
+    ) -> bool:
         """Forward output from the current logical stage to the next one."""
         next_logical = src_stage_id + 1
         next_pool = self.stage_pools[next_logical]
@@ -1730,7 +1754,7 @@ class Orchestrator:
                     await self._cleanup_request_ids(
                         [req_id, *self._cfg_tracker.cleanup_parent(req_id)],
                     )
-                    return
+                    return True
                 if isinstance(diffusion_prompt, list):
                     if not diffusion_prompt:
                         error_output = OmniRequestOutput.from_error(
@@ -1756,7 +1780,7 @@ class Orchestrator:
                         await self._cleanup_request_ids(
                             [req_id, *self._cfg_tracker.cleanup_parent(req_id)],
                         )
-                        return
+                        return True
                     if len(diffusion_prompt) == 1:
                         diffusion_prompt = diffusion_prompt[0]
             else:
@@ -1793,7 +1817,7 @@ class Orchestrator:
                 request_id=req_id,
                 tx_ms=_tx_ms,
             )
-            return
+            return False
 
         # PD disaggregation: prefill → decode routing uses original prompt + KV transfer params
         if self._pd_pair is not None and (src_stage_id, next_logical) == self._pd_pair:
@@ -1847,7 +1871,7 @@ class Orchestrator:
                 request_id=req_id,
                 tx_ms=_tx_ms,
             )
-            return
+            return False
 
         if req_state.pd_prefill_multimodal_output is not None:
             req_state.streaming.bridge_states.setdefault(
@@ -1886,7 +1910,7 @@ class Orchestrator:
                     src_stage_id,
                     next_logical,
                 )
-                return
+                return False
 
             final_stage_id = req_state.final_stage_id
             final_pool = self.stage_pools[final_stage_id]
@@ -1919,17 +1943,20 @@ class Orchestrator:
                 )
             )
             await self._cleanup_request_ids([req_id, *self._cfg_tracker.cleanup_parent(req_id)])
-            return
+            return True
 
         # Build and submit requests for each input
+        terminal_handoff_submitted = False
         for next_input in next_inputs:
             # Only AR thinker stages consume encoder mm_features; downstream
             # (talker/code2wav/…) must not see them (avoids encoder-cache misses).
             model_stage = getattr(getattr(next_pool.stage_vllm_config, "model_config", None), "model_stage", None)
             mm_features = req_state.mm_features if model_stage == "thinker" else None
             input_resumable = next_stage_resumable
-            if isinstance(next_input, dict) and _MINICPMO45_RESUMABLE_KEY in next_input:
-                input_resumable = bool(next_input[_MINICPMO45_RESUMABLE_KEY])
+            resumable_override = _next_stage_resumable_override(next_input)
+            if resumable_override is not None:
+                input_resumable = resumable_override
+            terminal_handoff_submitted |= not input_resumable
             request = self._build_next_stage_request(
                 req_id,
                 next_logical,
@@ -1960,6 +1987,7 @@ class Orchestrator:
             request_id=req_id,
             tx_ms=_tx_ms,
         )
+        return terminal_handoff_submitted
 
     async def _prewarm_async_chunk_stages(
         self,

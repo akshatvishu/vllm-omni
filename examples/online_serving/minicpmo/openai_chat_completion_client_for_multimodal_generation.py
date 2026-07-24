@@ -82,7 +82,10 @@ def run_multimodal_generation(args, client: OpenAI) -> None:
             audio_path=audio_path,
         )
         extra_body: dict = {
-            "chat_template_kwargs": {"use_tts_template": use_tts},
+            "chat_template_kwargs": {
+                "use_tts_template": use_tts,
+                "enable_thinking": getattr(args, "enable_thinking", False),
+            },
         }
         if args.query_type == "use_audio_in_video":
             # MiniCPM-o 4.5 does not use Qwen's use_audio_in_video path; keep
@@ -100,6 +103,8 @@ def run_multimodal_generation(args, client: OpenAI) -> None:
                 ],
                 model=model_name,
                 modalities=output_modalities,
+                temperature=getattr(args, "temperature", 0.7),
+                top_p=getattr(args, "top_p", 0.95),
                 extra_body=payload["extra_body"],
                 stream=args.stream,
             )
@@ -226,6 +231,23 @@ def parse_args():
         type=str,
         default=None,
         help="Comma-separated prompts for concurrent requests.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.7,
+        help="Sampling temperature (default 0.7 to prevent greedy repetition).",
+    )
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        default=0.95,
+        help="Top-p sampling parameter.",
+    )
+    parser.add_argument(
+        "--enable-thinking",
+        action="store_true",
+        help="Enable reasoning/thinking mode.",
     )
     return parser.parse_args()
 
