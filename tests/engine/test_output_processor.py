@@ -491,3 +491,24 @@ def test_no_detokenizer_final_only():
     result = s.make_request_output([], None, FinishReason.STOP, None)
     assert result is not None
     assert AUDIO in result.outputs[0].multimodal_output
+
+
+def test_last_delta_audio_chunk_marks_finished():
+    """DELTA output with finish_reason=None marks finished=True when tts_is_last_chunk == 1."""
+    s = _make_no_detok_state(RequestOutputKind.DELTA)
+    s.add_multimodal_tensor(
+        {
+            "audio": torch.randn(10),
+            "meta.tts_is_last_chunk": torch.tensor([1]),
+        },
+        mm_type=AUDIO,
+    )
+
+    result = s.make_request_output([], None, None, None)
+    assert result is not None
+    assert result.outputs[0].finish_reason == "stop"
+    assert result.outputs[0].stop_reason == "last_chunk"
+    assert result.finished is True
+
+
+

@@ -7,6 +7,7 @@ import torch
 from vllm_omni.outputs.mm_outputs import MultimodalPayload
 from vllm_omni.outputs.multimodal_accumulation import (
     drain_delta_payload,
+    is_last_delta_audio_chunk,
     is_non_final_delta_audio_chunk,
     replace_snapshot_keys,
 )
@@ -39,6 +40,7 @@ def test_chunk_accumulation_policy_replaces_snapshots_and_drains_delta_state():
     merged = accumulated.merged_with(incoming)
 
     assert not is_non_final_delta_audio_chunk(merged, "audio")
+    assert is_last_delta_audio_chunk(merged, "audio")
     assert merged.tensors["meta.segment_end"].tolist() == [1]
 
     drain_delta_payload(merged)
@@ -48,3 +50,4 @@ def test_chunk_accumulation_policy_replaces_snapshots_and_drains_delta_state():
     assert "meta.segment_end" not in merged
     assert "meta.turn_end" not in merged
     assert merged.metadata["meta.stable_request_value"] == "keep"
+

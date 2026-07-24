@@ -21,6 +21,7 @@ from vllm_omni.outputs import OmniRequestOutput
 from vllm_omni.outputs.mm_outputs import MultimodalCompletionOutput, MultimodalPayload
 from vllm_omni.outputs.multimodal_accumulation import (
     drain_delta_payload,
+    is_last_delta_audio_chunk,
     is_non_final_delta_audio_chunk,
     replace_snapshot_keys,
 )
@@ -183,6 +184,9 @@ class OmniRequestState(RequestState):
         if is_delta and finish_reason is not None and is_non_final_delta_audio_chunk(self.mm_accumulated, self.mm_type):
             finish_reason = None
             stop_reason = None
+        elif is_delta and finish_reason is None and is_last_delta_audio_chunk(self.mm_accumulated, self.mm_type):
+            finish_reason = FinishReason.STOP
+            stop_reason = "last_chunk"
 
         finished = finish_reason is not None
         final_only = self.output_kind == RequestOutputKind.FINAL_ONLY

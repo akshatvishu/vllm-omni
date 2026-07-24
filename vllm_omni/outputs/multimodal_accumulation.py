@@ -90,3 +90,11 @@ def is_non_final_delta_audio_chunk(payload: MultimodalPayload, mm_type: str | No
     if str(mm_type or "").lower() != "audio" and "audio" not in payload:
         return False
     return _last_scalar_int(_payload_meta_value(payload, "tts_is_last_chunk")) == 0
+
+
+def is_last_delta_audio_chunk(payload: MultimodalPayload, mm_type: str | None) -> bool:
+    """Return whether an audio delta explicitly declares it is the final chunk."""
+    if str(mm_type or "").lower() != "audio" and "audio" not in payload:
+        return False
+    return _last_scalar_int(_payload_meta_value(payload, "tts_is_last_chunk")) == 1
+
