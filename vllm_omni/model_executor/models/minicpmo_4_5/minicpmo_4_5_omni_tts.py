@@ -475,7 +475,10 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 codes = codes.to(device=hidden.device, dtype=torch.long).reshape(-1)
             step = int(state.get("step", 0))
             segment_step = int(state.get("segment_step", step))
-            sampled = self._sample_audio_code(hidden[end - 1 : end], codes, request_id, segment_step)
+            # EOS warmup is request-global.  The upstream streaming path starts
+            # a new 500-token budget for each text chunk, but it does not
+            # restart the minimum-audio-token warmup for each chunk.
+            sampled = self._sample_audio_code(hidden[end - 1 : end], codes, request_id, step)
             is_eos = int(sampled.item()) == self._num_audio_tokens - 1
             state["step"] = int(state.get("step", 0)) + 1
             state["segment_step"] = segment_step + 1

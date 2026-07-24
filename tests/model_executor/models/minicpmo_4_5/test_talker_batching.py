@@ -253,6 +253,31 @@ def test_intermediate_text_chunk_stops_without_terminating_the_talker_request(mo
     assert talker.compute_logits(output.text_hidden_states).argmax(dim=-1).tolist() == [1]
 
 
+def test_codec_eos_warmup_is_not_restarted_for_each_text_chunk(mocker) -> None:
+    talker = _make_talker()
+    sample = mocker.patch.object(talker, "_sample_audio_code", return_value=torch.tensor(3))
+    info = {
+        "request_id": "req-global-warmup",
+        "audio_state": {
+            "step": 49,
+            "segment_step": 0,
+            "max_tokens": 1,
+            "text_finished": False,
+        },
+        "audio_codes": {"accumulated": torch.tensor([4, 5])},
+    }
+
+    talker.make_omni_output(
+        torch.ones(1, 2),
+        model_intermediate_buffer=[info],
+        request_token_spans=[(0, 1)],
+    )
+
+    assert sample.call_args.args[3] == 49
+    assert info["audio_state"]["step"] == 50
+    assert info["audio_state"]["segment_step"] == 1
+
+
 def test_request_local_state_survives_missing_runner_buffer_update(mocker) -> None:
     talker = _make_talker()
     mocker.patch.object(talker, "_sample_audio_code", return_value=torch.tensor(3))
