@@ -72,13 +72,39 @@ def _routed(output, index: int):
 
 @pytest.mark.parametrize(
     ("condition_tokens", "expected"),
-    [(3, 64), (100, 1000), (1000, 2048)],
+    [(3, 64), (100, 1000), (1000, 3094)],
 )
 def test_audio_token_limit_scales_with_condition_length(
     condition_tokens: int,
     expected: int,
 ) -> None:
     assert _max_audio_tokens(condition_tokens) == expected
+
+
+def test_audio_token_limit_is_bounded_by_talker_context() -> None:
+    assert _max_audio_tokens(1000, max_position_embeddings=2048) == 1046
+    with pytest.raises(ValueError, match="leaves no room"):
+        _max_audio_tokens(4094)
+
+
+def test_audio_generation_crosses_the_removed_2048_codec_cap(mocker) -> None:
+    talker = _make_talker()
+    mocker.patch.object(talker, "_sample_audio_code", return_value=torch.tensor(3))
+    info = {
+        "request_id": "req-long-audio",
+        "audio_state": {"step": 2048, "max_tokens": 3000},
+        "audio_codes": {"accumulated": torch.tensor([4, 5])},
+    }
+
+    output = talker.make_omni_output(
+        torch.ones(1, 2),
+        model_intermediate_buffer=[info],
+        request_token_spans=[(0, 1)],
+    )
+
+    assert info["audio_state"]["step"] == 2049
+    assert output.multimodal_outputs["codes"]["audio"][0].tolist() == [[3]]
+    assert output.multimodal_outputs["meta"]["finished"][0].item() is False
 
 
 def test_talker_emits_request_aligned_codec_deltas_after_compaction(mocker) -> None:

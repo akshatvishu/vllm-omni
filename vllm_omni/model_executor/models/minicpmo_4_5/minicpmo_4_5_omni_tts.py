@@ -30,7 +30,6 @@ from vllm_omni.platforms import current_omni_platform
 
 _REPETITION_WINDOW = 16
 _MIN_AUDIO_TOKENS = 64
-_MAX_AUDIO_TOKENS = 2048
 _AUDIO_TOKENS_PER_TEXT_TOKEN = 10
 # Codec-token sampling happens inside the model; vLLM sampling parameters
 # only choose the Talker's binary continue/stop row.
@@ -42,17 +41,25 @@ _CODEC_REPETITION_PENALTY = 1.05
 _CODEC_MIN_TOKENS = 50
 
 
-def _max_audio_tokens(condition_tokens: int) -> int:
-    """Bound codec generation with a conservative text-length estimate.
+def _max_audio_tokens(condition_tokens: int, max_position_embeddings: int = 4096) -> int:
+    """Bound codec generation by the Talker's context, not an arbitrary cap.
 
     EOS is masked for the first 50 steps, so a direct ``text_tokens * 10``
-    limit can terminate short responses before EOS is eligible. The 2048
-    ceiling matches the checkpoint's native generation default and keeps the
-    sequence within the Talker's 4096-position context.
+    limit can terminate short responses before EOS is eligible. The returned
+    budget leaves room for the two appended text-EOS/audio-BOS condition
+    embeddings and never exceeds the checkpoint's position capacity.
     """
-    return max(
-        _MIN_AUDIO_TOKENS,
-        min(_MAX_AUDIO_TOKENS, condition_tokens * _AUDIO_TOKENS_PER_TEXT_TOKEN),
+    condition_tokens = max(0, int(condition_tokens))
+    context_budget = int(max_position_embeddings) - condition_tokens - 2
+    if context_budget <= 0:
+        raise ValueError(
+            "MiniCPM-o Talker conditioning leaves no room for codec generation: "
+            f"condition_tokens={condition_tokens}, "
+            f"max_position_embeddings={max_position_embeddings}"
+        )
+    return min(
+        context_budget,
+        max(_MIN_AUDIO_TOKENS, condition_tokens * _AUDIO_TOKENS_PER_TEXT_TOKEN),
     )
 
 
@@ -284,7 +291,10 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     f"tts_ids={token_ids.shape[0]} tts_hidden={hidden_states.shape[0]} "
                     f"prompt_len={info_dict.get('_omni_prompt_len')}"
                 )
-            max_tokens = _max_audio_tokens(int(token_ids.numel()))
+            max_tokens = _max_audio_tokens(
+                int(full_embeds.shape[0]) - 2,
+                max_position_embeddings=int(self._tts_config.max_position_embeddings),
+            )
             state = {
                 "step": 0,
                 "max_tokens": max_tokens,
