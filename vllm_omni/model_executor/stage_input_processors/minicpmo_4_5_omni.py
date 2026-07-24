@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """MiniCPM-o 4.5 Thinker-to-Talker and Talker-to-Code2Wav bridges."""
 
+import copy
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -21,6 +22,9 @@ logger = logging.getLogger(__name__)
 _MINICPMO45_ASYNC_STATE = "_minicpmo45_async_codec_state"
 _MINICPMO45_STREAM_RECORD = "_minicpmo45_async_stream_record"
 _MINICPMO45_SILENCE_CODE = 4218
+_MINICPMO45_TTS_TEXT_CHUNK_SIZE = 10
+_MINICPMO45_TTS_MAX_AUDIO_TOKENS_PER_CHUNK = 500
+_MINICPMO45_RESUMABLE_KEY = "_minicpmo45_resumable"
 
 
 class _MiniCPMO45MetaStruct(MetaStruct):
@@ -568,6 +572,25 @@ def _build_tts_scheduler_prompt_token_ids(
     raise ValueError("MiniCPM-o TTS stage requires at least one scheduler prompt token")
 
 
+def _minicpmo45_tts_condition_chunks(
+    token_ids: list[int],
+    hidden_states: list,
+    *,
+    chunk_size: int = _MINICPMO45_TTS_TEXT_CHUNK_SIZE,
+):
+    """Split a completed Thinker condition like the upstream TTS loop."""
+    if len(token_ids) != len(hidden_states):
+        raise ValueError(
+            f"MiniCPM-o TTS condition length mismatch: token_ids={len(token_ids)} hidden_states={len(hidden_states)}"
+        )
+    if chunk_size <= 0:
+        raise ValueError(f"MiniCPM-o TTS text chunk size must be positive, got {chunk_size}")
+    return [
+        (token_ids[start : start + chunk_size], hidden_states[start : start + chunk_size])
+        for start in range(0, len(token_ids), chunk_size)
+    ]
+
+
 def llm2tts(
     source_outputs,
     prompt: OmniTokensPrompt | TextPrompt = None,
@@ -819,27 +842,61 @@ def llm2tts(
             )
             if not handoff_ids:
                 continue
-        set_tts_handoff(model_intermediate_buffer, handoff_ids, handoff_hidden)
         if native_turn_end_handoff:
             model_intermediate_buffer.setdefault("meta", {})["turn_end"] = True
             _reset_native_tts_handoff(_streaming_context)
 
-        if handoff_ids is not None and handoff_hidden is not None:
-            condition_length = max(len(handoff_ids), len(handoff_hidden)) + 2
-            scheduler_prompt_token_ids = [0] * condition_length
-            handoff_meta = model_intermediate_buffer.setdefault("meta", {})
-            handoff_meta["replace_streaming_prompt"] = True
-            handoff_meta["next_stage_prompt_len"] = condition_length
+        # The official MiniCPM TTS loop feeds one ten-token text condition at
+        # a time into one persistent Talker stream.  The downstream vLLM
+        # session update preserves the previous condition and sampled audio
+        # tokens in its KV cache; only the final update is non-resumable.
+        if handoff_ids is not None and handoff_hidden is not None and not is_native_duplex_handoff:
+            condition_chunks = _minicpmo45_tts_condition_chunks(handoff_ids, handoff_hidden)
+        elif handoff_ids is not None and handoff_hidden is not None:
+            condition_chunks = [(handoff_ids, handoff_hidden)]
         else:
-            scheduler_prompt_token_ids = _build_tts_scheduler_prompt_token_ids(
-                tts_token_ids_slice,
-                llm_output_ids,
-                prompt_token_ids,
-            )
-        tts_inputs.append(
-            OmniTokensPrompt(
+            condition_chunks = [(None, None)]
+
+        for chunk_index, (chunk_ids, chunk_hidden) in enumerate(condition_chunks):
+            chunk_buffer = copy.deepcopy(model_intermediate_buffer)
+            if chunk_ids is not None and chunk_hidden is not None:
+                set_tts_handoff(chunk_buffer, chunk_ids, chunk_hidden)
+
+            is_text_finished = chunk_index == len(condition_chunks) - 1
+            if chunk_ids is not None and chunk_hidden is not None:
+                # Intermediate conditions receive Audio BOS only. The learned
+                # Text EOS is appended by the Talker on the final condition.
+                condition_length = len(chunk_ids) + (2 if is_text_finished else 1)
+                scheduler_prompt_token_ids = [0] * condition_length
+                handoff_meta = chunk_buffer.setdefault("meta", {})
+                if not is_native_duplex_handoff:
+                    handoff_meta["minicpmo45_tts_condition_chunk"] = True
+                    handoff_meta["minicpmo45_tts_text_finished"] = is_text_finished
+                    handoff_meta["minicpmo45_tts_max_audio_tokens"] = _MINICPMO45_TTS_MAX_AUDIO_TOKENS_PER_CHUNK
+                    # Replace the async prewarm placeholder for the first
+                    # chunk; later chunks append to the existing Talker
+                    # session.
+                    handoff_meta["replace_streaming_prompt"] = chunk_index == 0
+                    if chunk_index == 0:
+                        handoff_meta["next_stage_prompt_len"] = condition_length
+                    chunk_resumable = not is_text_finished
+                else:
+                    # Native duplex keeps its existing cumulative handoff
+                    # contract; only ordinary text chat uses the chunk queue.
+                    handoff_meta["replace_streaming_prompt"] = True
+                    handoff_meta["next_stage_prompt_len"] = condition_length
+                    chunk_resumable = False
+            else:
+                scheduler_prompt_token_ids = _build_tts_scheduler_prompt_token_ids(
+                    tts_token_ids_slice,
+                    llm_output_ids,
+                    prompt_token_ids,
+                )
+                chunk_resumable = False
+
+            chunk_prompt = OmniTokensPrompt(
                 prompt_token_ids=scheduler_prompt_token_ids,
-                model_intermediate_buffer=model_intermediate_buffer,
+                model_intermediate_buffer=chunk_buffer,
                 multi_modal_data=(
                     multi_modal_data[llm_output.request_id]
                     if requires_multimodal_data and multi_modal_data.get(llm_output.request_id) is not None
@@ -847,7 +904,9 @@ def llm2tts(
                 ),
                 mm_processor_kwargs=None,
             )
-        )
+            if handoff_ids is not None and handoff_hidden is not None and not is_native_duplex_handoff:
+                chunk_prompt[_MINICPMO45_RESUMABLE_KEY] = chunk_resumable
+            tts_inputs.append(chunk_prompt)
         if native_turn_end_handoff:
             bridge_states = getattr(_streaming_context, "bridge_states", None)
             duplex_state = bridge_states.get("duplex") if isinstance(bridge_states, dict) else None

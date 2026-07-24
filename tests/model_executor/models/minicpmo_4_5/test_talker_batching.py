@@ -226,6 +226,33 @@ def test_max_token_terminal_includes_only_new_codec_delta(mocker) -> None:
     assert talker.compute_logits(output.text_hidden_states).argmax(dim=-1).tolist() == [1]
 
 
+def test_intermediate_text_chunk_stops_without_terminating_the_talker_request(mocker) -> None:
+    talker = _make_talker()
+    mocker.patch.object(talker, "_sample_audio_code", return_value=torch.tensor(3))
+    info = {
+        "request_id": "req-chunk",
+        "audio_state": {
+            "step": 4,
+            "segment_step": 0,
+            "max_tokens": 1,
+            "text_finished": False,
+        },
+        "audio_codes": {"accumulated": torch.tensor([4, 5])},
+    }
+
+    output = talker.make_omni_output(
+        torch.ones(1, 2),
+        model_intermediate_buffer=[info],
+        request_token_spans=[(0, 1)],
+    )
+
+    assert info["audio_state"]["segment_finished"] is True
+    assert info["audio_state"]["finished"] is False
+    assert output.multimodal_outputs["meta"]["finished"][0].item() is True
+    assert output.multimodal_outputs["codes"]["audio"][0].tolist() == [[3]]
+    assert talker.compute_logits(output.text_hidden_states).argmax(dim=-1).tolist() == [1]
+
+
 def test_request_local_state_survives_missing_runner_buffer_update(mocker) -> None:
     talker = _make_talker()
     mocker.patch.object(talker, "_sample_audio_code", return_value=torch.tensor(3))

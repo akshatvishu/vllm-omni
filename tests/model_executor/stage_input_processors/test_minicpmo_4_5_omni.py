@@ -67,6 +67,32 @@ def test_plain_chat_handoff_owns_talker_prompt_contract() -> None:
     assert info["meta"]["next_stage_prompt_len"] == 4
 
 
+def test_plain_chat_handoff_matches_reference_text_chunk_schedule() -> None:
+    output_ids = list(range(25))
+    source = _output(
+        prompt_ids=[101],
+        output_ids=output_ids,
+        latent=torch.zeros((26, 4)),
+    )
+
+    converted = llm2tts([source], prompt=[{}])
+
+    assert len(converted) == 3
+    assert [len(item["prompt_token_ids"]) for item in converted] == [11, 11, 7]
+    assert [item["model_intermediate_buffer"]["ids"]["tts"] for item in converted] == [
+        list(range(10)),
+        list(range(10, 20)),
+        list(range(20, 25)),
+    ]
+    assert converted[0]["model_intermediate_buffer"]["meta"]["replace_streaming_prompt"] is True
+    assert converted[1]["model_intermediate_buffer"]["meta"]["replace_streaming_prompt"] is False
+    assert converted[0]["model_intermediate_buffer"]["meta"]["minicpmo45_tts_text_finished"] is False
+    assert converted[-1]["model_intermediate_buffer"]["meta"]["minicpmo45_tts_text_finished"] is True
+    assert converted[0]["_minicpmo45_resumable"] is True
+    assert converted[1]["_minicpmo45_resumable"] is True
+    assert converted[-1]["_minicpmo45_resumable"] is False
+
+
 def test_llm2tts_carries_request_ref_audio() -> None:
     latent = torch.arange(20, dtype=torch.float32).reshape(5, 4)
     source = _output(

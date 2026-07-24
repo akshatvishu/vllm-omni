@@ -55,6 +55,15 @@ from vllm_omni.metrics.stat_logger import OmniPrometheusStatLogger
 from vllm_omni.outputs import OmniRequestOutput
 
 logger = init_logger(__name__)
+_MINICPMO45_RESUMABLE_KEY = "_minicpmo45_resumable"
+
+
+def _is_minicpmo45_model_config(model_config: Any) -> bool:
+    hf_config = getattr(model_config, "hf_config", None)
+    return getattr(model_config, "model_type", None) == "minicpmo_4_5" or (
+        getattr(hf_config, "model_type", None) == "minicpmo" and str(getattr(hf_config, "version", "")) == "4.5"
+    )
+
 
 if TYPE_CHECKING:
     from vllm_omni.experimental.fullduplex.engine.contracts import (
@@ -1918,13 +1927,16 @@ class Orchestrator:
             # (talker/code2wav/…) must not see them (avoids encoder-cache misses).
             model_stage = getattr(getattr(next_pool.stage_vllm_config, "model_config", None), "model_stage", None)
             mm_features = req_state.mm_features if model_stage == "thinker" else None
+            input_resumable = next_stage_resumable
+            if isinstance(next_input, dict) and _MINICPMO45_RESUMABLE_KEY in next_input:
+                input_resumable = bool(next_input[_MINICPMO45_RESUMABLE_KEY])
             request = self._build_next_stage_request(
                 req_id,
                 next_logical,
                 next_input,
                 params=params,
                 mm_features=mm_features,
-                resumable=next_stage_resumable,
+                resumable=input_resumable,
             )
 
             if already_submitted:
@@ -2011,6 +2023,12 @@ class Orchestrator:
                 base_input["multi_modal_data"] = None
                 base_input["mm_processor_kwargs"] = None
                 downstream_resumable = bool(getattr(stage0_request, "resumable", req_state.streaming.enabled))
+                if _is_minicpmo45_model_config(self.stage_pools[0].stage_vllm_config.model_config):
+                    # MiniCPM's Talker receives queued ten-token conditions
+                    # after the async prewarm. It must remain a resumable
+                    # session so intermediate Talker stop rows advance to the
+                    # next condition instead of freeing the placeholder.
+                    downstream_resumable = True
                 request = build_engine_core_request_from_tokens(
                     request_id=request_id,
                     prompt=base_input,
