@@ -184,18 +184,22 @@ def _make_tiny_qwen_image():
     with torch.no_grad():
         for parameter in model.parameters():
             parameter.normal_(mean=0.0, std=0.02)
+    device = current_platform.device_type
     inputs = {
-        "hidden_states": torch.randn(1, 16, 64, device="cuda"),
-        "timestep": torch.tensor([500.0], device="cuda"),
-        "encoder_hidden_states": torch.randn(1, 8, 32, device="cuda"),
+        "hidden_states": torch.randn(1, 16, 64, device=device),
+        "timestep": torch.tensor([500.0], device=device),
+        "encoder_hidden_states": torch.randn(1, 8, 32, device=device),
         "img_shapes": [(1, 4, 4)],
         "txt_seq_lens": [8],
     }
-    return model.cuda().eval(), inputs
+    return model.to(device).eval(), inputs
 
 
-@hardware_test(res={"cuda": "H100"}, num_cards=1)
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required for native TeaCache integration")
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=1)
+@pytest.mark.skipif(
+    not (current_platform.is_cuda() or current_platform.is_rocm()),
+    reason="GPU accelerator (CUDA/ROCm) is required for native TeaCache integration",
+)
 def test_qwen_image_native_teacache_skips_transformer_blocks(distributed_env):
     """Exercise the real Qwen-Image boundary and prove a repeated step is a cache hit."""
     model, inputs = _make_tiny_qwen_image()
