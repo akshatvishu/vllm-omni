@@ -6,6 +6,7 @@ import os
 import pytest
 import torch
 from vllm.config import VllmConfig, set_current_vllm_config
+from vllm.platforms import current_platform
 
 from tests.helpers.mark import hardware_test
 from vllm_omni.diffusion.cache.teacache.backend import TeaCacheBackend
