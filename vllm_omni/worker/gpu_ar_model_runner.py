@@ -2075,6 +2075,9 @@ class GPUARModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin):
                     model_runner_output=OmniModelRunnerOutput.empty(),
                     **async_output_kwargs,
                 )
+                logger.info_once(
+                    "[early-sampled-token-copy] Early sampled token D2H transfer triggered for hidden opt-out model"
+                )
 
         def output_builder() -> OmniModelRunnerOutput:
             if output_tensor_snapshot.async_payload is not None:
