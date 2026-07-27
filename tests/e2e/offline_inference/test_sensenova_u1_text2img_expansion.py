@@ -172,3 +172,20 @@ def test_sensenova_u1_text2img_cache_dit():
         cache_backend="cache_dit",
     ) as runner:
         _generate_sensenova_u1_image(runner.omni)
+
+
+@pytest.mark.slow
+@pytest.mark.diffusion
+@pytest.mark.cache
+@hardware_test(res={"cuda": "H100"}, num_cards=1)
+def test_sensenova_u1_text2img_tea_cache():
+    """Exercise native TeaCache with the full 8B model on one GPU."""
+    # The 8B checkpoint is small enough for a single 192 GB card, while using
+    # the real pipeline here verifies target discovery and cache setup beyond
+    # the tiny structural GPU test in test_teacache_protocol.py.
+    with OmniRunner(
+        "SenseNova/SenseNova-U1-8B-MoT",
+        stage_configs_path=None,
+        cache_backend="tea_cache",
+    ) as runner:
+        _generate_sensenova_u1_image(runner.omni)
