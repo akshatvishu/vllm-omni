@@ -23,7 +23,7 @@ logger = init_logger(__name__)
 class StateManager:
     """Manage per-context hook state instances.
 
-    State classes (e.g. TeaCacheState, MagCacheState) are plain classes;
+    State classes, such as MagCacheState, are plain classes;
     they only need to be constructible with the given init args.
     """
 

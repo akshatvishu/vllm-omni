@@ -11,7 +11,7 @@ to transformer models.
 Main cache backend implementations:
 1. CacheDiTBackend: Implements cache-dit acceleration (DBCache, SCM, TaylorSeer) using
    the cache-dit library. Inherits from CacheBackend. Used via cache_backend="cache_dit".
-2. TeaCacheBackend: Hook-based backend for TeaCache acceleration. Inherits from
+2. TeaCacheBackend: Native model-boundary backend for TeaCache acceleration. Inherits from
    CacheBackend. Used via cache_backend="tea_cache".
 3. StepCacheBackend: Velocity cosine step-skipping for DreamZero. Inherits from
    CacheBackend. Used via cache_backend="step_cache".
@@ -39,8 +39,9 @@ class CacheBackend(ABC):
     cache lifecycle.
 
     Cache backends apply caching strategies to transformer models to accelerate
-    inference. Different backends use different underlying mechanisms (e.g., cache-dit
-    library for CacheDiTBackend, hooks for TeaCacheBackend), but all share the same
+    inference. Different backends use different underlying mechanisms, such as the
+    cache-dit library for CacheDiTBackend and native model boundaries for
+    TeaCacheBackend, but all share the same
     unified interface.
 
     Attributes:
@@ -64,8 +65,9 @@ class CacheBackend(ABC):
         Enable cache on the pipeline.
 
         This method applies the caching strategy to the transformer(s) in the pipeline.
-        The specific implementation depends on the backend (e.g., hooks for TeaCacheBackend,
-        cache-dit library for CacheDiTBackend). Called once during pipeline initialization.
+        The specific implementation depends on the backend, such as native model
+        boundaries for TeaCacheBackend or the cache-dit library for CacheDiTBackend.
+        Called once during pipeline initialization.
 
         Args:
             pipeline: Diffusion pipeline instance. The backend can extract:

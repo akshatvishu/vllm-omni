@@ -33,7 +33,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig, SensenovaCachedAdapter
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor
 
 logger = init_logger(__name__)
 
@@ -670,6 +670,8 @@ class SenseNovaU1Model(nn.Module):
         past_key_values=None,
         inputs_embeds=None,
         use_cache=None,
+        tea_cache_executor: TeaCacheBlockExecutor | None = None,
+        tea_cache_do_true_cfg: bool = False,
         **kwargs,
     ):
         if image_gen_indicators is None:
@@ -699,18 +701,33 @@ class SenseNovaU1Model(nn.Module):
         else:
             causal_mask_mapping = attention_mask
 
-        hidden_states = inputs_embeds
-        for layer in self.layers:
-            hidden_states = layer(
-                hidden_states,
-                image_gen_indicators=image_gen_indicators,
-                exist_und=exist_und,
-                exist_gen=exist_gen,
-                indexes=indexes,
-                attention_mask=causal_mask_mapping,
-                past_key_values=past_key_values,
-                use_cache=use_cache,
-                **kwargs,
+        def run_transformer_blocks() -> tuple[torch.Tensor]:
+            hidden_states = inputs_embeds
+            for layer in self.layers:
+                hidden_states = layer(
+                    hidden_states,
+                    image_gen_indicators=image_gen_indicators,
+                    exist_und=exist_und,
+                    exist_gen=exist_gen,
+                    indexes=indexes,
+                    attention_mask=causal_mask_mapping,
+                    past_key_values=past_key_values,
+                    use_cache=use_cache,
+                    **kwargs,
+                )
+            return (hidden_states,)
+
+        if tea_cache_executor is None or not exist_gen or exist_und:
+            (hidden_states,) = run_transformer_blocks()
+        else:
+            # The image-generation stack uses a separate first-layer norm. TeaCache
+            # measures the same normalized signal that the first cached block sees.
+            modulated_input = self.layers[0].input_layernorm_mot_gen(inputs_embeds)
+            (hidden_states,) = tea_cache_executor.run(
+                modulated_input=modulated_input,
+                residual_inputs=(inputs_embeds,),
+                compute_fn=run_transformer_blocks,
+                do_true_cfg=tea_cache_do_true_cfg,
             )
 
         if not exist_gen:
@@ -729,7 +746,12 @@ class SenseNovaU1Model(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-class SenseNovaU1ForCausalLM(nn.Module, SupportsTeaCache):
+class SenseNovaU1ForCausalLM(nn.Module):
+    supports_teacache = True
+    tea_cache_model_key = "SenseNovaU1ForCausalLM"
+    tea_cache_executor: TeaCacheBlockExecutor | None = None
+    _tea_cache_do_true_cfg = False
+
     def __init__(self, config, quant_config=None, prefix: str = ""):
         super().__init__()
         self.config = config
@@ -739,16 +761,6 @@ class SenseNovaU1ForCausalLM(nn.Module, SupportsTeaCache):
         # LogitsProcessor handles the TP all-gather of vocab-sharded ParallelLMHead
         # outputs so callers see full-vocab logits regardless of tp_size.
         self.logits_processor = LogitsProcessor(config.vocab_size)
-
-    # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> SenseNovaU1CausalLMOutput:
-        raise NotImplementedError
 
     def get_teacache_coefficients(self) -> list[float]:
         return [9.07281930e04, -2.17699186e04, 1.83940990e03, -6.30339273e01, 7.61309272e-01]
@@ -785,6 +797,8 @@ class SenseNovaU1ForCausalLM(nn.Module, SupportsTeaCache):
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
+            tea_cache_executor=self.tea_cache_executor,
+            tea_cache_do_true_cfg=self._tea_cache_do_true_cfg,
             **kwargs,
         )
         logits = self.logits_processor(self.lm_head, outputs.last_hidden_state) if compute_logits else None

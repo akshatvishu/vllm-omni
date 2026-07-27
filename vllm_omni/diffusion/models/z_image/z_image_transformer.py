@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.base import CachedTransformer
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
     SequenceParallelOutput,
@@ -591,7 +591,7 @@ class RopeEmbedder:
         return torch.cat(cos_result, dim=-1), torch.cat(sin_result, dim=-1)
 
 
-class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
+class ZImageTransformer2DModel(CachedTransformer):
     """Z-Image Transformer model for image generation.
 
     Sequence Parallelism:
@@ -614,6 +614,9 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
     """
 
     _repeated_blocks = ["ZImageTransformerBlock"]
+    supports_teacache = True
+    tea_cache_model_key = "ZImageTransformer2DModel"
+    tea_cache_executor: TeaCacheBlockExecutor | None = None
     _layerwise_offload_blocks_attrs = ["layers"]
 
     @staticmethod
@@ -925,16 +928,6 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
             all_cap_pad_mask,
         )
 
-    # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> tuple[torch.Tensor, dict]:
-        raise NotImplementedError
-
     def get_teacache_coefficients(self) -> list[float]:
         # Copied from Qwen-Image, needs tuning for Z-Image
         return [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02]
@@ -1032,9 +1025,24 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
             x, x_cos, x_sin, cap_feats, cap_cos, cap_sin, x_item_seqlens, cap_item_seqlens
         )
 
-        # Main transformer blocks
-        for layer in self.layers:
-            unified = layer(unified, unified_attn_mask, unified_cos, unified_sin, adaln_input)
+        def run_transformer_blocks() -> tuple[torch.Tensor]:
+            h = unified
+            for layer in self.layers:
+                h = layer(h, unified_attn_mask, unified_cos, unified_sin, adaln_input)
+            return (h,)
+
+        if self.tea_cache_executor is None:
+            (unified,) = run_transformer_blocks()
+        else:
+            block = self.layers[0]
+            mod_params = block.adaLN_modulation(adaln_input).unsqueeze(1).chunk(4, dim=2)
+            modulated_input = block.attention_norm1(unified) * (1.0 + mod_params[0])
+            (unified,) = self.tea_cache_executor.run(
+                modulated_input=modulated_input,
+                residual_inputs=(unified,),
+                compute_fn=run_transformer_blocks,
+                do_true_cfg=self.do_true_cfg,
+            )
 
         # Final layer
         unified = self.all_final_layer[f"{patch_size}-{f_patch_size}"](unified, adaln_input)

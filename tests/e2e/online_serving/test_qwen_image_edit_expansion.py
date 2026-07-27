@@ -158,11 +158,12 @@ def test_qwen_image_edit_2511_single_image(omni_server: OmniServer, openai_clien
     """Test Qwen-Image-Edit-2511 with a single image input.
 
     Regression: with tea_cache enabled and zero_cond_t=True, the TeaCache
-    postprocess closure used the doubled temb (shape 2*batch) without halving
+    native forward path used the doubled temb (shape 2*batch) without halving
     it, causing norm_out to broadcast and return noise_pred with shape
     (2*batch, seq, ch). The scheduler step then silently expanded latents via
     broadcasting, so at step 2 torch.cat([latents, image_latents], dim=1)
-    crashed with a batch size mismatch. Fixed in extractors.py.
+    crashed with a batch size mismatch. The native Qwen forward path keeps the
+    zero_cond_t output shape fix.
     """
     image_data_url = f"data:image/jpeg;base64,{generate_synthetic_image(512, 512)['base64']}"
 

@@ -787,9 +787,9 @@ See detailed guide: [How to add TeaCache support](../../design/feature/teacache.
 
 **Quick setup:**
 
-1. Write extractor function
-2. Register in `EXTRACTOR_REGISTRY`
-3. Add polynomial coefficients
+1. Add `supports_teacache = True`, a unique `tea_cache_model_key`, and a `tea_cache_executor` slot to the model.
+2. Put the cache boundary around the model's existing block loop in `forward()` and pass the declared residual tensors to the executor.
+3. Return the model's polynomial coefficients from `get_teacache_coefficients()` and add a native boundary test.
 
 **Usage:** Set `cache_backend` and `cache_config` when initializing:
 ```python

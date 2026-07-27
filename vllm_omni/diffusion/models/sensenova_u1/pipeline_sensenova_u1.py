@@ -511,6 +511,9 @@ class SenseNovaU1DenoisingAdapter(nn.Module):
         return self.language_model.logits_processor
 
     def forward(self, *args, **kwargs):
+        # The adapter is the CFG owner; keep that policy out of the shared LM
+        # so prefix/understanding forwards do not accidentally use CFG state.
+        object.__setattr__(self.language_model, "_tea_cache_do_true_cfg", self.do_true_cfg)
         return self.language_model(*args, **kwargs)
 
 

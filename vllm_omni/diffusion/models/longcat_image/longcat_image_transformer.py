@@ -20,7 +20,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor
 from vllm_omni.diffusion.data import DiffusionParallelConfig, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
@@ -577,7 +577,7 @@ class LongCatImageSingleTransformerBlock(nn.Module):
         return encoder_hidden_states, hidden_states
 
 
-class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
+class LongCatImageTransformer2DModel(nn.Module):
     """
     The Transformer model introduced in Flux.
 
@@ -594,6 +594,9 @@ class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
 
     _repeated_blocks = ["LongCatImageTransformerBlock", "LongCatImageSingleTransformerBlock"]
     _layerwise_offload_blocks_attrs = ["transformer_blocks", "single_transformer_blocks"]
+    supports_teacache = True
+    tea_cache_model_key = "LongCatImageTransformer2DModel"
+    tea_cache_executor: TeaCacheBlockExecutor | None = None
 
     # Sequence Parallelism for LongCat (following diffusers' _cp_plan pattern)
     _sp_plan = {
@@ -674,16 +677,6 @@ class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
         self.use_checkpoint = [True] * num_layers
         self.use_single_checkpoint = [True] * num_single_layers
 
-    # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
-        raise NotImplementedError
-
     def get_teacache_coefficients(self) -> list[float]:
         return [652.5980, -424.1615, 84.5526, -4.5923, 0.1694]
 
@@ -722,20 +715,35 @@ class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
             torch.cat([txt_sin, img_sin], dim=0),
         )
 
-        for block in self.transformer_blocks:
-            encoder_hidden_states, hidden_states = block(
-                hidden_states=hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-                temb=temb,
-                image_rotary_emb=image_rotary_emb,
-            )
+        def run_transformer_blocks() -> tuple[torch.Tensor, torch.Tensor]:
+            h, e = hidden_states, encoder_hidden_states
+            for block in self.transformer_blocks:
+                e, h = block(
+                    hidden_states=h,
+                    encoder_hidden_states=e,
+                    temb=temb,
+                    image_rotary_emb=image_rotary_emb,
+                )
+            for block in self.single_transformer_blocks:
+                e, h = block(
+                    hidden_states=h,
+                    encoder_hidden_states=e,
+                    temb=temb,
+                    image_rotary_emb=image_rotary_emb,
+                )
+            return h, e
 
-        for block in self.single_transformer_blocks:
-            encoder_hidden_states, hidden_states = block(
-                hidden_states=hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-                temb=temb,
-                image_rotary_emb=image_rotary_emb,
+        if self.tea_cache_executor is None:
+            hidden_states, encoder_hidden_states = run_transformer_blocks()
+        else:
+            # Use the first block's normalized image stream, matching the
+            # calibration metric and avoiding a second model-specific path.
+            modulated_input = self.transformer_blocks[0].norm1(hidden_states, emb=temb)[0]
+            hidden_states, encoder_hidden_states = self.tea_cache_executor.run(
+                modulated_input=modulated_input,
+                residual_inputs=(hidden_states, encoder_hidden_states),
+                compute_fn=run_transformer_blocks,
+                do_true_cfg=getattr(self, "do_true_cfg", False),
             )
 
         hidden_states = self.norm_out(hidden_states, temb)

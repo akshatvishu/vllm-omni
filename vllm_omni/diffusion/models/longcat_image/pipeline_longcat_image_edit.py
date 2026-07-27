@@ -594,6 +594,7 @@ class LongCatImageEditPipeline(
         )
 
         do_true_cfg = guidance_scale > 1 and negative_prompt is not None
+        self.transformer.do_true_cfg = do_true_cfg
         if do_true_cfg:
             (negative_prompt_embeds, negative_text_ids) = self.encode_prompt(
                 prompt=negative_prompt,

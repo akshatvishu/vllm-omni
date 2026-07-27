@@ -733,29 +733,10 @@ class CacheBackend(ABC):
 
 **Location**: `vllm_omni/diffusion/cache/teacache/backend.py`
 
-```python
-class TeaCacheBackend(CacheBackend):
-    def enable(self, pipeline: Any):
-        # Extract transformer from pipeline
-        transformer = pipeline.transformer
-        transformer_type = transformer.__class__.__name__
-
-        # Create TeaCacheConfig from DiffusionCacheConfig
-        teacache_config = TeaCacheConfig(
-            transformer_type=transformer_type,
-            rel_l1_thresh=self.config.rel_l1_thresh,
-            coefficients=self.config.coefficients,
-        )
-
-        # Apply hooks to transformer
-        apply_teacache_hook(transformer, teacache_config)
-        self.enabled = True
-
-    def refresh(self, pipeline: Any, num_inference_steps: int, verbose: bool = True):
-        transformer = pipeline.transformer
-        if hasattr(transformer, "_hook_registry"):
-            transformer._hook_registry.reset_hook(TeaCacheHook._HOOK_NAME)
-```
+The backend resolves the coefficients and installs one `TeaCacheRuntime` in the
+model's `tea_cache_executor` slot. The model calls that executor around its native
+block region. `TeaCacheBackend.refresh()` resets the runtimes it installed, so it
+does not need to find a hook registry or rediscover a pipeline alias.
 
 **TeaCache Features**:
 
@@ -765,7 +746,7 @@ class TeaCacheBackend(CacheBackend):
 
 - **CFG-aware**: Handles positive/negative branches separately
 
-- **Custom Hook System**: Uses a custom forward interception mechanism (via `HookRegistry`) that wraps the module's `forward` method, allowing transparent integration without modifying model code
+- **Native model boundary**: The model keeps preprocessing and postprocessing in its normal forward path and declares the exact tensors that the runtime can reuse.
 
 **2. Cache-DiT Backend**
 

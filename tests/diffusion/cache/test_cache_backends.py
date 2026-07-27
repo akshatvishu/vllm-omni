@@ -6,7 +6,7 @@ Unit tests for cache backends (cache-dit and teacache).
 
 This module tests the cache backend implementations:
 - CacheDiTBackend: cache-dit acceleration backend
-- TeaCacheBackend: TeaCache hook-based backend
+- TeaCacheBackend: TeaCache native model-boundary backend
 - Cache selector function: get_cache_backend
 - DiffusionCacheConfig: configuration dataclass
 """
@@ -350,31 +350,34 @@ class TestTeaCacheBackend:
         assert backend.config.rel_l1_thresh == 0.3
         assert backend.enabled is False
 
-    @patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook")
-    def test_enable(self, mock_apply_hook):
-        """Test enabling TeaCache on pipeline."""
-        # Mock pipeline
+    def test_enable(self):
+        """Test enabling TeaCache on pipeline with a capable model."""
         mock_pipeline = Mock()
         mock_pipeline.__class__.__name__ = "QwenImagePipeline"
         mock_transformer = Mock()
-        mock_transformer.__class__.__name__ = "QwenImageTransformer2DModel"
+        mock_transformer.supports_teacache = True
+        mock_transformer.tea_cache_model_key = "QwenImageTransformer2DModel"
+        mock_transformer.tea_cache_executor = None
+        mock_transformer.get_teacache_coefficients = Mock(return_value=[1.0, 0.5, 0.2, 0.1, 0.05])
         mock_pipeline.transformer = mock_transformer
 
         config = DiffusionCacheConfig(rel_l1_thresh=0.3)
         backend = TeaCacheBackend(config)
         backend.enable(mock_pipeline)
 
-        # Verify hook was applied
         assert backend.enabled is True
-        mock_apply_hook.assert_called_once()
+        assert mock_transformer.tea_cache_executor is not None
+        assert len(backend._installed_runtimes) == 1
 
-    @patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook")
-    def test_enable_with_coefficients(self, mock_apply_hook):
+    def test_enable_with_coefficients(self):
         """Test enabling TeaCache with custom coefficients."""
         mock_pipeline = Mock()
         mock_pipeline.__class__.__name__ = "QwenImagePipeline"
         mock_transformer = Mock()
-        mock_transformer.__class__.__name__ = "QwenImageTransformer2DModel"
+        mock_transformer.supports_teacache = True
+        mock_transformer.tea_cache_model_key = "QwenImageTransformer2DModel"
+        mock_transformer.tea_cache_executor = None
+        mock_transformer.get_teacache_coefficients = Mock(return_value=[1.0, 0.5, 0.2, 0.1, 0.05])
         mock_pipeline.transformer = mock_transformer
 
         config = DiffusionCacheConfig(rel_l1_thresh=0.3, coefficients=[1.0, 0.5, 0.2, 0.1, 0.05])
@@ -382,31 +385,28 @@ class TestTeaCacheBackend:
         backend.enable(mock_pipeline)
 
         assert backend.enabled is True
-        mock_apply_hook.assert_called_once()
+        assert mock_transformer.tea_cache_executor.config.coefficients == (1.0, 0.5, 0.2, 0.1, 0.05)
 
-    @patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook")
-    def test_refresh(self, mock_apply_hook):
+    def test_refresh(self):
         """Test refreshing TeaCache state."""
         mock_pipeline = Mock()
         mock_pipeline.__class__.__name__ = "QwenImagePipeline"
         mock_transformer = Mock()
-        mock_transformer.__class__.__name__ = "QwenImageTransformer2DModel"
+        mock_transformer.supports_teacache = True
+        mock_transformer.tea_cache_model_key = "QwenImageTransformer2DModel"
+        mock_transformer.tea_cache_executor = None
+        mock_transformer.get_teacache_coefficients = Mock(return_value=[1.0, 0.5, 0.2, 0.1, 0.05])
         mock_pipeline.transformer = mock_transformer
-
-        # Mock hook registry
-        mock_hook = Mock()
-        mock_registry = Mock()
-        mock_registry.get_hook = Mock(return_value=mock_hook)
-        mock_registry.reset_hook = Mock()
-        mock_transformer._hook_registry = mock_registry
 
         config = DiffusionCacheConfig()
         backend = TeaCacheBackend(config)
         backend.enable(mock_pipeline)
 
-        # Test refresh
+        runtime = mock_transformer.tea_cache_executor
+        runtime.state.forward_cnt = 10
+
         backend.refresh(mock_pipeline, num_inference_steps=50)
-        mock_registry.reset_hook.assert_called_once()
+        assert runtime.state.forward_cnt == 0
 
 
 class TestCacheSelector:

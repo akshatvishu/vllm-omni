@@ -37,7 +37,7 @@ from vllm_omni.diffusion.attention.backends.abstract import (
 )
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.base import CachedTransformer
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
 from vllm_omni.diffusion.distributed.sp_plan import (
@@ -902,7 +902,7 @@ class QwenImageTransformerBlock(nn.Module):
 
 
 # Note: inheriting from CachedTransformer only when we support caching
-class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
+class QwenImageTransformer2DModel(CachedTransformer):
     """
     The Transformer model introduced in Qwen.
 
@@ -932,6 +932,9 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
     # -- typically a transformer layer
     # used for torch compile optimizations
     _repeated_blocks = ["QwenImageTransformerBlock"]
+    supports_teacache = True
+    tea_cache_model_key = "QwenImageTransformer2DModel"
+    tea_cache_executor: TeaCacheBlockExecutor | None = None
     _layerwise_offload_blocks_attrs = ["transformer_blocks"]
     packed_modules_mapping = {
         "to_qkv": ["to_q", "to_k", "to_v"],
@@ -1075,16 +1078,6 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         # Only active when zero_cond_t=True (image editing models)
         self.modulate_index_prepare = ModulateIndexPrepare(zero_cond_t=zero_cond_t)
 
-    # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
-        raise NotImplementedError
-
     def get_teacache_coefficients(self) -> list[float]:
         return [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02]
 
@@ -1099,7 +1092,8 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         guidance: torch.Tensor = None,  # TODO: this should probably be removed
         attention_kwargs: dict[str, Any] | None = None,
         additional_t_cond=None,
-    ) -> Transformer2DModelOutput:
+        return_dict: bool = True,
+    ) -> torch.Tensor | Transformer2DModelOutput:
         """
         The [`QwenTransformer2DModel`] forward method.
 
@@ -1203,16 +1197,33 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         if encoder_hidden_states_mask is not None and encoder_hidden_states_mask.all():
             encoder_hidden_states_mask = None
 
-        for index_block, block in enumerate(self.transformer_blocks):
-            encoder_hidden_states, hidden_states = block(
-                hidden_states=hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_hidden_states_mask=encoder_hidden_states_mask,
-                temb=temb,
-                image_rotary_emb=image_rotary_emb,
-                joint_attention_kwargs=attention_kwargs,
-                modulate_index=modulate_index,
-                hidden_states_mask=hidden_states_mask,
+        def run_transformer_blocks() -> tuple[torch.Tensor, torch.Tensor]:
+            h, e = hidden_states, encoder_hidden_states
+            for block in self.transformer_blocks:
+                e, h = block(
+                    hidden_states=h,
+                    encoder_hidden_states=e,
+                    encoder_hidden_states_mask=encoder_hidden_states_mask,
+                    temb=temb,
+                    image_rotary_emb=image_rotary_emb,
+                    joint_attention_kwargs=attention_kwargs,
+                    modulate_index=modulate_index,
+                    hidden_states_mask=hidden_states_mask,
+                )
+            return h, e
+
+        if self.tea_cache_executor is None:
+            hidden_states, encoder_hidden_states = run_transformer_blocks()
+        else:
+            block = self.transformer_blocks[0]
+            img_mod1, _ = block.img_mod(temb).chunk(2, dim=-1)
+            img_scale1, img_shift1, _ = block._modulate(img_mod1)
+            modulated_input = block.img_norm1(hidden_states, img_scale1, img_shift1)
+            hidden_states, encoder_hidden_states = self.tea_cache_executor.run(
+                modulated_input=modulated_input,
+                residual_inputs=(hidden_states, encoder_hidden_states),
+                compute_fn=run_transformer_blocks,
+                do_true_cfg=self.do_true_cfg,
             )
 
         if self.zero_cond_t:
@@ -1224,6 +1235,8 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         # Note: SP gather is handled automatically by _sp_plan's SequenceParallelGatherHook
         # on proj_out output. No manual all_gather needed here.
 
+        if not return_dict:
+            return (output,)
         return Transformer2DModelOutput(sample=output)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:

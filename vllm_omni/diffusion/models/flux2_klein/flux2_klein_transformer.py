@@ -42,7 +42,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor
 from vllm_omni.diffusion.data import DiffusionParallelConfig, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
@@ -764,7 +764,7 @@ class Flux2Modulation(nn.Module):
         return tuple(mod_params[3 * i : 3 * (i + 1)] for i in range(self.mod_param_sets))
 
 
-class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
+class Flux2Transformer2DModel(nn.Module):
     """
     The Transformer model introduced in Flux 2.
 
@@ -780,6 +780,9 @@ class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
 
     _repeated_blocks = ["Flux2TransformerBlock", "Flux2SingleTransformerBlock"]
     _layerwise_offload_blocks_attrs = ["transformer_blocks", "single_transformer_blocks"]
+    supports_teacache = True
+    tea_cache_model_key = "Flux2Klein"
+    tea_cache_executor: TeaCacheBlockExecutor | None = None
 
     @staticmethod
     def _is_transformer_block(name: str, module) -> bool:
@@ -908,16 +911,6 @@ class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
     def dtype(self) -> torch.dtype:
         return next(self.parameters()).dtype
 
-    # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
-        raise NotImplementedError
-
     def get_teacache_coefficients(self) -> list[float]:
         # Same as FLUX.1 (similar dual-stream architecture)
         return [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01]
@@ -989,29 +982,43 @@ class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
         if encoder_hidden_states_mask is not None:
             joint_attention_kwargs["encoder_hidden_states_mask"] = encoder_hidden_states_mask
 
-        for block in self.transformer_blocks:
-            encoder_hidden_states, hidden_states = block(
-                hidden_states=hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-                temb_mod_params_img=double_stream_mod_img,
-                temb_mod_params_txt=double_stream_mod_txt,
-                image_rotary_emb=concat_rotary_emb,
-                joint_attention_kwargs=joint_attention_kwargs,
+        def run_transformer_blocks() -> tuple[torch.Tensor]:
+            h, e = hidden_states, encoder_hidden_states
+            for block in self.transformer_blocks:
+                e, h = block(
+                    hidden_states=h,
+                    encoder_hidden_states=e,
+                    temb_mod_params_img=double_stream_mod_img,
+                    temb_mod_params_txt=double_stream_mod_txt,
+                    image_rotary_emb=concat_rotary_emb,
+                    joint_attention_kwargs=joint_attention_kwargs,
+                )
+
+            h = torch.cat([e, h], dim=1)
+            for block in self.single_transformer_blocks:
+                h = block(
+                    hidden_states=h,
+                    encoder_hidden_states=None,
+                    temb_mod_params=single_stream_mod,
+                    image_rotary_emb=concat_rotary_emb,
+                    joint_attention_kwargs=joint_attention_kwargs,
+                    text_seq_len=num_txt_tokens,
+                )
+            return (h[:, num_txt_tokens:, ...],)
+
+        if self.tea_cache_executor is None:
+            (hidden_states,) = run_transformer_blocks()
+        else:
+            block = self.transformer_blocks[0]
+            modulated_input = block.norm1(hidden_states)
+            modulated_input = (1 + double_stream_mod_img[0][1]) * modulated_input + double_stream_mod_img[0][0]
+            (hidden_states,) = self.tea_cache_executor.run(
+                modulated_input=modulated_input,
+                residual_inputs=(hidden_states,),
+                compute_fn=run_transformer_blocks,
+                do_true_cfg=getattr(self, "do_true_cfg", False),
             )
 
-        hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
-
-        for block in self.single_transformer_blocks:
-            hidden_states = block(
-                hidden_states=hidden_states,
-                encoder_hidden_states=None,
-                temb_mod_params=single_stream_mod,
-                image_rotary_emb=concat_rotary_emb,
-                joint_attention_kwargs=joint_attention_kwargs,
-                text_seq_len=num_txt_tokens,
-            )
-
-        hidden_states = hidden_states[:, num_txt_tokens:, ...]
         hidden_states = self.norm_out(hidden_states, temb)
         output = self.proj_out(hidden_states)
 

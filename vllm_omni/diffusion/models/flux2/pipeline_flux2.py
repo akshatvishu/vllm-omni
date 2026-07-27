@@ -987,6 +987,8 @@ class Flux2Pipeline(
 
         has_neg_prompt = negative_prompt_embeds is not None or any(req_negative_prompt)
         do_true_cfg = self.guidance_scale > 1 and has_neg_prompt
+        # TeaCache reads CFG ownership at the native transformer boundary.
+        self.transformer.do_true_cfg = do_true_cfg
 
         self.check_cfg_parallel_validity(self.guidance_scale, has_neg_prompt)
         negative_text_ids = None

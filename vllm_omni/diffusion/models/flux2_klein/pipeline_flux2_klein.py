@@ -817,6 +817,7 @@ class Flux2KleinPipeline(
         )
 
         self._guidance_scale = guidance_scale
+        self.transformer.do_true_cfg = self.do_classifier_free_guidance
         self._attention_kwargs = attention_kwargs
         self._current_timestep = None
         self._interrupt = False

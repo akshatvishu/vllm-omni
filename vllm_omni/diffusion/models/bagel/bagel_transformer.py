@@ -38,7 +38,7 @@ from vllm.transformers_utils.configs.bagel import BagelConfig
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata as DiffusionAttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention as DiffusionAttention
 from vllm_omni.diffusion.cache.cachedit import BagelCachedAdapter, CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor
 from vllm_omni.diffusion.data import DiffusionParallelConfig
 from vllm_omni.diffusion.distributed.cfg_parallel import CFGParallelMixin
 from vllm_omni.diffusion.distributed.parallel_state import (
@@ -1248,9 +1248,12 @@ def get_flattened_position_ids_extrapolate(img_h, img_w, patch_size, max_num_pat
     return pos_ids
 
 
-class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
+class Bagel(CFGParallelMixin, nn.Module):
     config_class = BagelConfig
     base_model_prefix = "bagel"
+    supports_teacache = True
+    tea_cache_model_key = "Bagel"
+    tea_cache_executor: TeaCacheBlockExecutor | None = None
 
     # Flow-matching denoise schedule convention. Official BAGEL samples
     # ``num_timesteps`` points over [1, 0] and drops the terminal t=0, yielding
@@ -1900,6 +1903,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
                     **common,
                     packed_position_ids=packed_position_ids,
                     past_key_values=past_key_values,
+                    do_true_cfg=cfg_text_scale_ > 1.0,
                 )
 
                 if cfg_text_scale_ > 1.0:
@@ -1907,6 +1911,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
                         **common,
                         packed_position_ids=cfg_text_packed_position_ids,
                         past_key_values=cfg_text_past_key_values,
+                        do_true_cfg=True,
                     )
                     cfg_img_v_t = None
                     if cfg_img_scale_ > 1.0:
@@ -1914,6 +1919,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
                             **common,
                             packed_position_ids=cfg_img_packed_position_ids,
                             past_key_values=cfg_img_past_key_values,
+                            do_true_cfg=True,
                         )
                     v_t = self._combine_cfg(
                         v_t,
@@ -1961,6 +1967,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
                     packed_position_ids=packed_position_ids,
                     packed_seqlens=packed_seqlens,
                     past_key_values=past_key_values,
+                    do_true_cfg=False,
                 )
                 if scheduler is not None:
                     out = scheduler.step(v_t.to(x_t.device), timesteps[i], x_t, dts[i], **_sched_kw)
@@ -2133,6 +2140,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
                 packed_text_ids=packed_text_ids,
                 packed_text_indexes=packed_text_indexes,
                 packed_seqlens=packed_seqlens,
+                do_true_cfg=use_cfg_this_step,
             )
             branches_kwargs = [
                 dict(**common, packed_position_ids=packed_position_ids, past_key_values=past_key_values),
@@ -2279,12 +2287,17 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
         packed_position_ids: torch.LongTensor,
         packed_seqlens: torch.IntTensor,
         past_key_values: NaiveCache,
+        do_true_cfg: bool = False,
     ) -> torch.Tensor:
         """Run a single-branch forward pass (no CFG batching).
 
         Used by CFG parallel mode where each rank computes one branch.
         Returns the velocity v_t for the given branch.
         Supports Ulysses / Ring SP when parallel_config.sequence_parallel_size > 1.
+
+        ``do_true_cfg`` is passed by the denoising loop because this model
+        owns several CFG dispatch paths and cannot infer branch ownership from
+        the packed tensors alone.
         """
         use_sp = self._sp_size > 1
 
@@ -2328,17 +2341,29 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
                 extra_inputs["packed_vae_token_indexes"] = local_vae_indexes
                 extra_inputs["packed_text_indexes"] = local_text_indexes
 
-            output = self.language_model.forward(
-                packed_query_sequence=packed_sequence,
-                query_lens=local_seqlens,
-                packed_query_position_ids=local_position_ids,
-                past_key_values=past_key_values,
-                update_past_key_values=False,
-                is_causal=False,
-                **extra_inputs,
-            )
+            def run_language_model() -> tuple[torch.Tensor]:
+                output = self.language_model.forward(
+                    packed_query_sequence=packed_sequence,
+                    query_lens=local_seqlens,
+                    packed_query_position_ids=local_position_ids,
+                    past_key_values=past_key_values,
+                    update_past_key_values=False,
+                    is_causal=False,
+                    **extra_inputs,
+                )
+                return (output.packed_query_sequence,)
 
-            local_v_t = self.llm2vae(output.packed_query_sequence)
+            if self.tea_cache_executor is None:
+                (packed_output,) = run_language_model()
+            else:
+                (packed_output,) = self.tea_cache_executor.run(
+                    modulated_input=packed_sequence,
+                    residual_inputs=(packed_sequence,),
+                    compute_fn=run_language_model,
+                    do_true_cfg=do_true_cfg,
+                )
+
+            local_v_t = self.llm2vae(packed_output)
             local_v_t = local_v_t[local_vae_indexes]
             return self._gather_vae_for_sp(local_v_t)
 
@@ -2364,28 +2389,30 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
             extra_inputs["packed_vae_token_indexes"] = packed_vae_token_indexes
             extra_inputs["packed_text_indexes"] = packed_text_indexes
 
-        output = self.language_model.forward(
-            packed_query_sequence=packed_sequence,
-            query_lens=packed_seqlens,
-            packed_query_position_ids=packed_position_ids,
-            past_key_values=past_key_values,
-            update_past_key_values=False,
-            is_causal=False,
-            **extra_inputs,
-        )
-        v_t = self.llm2vae(output.packed_query_sequence)
+        def run_language_model() -> tuple[torch.Tensor]:
+            output = self.language_model.forward(
+                packed_query_sequence=packed_sequence,
+                query_lens=packed_seqlens,
+                packed_query_position_ids=packed_position_ids,
+                past_key_values=past_key_values,
+                update_past_key_values=False,
+                is_causal=False,
+                **extra_inputs,
+            )
+            return (output.packed_query_sequence,)
+
+        if self.tea_cache_executor is None:
+            (packed_output,) = run_language_model()
+        else:
+            (packed_output,) = self.tea_cache_executor.run(
+                modulated_input=packed_sequence,
+                residual_inputs=(packed_sequence,),
+                compute_fn=run_language_model,
+                do_true_cfg=do_true_cfg,
+            )
+        v_t = self.llm2vae(packed_output)
         v_t = v_t[packed_vae_token_indexes]
         return v_t
-
-    # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> torch.Tensor:
-        raise NotImplementedError
 
     def get_teacache_coefficients(self) -> list[float]:
         return [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00]
@@ -2407,6 +2434,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
         cfg_img_scale: float = 1.0,
         cfg_branch_pids: list[torch.Tensor] | None = None,
         cfg_branch_caches: list[NaiveCache] | None = None,
+        do_true_cfg: bool = False,
     ):
         # Build query sequence (identical for all CFG branches)
         packed_text_embedding = self.language_model.forward(
@@ -2449,17 +2477,31 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
                 extra_inputs["packed_vae_token_indexes"] = batched_vae_indexes
                 extra_inputs["packed_text_indexes"] = batched_text_indices
 
-            output = self.language_model.forward(
-                packed_query_sequence=batched_sequence,
-                query_lens=batched_seqlens,
-                packed_query_position_ids=batched_position_ids,
-                past_key_values=merged_cache,
-                update_past_key_values=False,
-                is_causal=False,
-                **extra_inputs,
-            )
+            def run_language_model() -> tuple[torch.Tensor]:
+                output = self.language_model.forward(
+                    packed_query_sequence=batched_sequence,
+                    query_lens=batched_seqlens,
+                    packed_query_position_ids=batched_position_ids,
+                    past_key_values=merged_cache,
+                    update_past_key_values=False,
+                    is_causal=False,
+                    **extra_inputs,
+                )
+                return (output.packed_query_sequence,)
 
-            all_vae_v_t = self.llm2vae(output.packed_query_sequence)[batched_vae_indexes]
+            if self.tea_cache_executor is None:
+                (packed_output,) = run_language_model()
+            else:
+                # CFG branches are batched here, so one residual is cached for
+                # the complete packed batch rather than mixing branch states.
+                (packed_output,) = self.tea_cache_executor.run(
+                    modulated_input=batched_sequence,
+                    residual_inputs=(batched_sequence,),
+                    compute_fn=run_language_model,
+                    do_true_cfg=do_true_cfg,
+                )
+
+            all_vae_v_t = self.llm2vae(packed_output)[batched_vae_indexes]
             vae_per_branch = packed_vae_token_indexes.shape[0]
             branch_v_ts = all_vae_v_t.split(vae_per_branch)
             v_t = branch_v_ts[0]
@@ -2467,16 +2509,28 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
             cfg_img_v_t = branch_v_ts[2] if len(branch_v_ts) > 2 else None
         else:
             # Single forward (no CFG or outside cfg_interval).
-            output = self.language_model.forward(
-                packed_query_sequence=packed_sequence,
-                query_lens=packed_seqlens,
-                packed_query_position_ids=packed_position_ids,
-                past_key_values=past_key_values,
-                update_past_key_values=False,
-                is_causal=False,
-                **extra_inputs,
-            )
-            v_t = self.llm2vae(output.packed_query_sequence)[packed_vae_token_indexes]
+            def run_language_model() -> tuple[torch.Tensor]:
+                output = self.language_model.forward(
+                    packed_query_sequence=packed_sequence,
+                    query_lens=packed_seqlens,
+                    packed_query_position_ids=packed_position_ids,
+                    past_key_values=past_key_values,
+                    update_past_key_values=False,
+                    is_causal=False,
+                    **extra_inputs,
+                )
+                return (output.packed_query_sequence,)
+
+            if self.tea_cache_executor is None:
+                (packed_output,) = run_language_model()
+            else:
+                (packed_output,) = self.tea_cache_executor.run(
+                    modulated_input=packed_sequence,
+                    residual_inputs=(packed_sequence,),
+                    compute_fn=run_language_model,
+                    do_true_cfg=do_true_cfg,
+                )
+            v_t = self.llm2vae(packed_output)[packed_vae_token_indexes]
 
         # ── CFG combination ──
         if use_cfg:

@@ -535,6 +535,7 @@ class LongCatImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfile
         )
 
         self._guidance_scale = guidance_scale
+        self.transformer.do_true_cfg = self.do_classifier_free_guidance
         self._joint_attention_kwargs = joint_attention_kwargs
         self._current_timestep = None
         self._interrupt = False

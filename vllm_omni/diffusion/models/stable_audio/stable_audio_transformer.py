@@ -17,7 +17,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
 from vllm_omni.diffusion.layers.fourier import GaussianFourierProjection
@@ -449,7 +449,7 @@ class StableAudioDiTBlock(nn.Module):
         return hidden_states
 
 
-class StableAudioDiTModel(nn.Module, SupportsTeaCache):
+class StableAudioDiTModel(nn.Module):
     """
     Optimized Stable Audio DiT model using vLLM layers.
 
@@ -476,6 +476,9 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
     _repeated_blocks = ["StableAudioDiTBlock"]
     _layerwise_offload_blocks_attrs = ["transformer_blocks"]
     _hsdp_shard_conditions = [is_transformer_block_module]
+    supports_teacache = True
+    tea_cache_model_key = "StableAudioDiTModel"
+    tea_cache_executor: TeaCacheBlockExecutor | None = None
 
     def __init__(
         self,
@@ -582,16 +585,6 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
         """Return the dtype of the model parameters."""
         return next(self.parameters()).dtype
 
-    # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
-        raise NotImplementedError
-
     def get_teacache_coefficients(self) -> list[float]:
         return [121.77490545701518, -153.7449426160371, 68.05368574596551, -12.281286412689623, 1.0733905006198015]
 
@@ -655,14 +648,29 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
             )
             attention_mask = torch.cat([prepend_mask, attention_mask], dim=-1)
 
-        # Transformer blocks
-        for block in self.transformer_blocks:
-            hidden_states = block(
-                hidden_states,
-                cross_attention_hidden_states,
-                rotary_embedding=rotary_embedding,
-                attention_mask=attention_mask,
-                encoder_attention_mask=encoder_attention_mask,
+        def run_transformer_blocks() -> tuple[torch.Tensor]:
+            h = hidden_states
+            for block in self.transformer_blocks:
+                h = block(
+                    h,
+                    cross_attention_hidden_states,
+                    rotary_embedding=rotary_embedding,
+                    attention_mask=attention_mask,
+                    encoder_attention_mask=encoder_attention_mask,
+                )
+            return (h,)
+
+        if self.tea_cache_executor is None:
+            (hidden_states,) = run_transformer_blocks()
+        else:
+            # Stable Audio caches the complete sequence, including its global
+            # conditioning token, before the output projection and conv.
+            modulated_input = self.transformer_blocks[0].norm1(hidden_states)
+            (hidden_states,) = self.tea_cache_executor.run(
+                modulated_input=modulated_input,
+                residual_inputs=(hidden_states,),
+                compute_fn=run_transformer_blocks,
+                do_true_cfg=getattr(self, "do_true_cfg", False),
             )
 
         # Project back to out_channels: [B, 1+L, inner_dim] -> [B, 1+L, out_channels]

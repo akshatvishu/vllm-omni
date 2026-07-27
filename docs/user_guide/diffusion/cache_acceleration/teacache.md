@@ -122,23 +122,9 @@ In `OmniDiffusionConfig`
 | `rel_l1_thresh` | float | `0.2` | Similarity threshold for cache reuse. Lower values prioritize quality (less caching), higher values prioritize speed (more caching). Suggested range: 0.1-0.8 |
 | `coefficients` | list[float] \| None | `None` | Polynomial coefficients for rescaling L1 distance. Must contain exactly 5 elements if provided. If `None`, uses model-specific defaults based on transformer type. |
 
-Users can find the default model coefficients in [`vllm_omni/diffusion/cache/teacache/config.py`](https://github.com/vllm-project/vllm-omni/blob/main/vllm_omni/diffusion/cache/teacache/config.py), for example:
-
-```python
-_MODEL_COEFFICIENTS = {
-    # Qwen-Image transformer coefficients from ComfyUI-TeaCache
-    # Tuned specifically for Qwen's dual-stream transformer architecture
-    # Used for all Qwen-Image Family pipelines, in general
-    "QwenImageTransformer2DModel": [
-        -4.50000000e02,
-        2.80000000e02,
-        -4.50000000e01,
-        3.20000000e00,
-        -2.00000000e-02,
-    ],
-    ...
-}
-```
+Each native transformer supplies its default coefficients through
+`get_teacache_coefficients()`. A user supplied `coefficients` list overrides the
+model values, and must contain five finite numbers.
 
 ---
 
@@ -190,5 +176,5 @@ cache_config={"rel_l1_thresh": 0.1}
 
 ## Summary
 
-1. ✅ **Enable TeaCache** - Set `cache_backend="tea_cache"` to get 1.5x-2.0x speedup with optimized defaults
-2. ✅ **(Optional) Customize** - Adjust thresholds and polynomial coefficients for specific speed/quality trade-offs
+1. Set `cache_backend="tea_cache"` to enable the native model boundary.
+2. Adjust `rel_l1_thresh` or provide five coefficients when the model needs different settings.

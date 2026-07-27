@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -9,42 +10,34 @@ import torch
 from vllm.config import LoadConfig
 from vllm.transformers_utils.config import get_hf_file_to_dict
 
-from vllm_omni.diffusion.cache.teacache.extractors import get_extractor
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor, supports_teacache
 from vllm_omni.diffusion.data import OmniDiffusionConfig, TransformerConfig
-from vllm_omni.diffusion.hooks import HookRegistry, ModelHook
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
 from vllm_omni.diffusion.request import OmniDiffusionRequest
+from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
 
 
-class DataCollectionHook(ModelHook):
-    """Hook to collect modulated inputs and model outputs for TeaCache coefficient estimation."""
+class DataCollectionExecutor(TeaCacheBlockExecutor):
+    """Collect native TeaCache boundary samples while executing the blocks."""
 
-    _HOOK_NAME = "teacache_collector"
-
-    def __init__(self, transformer_type: str):
-        super().__init__()
-        self.transformer_type = transformer_type
-        self.extractor_fn = None
+    def __init__(self):
         self.current_trajectory: list[tuple[np.ndarray, np.ndarray]] = []
 
-    def initialize_hook(self, module: torch.nn.Module) -> torch.nn.Module:
-        self.extractor_fn = get_extractor(self.transformer_type)
-        return module
-
-    def new_forward(self, module: torch.nn.Module, *args: Any, **kwargs: Any) -> Any:
-        ctx = self.extractor_fn(module, *args, **kwargs)
+    def run(
+        self,
+        *,
+        modulated_input: torch.Tensor,
+        residual_inputs: tuple[torch.Tensor, ...],
+        compute_fn: Callable[[], tuple[torch.Tensor, ...]],
+        do_true_cfg: bool = False,
+    ) -> tuple[torch.Tensor, ...]:
         # NOTE: We upcast to float32 to also handle bfloat16.
-        modulated_input_cpu = ctx.modulated_input.detach().float().cpu().numpy()
-
-        outputs = ctx.run_transformer_blocks()
-        ctx.hidden_states = outputs[0]
-        if len(outputs) > 1 and ctx.encoder_hidden_states is not None:
-            ctx.encoder_hidden_states = outputs[1]
-
-        model_output_cpu = ctx.hidden_states.detach().float().cpu().numpy()
+        modulated_input_cpu = modulated_input.detach().float().cpu().numpy()
+        outputs = compute_fn()
+        model_output_cpu = outputs[0].detach().float().cpu().numpy()
         self.current_trajectory.append((modulated_input_cpu, model_output_cpu))
-        return ctx.postprocess(ctx.hidden_states)
+        return outputs
 
     def start_collection(self):
         self.current_trajectory = []
@@ -85,12 +78,8 @@ class DefaultAdapter:
 
     @staticmethod
     def get_transformer(pipeline: Any) -> tuple[Any, str]:
-        return pipeline.transformer, pipeline.transformer.__class__.__name__
-
-    @staticmethod
-    def install_hook(transformer: Any, hook: DataCollectionHook) -> None:
-        registry = HookRegistry.get_or_create(transformer)
-        registry.register_hook(hook._HOOK_NAME, hook)
+        transformer = pipeline.transformer
+        return transformer, transformer.tea_cache_model_key
 
 
 class BagelAdapter(DefaultAdapter):
@@ -103,12 +92,8 @@ class BagelAdapter(DefaultAdapter):
 
     @staticmethod
     def get_transformer(pipeline: Any) -> tuple[Any, str]:
-        return pipeline.bagel, "Bagel"
-
-    @staticmethod
-    def install_hook(transformer: Any, hook: DataCollectionHook) -> None:
-        registry = HookRegistry.get_or_create(transformer)
-        registry.register_hook(hook._HOOK_NAME, hook)
+        transformer = pipeline.bagel
+        return transformer, transformer.tea_cache_model_key
 
 
 class Flux2Adapter(DefaultAdapter):
@@ -132,11 +117,21 @@ class StableAudioAdapter(DefaultAdapter):
     model_class_name = "StableAudioPipeline"
 
 
+class SenseNovaAdapter(DefaultAdapter):
+    model_class_name = "SenseNovaU1Pipeline"
+
+    @staticmethod
+    def get_transformer(pipeline: Any) -> tuple[Any, str]:
+        transformer = pipeline.denoising_transformer.language_model
+        return transformer, transformer.tea_cache_model_key
+
+
 _MODEL_ADAPTERS: dict[str, type] = {
     "Bagel": BagelAdapter,
-    "StableAudio": StableAudioAdapter,
     "Flux2": Flux2Adapter,
+    "StableAudio": StableAudioAdapter,
     "LongCat": LongCatAdapter,
+    "SenseNova": SenseNovaAdapter,
 }
 
 _EPSILON = 1e-6
@@ -194,12 +189,14 @@ class TeaCacheCoefficientEstimator:
         adapter = _MODEL_ADAPTERS[model_type]
         self.pipeline = adapter.load_pipeline(model_path, device, dtype)
         self.transformer, self.transformer_type = adapter.get_transformer(self.pipeline)
-        self.hook = DataCollectionHook(self.transformer_type)
+        if not supports_teacache(self.transformer):
+            raise TypeError(f"{type(self.transformer).__name__} does not support native TeaCache")
+        self.executor = DataCollectionExecutor()
         self.collected_data: list[list[tuple[np.ndarray, np.ndarray]]] = []
-        adapter.install_hook(self.transformer, self.hook)
+        self.transformer.tea_cache_executor = self.executor
 
     def collect_from_prompt(self, prompt: str, **generate_kwargs):
-        self.hook.start_collection()
+        self.executor.start_collection()
         req = OmniDiffusionRequest(
             prompt=prompt,
             request_id="teacache-coefficient-estimator",
@@ -208,11 +205,9 @@ class TeaCacheCoefficientEstimator:
                 seed=generate_kwargs.get("seed", 42),
             ),
         )
-        from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
-
         with torch.no_grad():
             self.pipeline.forward(DiffusionRequestBatch(requests=[req]))
-        trajectory = self.hook.stop_collection()
+        trajectory = self.executor.stop_collection()
         if trajectory:
             self.collected_data.append(trajectory)
         torch.accelerator.empty_cache()
