@@ -3,9 +3,10 @@
 
 """Check selected ``vllm serve --omni`` flags without loading a model.
 
-The tests use the production parser, registry and deploy resolver, diffusion
-fallback, final config projection, and lightweight runtime consumers. Each
-test checks the exact point where a flag is applied or lost.
+The tests use the production parser, current runtime registry and deploy
+resolver, structured resolver from issue #4021, diffusion fallback, final
+config projection, and lightweight runtime consumers. Each test checks the
+exact point where a flag is applied or lost.
 
 Loading a model would not strengthen these config checks. The one GPU serving
 test in ``tests/e2e/online_serving/test_entrypoint_flag_smoke.py`` instead
@@ -22,6 +23,7 @@ import pytest
 from fastapi import HTTPException
 
 from vllm_omni.config.config_factory import StageConfigFactory
+from vllm_omni.config.omni_config import VllmOmniConfig
 from vllm_omni.config.pipeline_registry import resolve_pipeline_config
 from vllm_omni.config.yaml_util import create_config
 from vllm_omni.diffusion.data import OmniDiffusionConfig
@@ -138,6 +140,35 @@ def test_diffusion_flags_are_lost_on_the_registry_deploy_path(mocker):
     # derives one device from its parallel config.
     assert "num_gpus" not in diffusion_stage.runtime_overrides
     assert final_config.num_gpus == 1
+
+
+def test_diffusion_flags_are_also_lost_on_the_structured_config_path():
+    """Check the additive config path from issue #4021 before runtime cutover."""
+    _, _, explicit = _parse_serve_args(
+        "--deploy-config",
+        "vllm_omni/deploy/glm_image.yaml",
+        "--diffusion-streaming-output",
+        "--default-sampling-params",
+        '{"1": {"num_inference_steps": 7, "guidance_scale": 2.5}}',
+        "--auxiliary-text-encoder",
+        "example/encoder",
+        "--num-gpus",
+        "7",
+    )
+    deploy_path = explicit.pop("deploy_config")
+
+    config = VllmOmniConfig.from_pipeline_config(
+        resolve_pipeline_config("glm_image"),
+        deploy_config_path=deploy_path,
+        cli_overrides={"model": "THUDM/GLM-Image", **explicit},
+    )
+    diffusion_stage = config.stage_by_id(1)
+
+    assert diffusion_stage.model_config.default_sampling_params["num_inference_steps"] == 50
+    assert diffusion_stage.model_config.default_sampling_params["guidance_scale"] == 1.5
+    assert getattr(diffusion_stage.diffusion_config, "streaming_output", False) is False
+    assert getattr(diffusion_stage.diffusion_config, "auxiliary_text_encoder", None) is None
+    assert diffusion_stage.runtime_config.num_gpus == 1
 
 
 @pytest.mark.asyncio
