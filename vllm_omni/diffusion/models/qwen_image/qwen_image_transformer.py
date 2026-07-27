@@ -37,6 +37,7 @@ from vllm_omni.diffusion.attention.backends.abstract import (
 )
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.base import CachedTransformer
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
 from vllm_omni.diffusion.distributed.sp_plan import (
@@ -901,7 +902,7 @@ class QwenImageTransformerBlock(nn.Module):
 
 
 # Note: inheriting from CachedTransformer only when we support caching
-class QwenImageTransformer2DModel(CachedTransformer):
+class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
     """
     The Transformer model introduced in Qwen.
 
@@ -1074,6 +1075,19 @@ class QwenImageTransformer2DModel(CachedTransformer):
         # Only active when zero_cond_t=True (image editing models)
         self.modulate_index_prepare = ModulateIndexPrepare(zero_cond_t=zero_cond_t)
 
+    # SupportsTeaCache protocol stubs
+    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
+        raise NotImplementedError
+
+    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
+        raise NotImplementedError
+
+    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
+        raise NotImplementedError
+
+    def get_teacache_coefficients(self) -> list[float]:
+        return [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02]
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -1085,8 +1099,7 @@ class QwenImageTransformer2DModel(CachedTransformer):
         guidance: torch.Tensor = None,  # TODO: this should probably be removed
         attention_kwargs: dict[str, Any] | None = None,
         additional_t_cond=None,
-        return_dict: bool = True,
-    ) -> torch.Tensor | Transformer2DModelOutput:
+    ) -> Transformer2DModelOutput:
         """
         The [`QwenTransformer2DModel`] forward method.
 
@@ -1103,9 +1116,6 @@ class QwenImageTransformer2DModel(CachedTransformer):
                 A kwargs dictionary that if specified is passed along to the `AttentionProcessor` as defined under
                 `self.processor` in
                 [diffusers.models.attention_processor](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention_processor.py).
-            return_dict (`bool`, *optional*, defaults to `True`):
-                Whether or not to return a [`~models.transformer_2d.Transformer2DModelOutput`] instead of a plain
-                tuple.
 
         Returns:
             If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a

@@ -20,6 +20,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.data import DiffusionParallelConfig, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
@@ -576,7 +577,7 @@ class LongCatImageSingleTransformerBlock(nn.Module):
         return encoder_hidden_states, hidden_states
 
 
-class LongCatImageTransformer2DModel(nn.Module):
+class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
     """
     The Transformer model introduced in Flux.
 
@@ -672,6 +673,19 @@ class LongCatImageTransformer2DModel(nn.Module):
 
         self.use_checkpoint = [True] * num_layers
         self.use_single_checkpoint = [True] * num_single_layers
+
+    # SupportsTeaCache protocol stubs
+    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
+        raise NotImplementedError
+
+    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
+        raise NotImplementedError
+
+    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
+        raise NotImplementedError
+
+    def get_teacache_coefficients(self) -> list[float]:
+        return [652.5980, -424.1615, 84.5526, -4.5923, 0.1694]
 
     def forward(
         self,

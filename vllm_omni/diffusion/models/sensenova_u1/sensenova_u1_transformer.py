@@ -33,6 +33,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig, SensenovaCachedAdapter
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 
 logger = init_logger(__name__)
 
@@ -728,7 +729,7 @@ class SenseNovaU1Model(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-class SenseNovaU1ForCausalLM(nn.Module):
+class SenseNovaU1ForCausalLM(nn.Module, SupportsTeaCache):
     def __init__(self, config, quant_config=None, prefix: str = ""):
         super().__init__()
         self.config = config
@@ -738,6 +739,19 @@ class SenseNovaU1ForCausalLM(nn.Module):
         # LogitsProcessor handles the TP all-gather of vocab-sharded ParallelLMHead
         # outputs so callers see full-vocab logits regardless of tp_size.
         self.logits_processor = LogitsProcessor(config.vocab_size)
+
+    # SupportsTeaCache protocol stubs
+    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
+        raise NotImplementedError
+
+    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
+        raise NotImplementedError
+
+    def postprocess(self, ctx: ForwardState) -> SenseNovaU1CausalLMOutput:
+        raise NotImplementedError
+
+    def get_teacache_coefficients(self) -> list[float]:
+        return [9.07281930e04, -2.17699186e04, 1.83940990e03, -6.30339273e01, 7.61309272e-01]
 
     def forward(
         self,

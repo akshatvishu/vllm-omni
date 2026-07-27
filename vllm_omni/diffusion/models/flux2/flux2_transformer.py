@@ -27,6 +27,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.data import DiffusionParallelConfig, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
@@ -750,7 +751,7 @@ class Flux2Modulation(nn.Module):
         return tuple(mod_params[3 * i : 3 * (i + 1)] for i in range(self.mod_param_sets))
 
 
-class Flux2Transformer2DModel(nn.Module):
+class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
     """
     The Transformer model introduced in Flux 2.
 
@@ -889,6 +890,20 @@ class Flux2Transformer2DModel(nn.Module):
     @property
     def dtype(self) -> torch.dtype:
         return next(self.parameters()).dtype
+
+    # SupportsTeaCache protocol stubs
+    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
+        raise NotImplementedError
+
+    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
+        raise NotImplementedError
+
+    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
+        raise NotImplementedError
+
+    def get_teacache_coefficients(self) -> list[float]:
+        # Copied from Qwen-Image, needs tuning for Flux2
+        return [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02]
 
     def forward(
         self,

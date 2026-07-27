@@ -17,6 +17,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
 from vllm_omni.diffusion.layers.fourier import GaussianFourierProjection
@@ -448,7 +449,7 @@ class StableAudioDiTBlock(nn.Module):
         return hidden_states
 
 
-class StableAudioDiTModel(nn.Module):
+class StableAudioDiTModel(nn.Module, SupportsTeaCache):
     """
     Optimized Stable Audio DiT model using vLLM layers.
 
@@ -580,6 +581,19 @@ class StableAudioDiTModel(nn.Module):
     def dtype(self) -> torch.dtype:
         """Return the dtype of the model parameters."""
         return next(self.parameters()).dtype
+
+    # SupportsTeaCache protocol stubs
+    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
+        raise NotImplementedError
+
+    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
+        raise NotImplementedError
+
+    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
+        raise NotImplementedError
+
+    def get_teacache_coefficients(self) -> list[float]:
+        return [121.77490545701518, -153.7449426160371, 68.05368574596551, -12.281286412689623, 1.0733905006198015]
 
     def forward(
         self,

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -27,6 +28,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.quantization.component_config import safe_quant_config
 
 if TYPE_CHECKING:
@@ -455,7 +457,7 @@ class FluxPosEmbed(nn.Module):
         self.theta = theta
         self.axes_dim = axes_dim
 
-    def forward(self, ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         n_axes = ids.shape[-1]
         cos_out = []
         sin_out = []
@@ -478,7 +480,15 @@ class FluxPosEmbed(nn.Module):
         return freqs_cos, freqs_sin
 
 
-class FluxTransformer2DModel(nn.Module):
+@dataclass
+class FluxState:
+    """Intermediate model-specific info for Flux Transformer."""
+
+    image_rotary_emb: tuple[torch.Tensor, torch.Tensor]
+    joint_attention_kwargs: dict[str, Any]
+
+
+class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
     """
     The Transformer model introduced in Flux.
 
@@ -610,7 +620,17 @@ class FluxTransformer2DModel(nn.Module):
         )
         self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
 
-    def forward(
+    def forward(self, *args, **kwargs) -> Transformer2DModelOutput:
+        """Forward pass for the DiT, which is implemented using the methods outlined by SupportsTeaCache.
+
+        NOTE: this is the disabled cache path; the forward is overridden by the TeaCache hook when it is
+        enabled, which needs the modulated inputs for cache decision. Skipping modulated inputs is intentional.
+        """
+        ctx = self.preprocess(*args, **kwargs, skip_modulated_input=True)
+        ctx = self.run_transformer_blocks(ctx)
+        return self.postprocess(ctx)
+
+    def preprocess(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor = None,
@@ -620,39 +640,9 @@ class FluxTransformer2DModel(nn.Module):
         txt_ids: torch.Tensor = None,
         guidance: torch.Tensor | None = None,
         joint_attention_kwargs: dict[str, Any] | None = None,
-        return_dict: bool = True,
-    ) -> torch.Tensor | Transformer2DModelOutput:
-        """
-        The [`FluxTransformer2DModel`] forward method.
-
-        Args:
-            hidden_states (`torch.Tensor` of shape `(batch_size, image_sequence_length, in_channels)`):
-                Input `hidden_states`.
-            encoder_hidden_states (`torch.Tensor` of shape `(batch_size, text_sequence_length, joint_attention_dim)`):
-                Conditional embeddings (embeddings computed from the input conditions such as prompts) to use.
-            pooled_projections (`torch.Tensor` of shape `(batch_size, projection_dim)`): Embeddings projected
-                from the embeddings of input conditions.
-            timestep ( `torch.LongTensor`):
-                Used to indicate denoising step.
-            img_ids: (`torch.Tensor`):
-                The position ids for image tokens.
-            txt_ids (`torch.Tensor`):
-                The position ids for text tokens.
-            guidance (`torch.Tensor`):
-                Guidance embeddings for guidance-distilled variant of the model.
-            joint_attention_kwargs (`dict`, *optional*):
-                A kwargs dictionary that if specified is passed along to the `AttentionProcessor` as defined under
-                `self.processor` in
-                [diffusers.models.attention_processor](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention_processor.py).
-            return_dict (`bool`, *optional*, defaults to `True`):
-                Whether or not to return a [`~models.transformer_2d.Transformer2DModelOutput`] instead of a plain
-                tuple.
-
-        Returns:
-            If `return_dict` is True, an [`~models.transformer_2d.Transformer2DModelOutput`] is returned, otherwise a
-            `tuple` where the first element is the sample tensor.
-        """
-
+        *,
+        skip_modulated_input: bool = False,
+    ) -> ForwardState[FluxState]:
         hidden_states = self.x_embedder(hidden_states)
         timestep = timestep.to(device=hidden_states.device, dtype=hidden_states.dtype) * 1000
 
@@ -685,32 +675,51 @@ class FluxTransformer2DModel(nn.Module):
             image_rotary_emb = (freqs_cos.npu(), freqs_sin.npu())
         else:
             image_rotary_emb = self.pos_embed(ids)
+        if not skip_modulated_input:
+            first_block = self.transformer_blocks[0]
+            modulated_input, *_ = first_block.norm1(hidden_states, emb=temb)
 
-        for index_block, block in enumerate(self.transformer_blocks):
-            encoder_hidden_states, hidden_states = block(
-                hidden_states=hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-                temb=temb,
+        else:
+            modulated_input = None
+        return ForwardState[FluxState](
+            modulated_input,
+            hidden_states,
+            encoder_hidden_states,
+            temb,
+            intermediates=FluxState(
                 image_rotary_emb=image_rotary_emb,
                 joint_attention_kwargs=joint_attention_kwargs,
+            ),
+        )
+
+    def run_transformer_blocks(self, ctx: ForwardState[FluxState]) -> ForwardState[FluxState]:
+        for block in self.transformer_blocks:
+            ctx.encoder_hidden_states, ctx.hidden_states = block(
+                hidden_states=ctx.hidden_states,
+                encoder_hidden_states=ctx.encoder_hidden_states,
+                temb=ctx.temb,
+                image_rotary_emb=ctx.intermediates.image_rotary_emb,
+                joint_attention_kwargs=ctx.intermediates.joint_attention_kwargs,
             )
 
-        for index_block, block in enumerate(self.single_transformer_blocks):
-            encoder_hidden_states, hidden_states = block(
-                hidden_states=hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-                temb=temb,
-                image_rotary_emb=image_rotary_emb,
-                joint_attention_kwargs=joint_attention_kwargs,
+        for block in self.single_transformer_blocks:
+            ctx.encoder_hidden_states, ctx.hidden_states = block(
+                hidden_states=ctx.hidden_states,
+                encoder_hidden_states=ctx.encoder_hidden_states,
+                temb=ctx.temb,
+                image_rotary_emb=ctx.intermediates.image_rotary_emb,
+                joint_attention_kwargs=ctx.intermediates.joint_attention_kwargs,
             )
+        return ctx
 
-        hidden_states = self.norm_out(hidden_states, temb)
-        output = self.proj_out(hidden_states)
-
-        if not return_dict:
-            return (output,)
+    def postprocess(self, ctx: ForwardState[FluxState]) -> Transformer2DModelOutput:
+        ctx.hidden_states = self.norm_out(ctx.hidden_states, ctx.temb)
+        output = self.proj_out(ctx.hidden_states)
 
         return Transformer2DModelOutput(sample=output)
+
+    def get_teacache_coefficients(self) -> list[float]:
+        return [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01]
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
