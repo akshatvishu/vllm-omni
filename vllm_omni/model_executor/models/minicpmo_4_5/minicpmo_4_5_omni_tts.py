@@ -48,6 +48,7 @@ _AUDIO_TOKENS_PER_TEXT_TOKEN = 10
 # only choose the Talker's binary continue/stop row.
 _CODEC_SEED = 42
 _CODEC_TEMPERATURE = 0.8
+# Match MiniCPM-o 4.5's official utils.TTSSamplingParams defaults.
 _CODEC_TOP_K = 25
 _CODEC_TOP_P = 0.85
 _CODEC_REPETITION_PENALTY = 1.05

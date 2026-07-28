@@ -28,8 +28,6 @@ def patch_minicpmo_remote_config(config: Any) -> None:
     if tts_config is None:
         return
     defaults = {
-        "top_p": 0.8,
-        "top_k": 100,
         "temperature": 0.8,
         "repetition_penalty": 1.05,
     }
