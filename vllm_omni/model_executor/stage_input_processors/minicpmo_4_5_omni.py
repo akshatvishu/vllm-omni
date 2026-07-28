@@ -1007,7 +1007,15 @@ def llm2tts(
             _reset_native_tts_handoff(_streaming_context)
 
         if handoff_ids is not None and handoff_hidden is not None:
-            condition_length = max(len(handoff_ids), len(handoff_hidden)) + 2
+            # Official streaming_generate sends ten text tokens per Talker
+            # condition. Intermediate chunks add audio BOS; the final chunk
+            # also adds text EOS. Later chunks are injected during Talker
+            # decode, so the scheduler prompt reserves only the first chunk.
+            handoff_length = max(len(handoff_ids), len(handoff_hidden))
+            first_text_chunk_length = min(handoff_length, 10)
+            condition_length = first_text_chunk_length + 1
+            if handoff_length <= 10:
+                condition_length += 1
             scheduler_prompt_token_ids = [0] * condition_length
             handoff_meta = model_intermediate_buffer.setdefault("meta", {})
             handoff_meta["replace_streaming_prompt"] = True

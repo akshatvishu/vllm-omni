@@ -31,7 +31,7 @@ Run this command in the first SSH shell:
 cd /scratch/workspace/vllm-omni
 set -o pipefail
 
-TRACE_DIR="$PWD/issue_5259_server_trace_eos"
+TRACE_DIR="$PWD/issue_5259_server_trace_chunked_fix"
 mkdir -p "$TRACE_DIR"
 
 MINICPMO45_TRACE=1 \
@@ -57,7 +57,7 @@ cd /scratch/workspace/vllm-omni
 set -o pipefail
 
 REPO_DIR="$PWD"
-TRACE_DIR="$REPO_DIR/issue_5259_server_trace_eos"
+TRACE_DIR="$REPO_DIR/issue_5259_server_trace_chunked_fix"
 
 (
   cd "$TRACE_DIR"
@@ -80,14 +80,14 @@ Run this command after the request finishes:
 ```bash
 cd /scratch/workspace/vllm-omni
 
-TRACE_DIR="$PWD/issue_5259_server_trace_eos"
+TRACE_DIR="$PWD/issue_5259_server_trace_chunked_fix"
 
 rg --no-filename '\[MiniCPMO45Trace\]' \
   "$TRACE_DIR" \
   --glob '*.log' \
   > "$TRACE_DIR/trace.log"
 
-tar -czf "$PWD/issue_5259_server_trace_eos.tar.gz" \
+tar -czf "$PWD/issue_5259_server_trace_chunked_fix.tar.gz" \
   -C "$TRACE_DIR" .
 ```
 

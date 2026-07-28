@@ -51,7 +51,9 @@ stages:
       top_p: 1.0
       top_k: -1
       min_tokens: 50
-      max_tokens: 2048
+      # Includes the generated codec steps and later ten-token text condition
+      # chunks that the Talker injects after intermediate audio EOS.
+      max_tokens: 3072
       stop_token_ids: [1]
       seed: 42
       detokenize: false
