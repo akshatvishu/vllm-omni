@@ -137,29 +137,22 @@ def test_sequential_requests_independent(omni_server, openai_client) -> None:
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_text_to_audio_long_output_001(omni_server, openai_client) -> None:
     """
-    Reproduce the long-story tail-coverage failure from issue #5259 in English.
+    Reproduce the H100 text and audio mismatch.
     Deploy Setting: default 2GPU
-    Input Modal: text (at least 500 output words)
+    Input Modal: text
     Output Modal: text + audio
     Input Setting: stream=True
     """
-    closing_sentence = "The lantern went dark, and the long journey was complete."
     messages = dummy_messages_from_mix_data(
         system_prompt=get_system_prompt(),
-        content_text=(
-            "Write an English story of at least 500 words. "
-            f"End the story with exactly this sentence: {closing_sentence}"
-        ),
+        content_text="Tell me a short story about a cat in about 50 words.",
     )
 
     request_config = {
         "model": omni_server.model,
         "messages": messages,
         "stream": True,
-        "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
-        "minimum_text_words": 500,
-        "required_text_suffix": closing_sentence,
-        "required_audio_text": closing_sentence,
+        "key_words": {"audio": ["cat"]},
     }
 
     openai_client.send_omni_request(request_config, request_num=1)

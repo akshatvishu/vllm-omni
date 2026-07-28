@@ -93,6 +93,8 @@ def _make_thinker_output(
     hidden_states: torch.Tensor | None = None,
     multimodal_output: dict[str, object] | None = None,
     request_multimodal_output: dict[str, object] | None = None,
+    finish_reason: str | None = None,
+    stop_reason: str | None = None,
 ):
     """Construct a minimal mock of a thinker engine output entry.
 
@@ -109,6 +111,8 @@ def _make_thinker_output(
         multimodal_output=mm_output,
         token_ids=output_token_ids,
         text=text,
+        finish_reason=finish_reason,
+        stop_reason=stop_reason,
     )
     if hidden_states is not None:
         output.hidden_states = hidden_states
@@ -228,9 +232,11 @@ class TestBasicShape:
                 _make_thinker_output(
                     prompt_token_ids=[10],
                     output_token_ids=[151703, 20, 21, 151704],
-                    text="complete English response",
+                    text="<think>plan</think>\n\ncomplete English response",
                     hidden_states=hidden,
                     request_id="req-trace",
+                    finish_reason="stop",
+                    stop_reason=151704,
                 )
             ],
             prompt=None,
@@ -241,11 +247,18 @@ class TestBasicShape:
         assert event == "thinker_to_talker"
         assert fields["request_id"] == "req-trace"
         assert fields["output_tokens"] == 4
+        assert fields["output_token_ids"]["tail"] == [151703, 20, 21, 151704]
+        assert fields["terminal_token_id"] == 151704
+        assert fields["finish_reason"] == "stop"
+        assert fields["stop_reason"] == 151704
         assert fields["tts_bos_index"] == 2
         assert fields["tts_eos_index"] == 4
+        assert fields["boundary_positions"]["plain_tts_bos_token_id"] == [1]
+        assert fields["boundary_positions"]["plain_tts_eos_token_id"] == [4]
         assert fields["handoff_tokens"]["count"] == 2
         assert fields["handoff_hidden"]["shape"] == [2, _HIDDEN_DIM]
-        assert fields["output_text"]["tail"] == "complete English response"
+        assert fields["think_text"]["tail"] == "plan"
+        assert fields["answer_text"]["tail"] == "complete English response"
 
     def test_latent_in_multimodal_output_takes_precedence(self) -> None:
         # When both ``multimodal_output["latent"]`` and ``hidden_states`` are

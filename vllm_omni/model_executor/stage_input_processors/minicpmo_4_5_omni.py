@@ -209,6 +209,27 @@ def _is_aborted(request: Any) -> bool:
     return any(marker in status_name for marker in ("ABORT", "CANCEL", "IGNORED", "ERROR"))
 
 
+def _request_finish_reason(request: Any) -> str | None:
+    get_finished_reason = getattr(request, "get_finished_reason", None)
+    if not callable(get_finished_reason):
+        return None
+    reason = get_finished_reason()
+    return str(getattr(reason, "value", reason)) if reason is not None else None
+
+
+def _thinking_text_summaries(text: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    think_start = text.find("<think>")
+    think_end = text.find("</think>", think_start + len("<think>")) if think_start >= 0 else -1
+    if think_start < 0:
+        return text_summary(None), text_summary(text)
+    if think_end < 0:
+        return text_summary(text[think_start + len("<think>") :]), text_summary(None)
+    return (
+        text_summary(text[think_start + len("<think>") : think_end]),
+        text_summary(text[think_end + len("</think>") :].lstrip()),
+    )
+
+
 def tts2code2wav_async_chunk(
     transfer_manager: Any,
     multimodal_output: Any,
@@ -338,6 +359,10 @@ def tts2code2wav_async_chunk(
             pending_codes=len(pending),
             left_context_frames=len(context),
             last_chunk=last_chunk,
+            request_finished=finished,
+            finish_reason=_request_finish_reason(request),
+            stop_reason=getattr(request, "stop_reason", None),
+            request_status=str(getattr(request, "status", None)),
             total_codec_tokens=int(state["codec_trace_count"]),
             total_codec_hash=f"{int(state['codec_trace_hash']):016x}",
         )
@@ -993,6 +1018,17 @@ def llm2tts(
             )
         if trace_enabled():
             trace_hidden = torch.as_tensor(handoff_hidden, dtype=torch.float32) if handoff_hidden is not None else None
+            think_text, answer_text = _thinking_text_summaries(thinker_text)
+            boundary_token_ids = {
+                **special_token_ids,
+                "plain_tts_bos_token_id": 151703,
+                "plain_tts_eos_token_id": 151704,
+                "plain_im_end_token_id": 151645,
+            }
+            boundary_positions = {
+                name: [index for index, token_id in enumerate(full_token_ids) if token_id == boundary_id]
+                for name, boundary_id in boundary_token_ids.items()
+            }
             trace_event(
                 logger,
                 "thinker_to_talker",
@@ -1000,15 +1036,23 @@ def llm2tts(
                 native_duplex=is_native_duplex_handoff,
                 prompt_tokens=len(prompt_token_ids),
                 output_tokens=len(llm_output_ids),
+                output_token_ids=int_sequence_summary(llm_output_ids),
+                terminal_token_id=llm_output_ids[-1] if llm_output_ids else None,
+                finish_reason=getattr(output, "finish_reason", None),
+                stop_reason=getattr(output, "stop_reason", None),
                 thinker_hidden=tensor_summary(thinker_hidden_states),
                 tts_bos_id=tts_bos_id,
                 tts_bos_index=tts_bos_idx,
                 tts_eos_index=tts_eos_idx,
                 tts_end_ids=sorted(tts_end_ids),
+                boundary_token_ids=boundary_token_ids,
+                boundary_positions=boundary_positions,
                 handoff_tokens=int_sequence_summary(handoff_ids),
                 handoff_hidden=tensor_summary(trace_hidden),
                 scheduler_prompt_tokens=len(scheduler_prompt_token_ids),
                 output_text=text_summary(thinker_text),
+                think_text=think_text,
+                answer_text=answer_text,
             )
         tts_inputs.append(
             OmniTokensPrompt(
