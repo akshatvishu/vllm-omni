@@ -41,9 +41,6 @@ from .trace import (
 logger = init_logger(__name__)
 
 _REPETITION_WINDOW = 16
-_MIN_AUDIO_TOKENS = 64
-_MAX_AUDIO_TOKENS = 2048
-_AUDIO_TOKENS_PER_TEXT_TOKEN = 10
 # Codec-token sampling happens inside the model; vLLM sampling parameters
 # only choose the Talker's binary continue/stop row.
 _CODEC_SEED = 42
@@ -52,25 +49,12 @@ _CODEC_TEMPERATURE = 0.8
 _CODEC_TOP_K = 25
 _CODEC_TOP_P = 0.85
 _CODEC_REPETITION_PENALTY = 1.05
-_CODEC_MIN_TOKENS = 50
 # The official streaming_generate path hands the Talker ten text tokens at a
 # time. Each chunk is followed by audio BOS; only the final chunk also carries
-# text EOS.
+# text EOS. generate_with_buffer gives each condition at most 500 codec
+# sampling steps while preserving one request-wide KV cache and codec history.
 _TEXT_CHUNK_SIZE = 10
-
-
-def _max_audio_tokens(condition_tokens: int) -> int:
-    """Bound codec generation with a conservative text-length estimate.
-
-    EOS is masked for the first 50 steps, so a direct ``text_tokens * 10``
-    limit can terminate short responses before EOS is eligible. The 2048
-    ceiling matches the checkpoint's native generation default and keeps the
-    sequence within the Talker's 4096-position context.
-    """
-    return max(
-        _MIN_AUDIO_TOKENS,
-        min(_MAX_AUDIO_TOKENS, condition_tokens * _AUDIO_TOKENS_PER_TEXT_TOKEN),
-    )
+_MAX_AUDIO_TOKENS_PER_CONDITION = 500
 
 
 def _restore_weight_norm_weight(weight_g: torch.Tensor, weight_v: torch.Tensor) -> torch.Tensor:
@@ -172,7 +156,6 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             self._codec_top_k = int(getattr(tts_config, "top_k", _CODEC_TOP_K))
             self._codec_top_p = float(getattr(tts_config, "top_p", _CODEC_TOP_P))
             self._codec_repetition_penalty = float(getattr(tts_config, "repetition_penalty", _CODEC_REPETITION_PENALTY))
-            self._codec_min_tokens = int(getattr(tts_config, "min_new_tokens", _CODEC_MIN_TOKENS))
         else:
             self._tts_config = None
 
@@ -336,10 +319,9 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     f"tts_ids={token_ids.shape[0]} tts_hidden={hidden_states.shape[0]} "
                     f"prompt_len={info_dict.get('_omni_prompt_len')}"
                 )
-            max_tokens = _max_audio_tokens(int(token_ids.numel()))
             state = {
                 "step": 0,
-                "max_tokens": max_tokens,
+                "condition_step": 0,
                 "finished": empty_condition,
                 "condition_chunks": condition_chunks,
                 "condition_chunk_index": 0,
@@ -386,8 +368,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                             "top_p": self._codec_top_p,
                             "repetition_penalty": self._codec_repetition_penalty,
                             "repetition_window": _REPETITION_WINDOW,
-                            "min_tokens": self._codec_min_tokens,
-                            "max_tokens": max_tokens,
+                            "max_tokens_per_condition": _MAX_AUDIO_TOKENS_PER_CONDITION,
                         },
                     },
                 )
@@ -403,14 +384,13 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     condition_token_ids=int_sequence_summary(token_ids),
                     condition_chunk_shapes=[list(chunk.shape) for chunk in condition_chunks],
                     condition_chunk_size=_TEXT_CHUNK_SIZE,
-                    max_audio_tokens=max_tokens,
+                    max_audio_tokens_per_condition=_MAX_AUDIO_TOKENS_PER_CONDITION,
                     empty_condition=empty_condition,
                     sampling_seed=self._codec_seed,
                     sampling_temperature=self._codec_temperature,
                     sampling_top_k=self._codec_top_k,
                     sampling_top_p=self._codec_top_p,
                     sampling_repetition_penalty=self._codec_repetition_penalty,
-                    sampling_min_tokens=self._codec_min_tokens,
                     condition_artifact=condition_artifact,
                 )
             empty_codes = torch.empty(0, dtype=torch.long, device=embeds.device)
@@ -503,9 +483,6 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         else:
             repetition_logits = logits
         filtered_logits = logits
-        if step < self._codec_min_tokens:
-            logits = logits.clone()
-            logits[..., eos_id] = float("-inf")
         probabilities = torch.softmax(logits, dim=-1)
         generator = self._request_generator(request_id, probabilities.device)
         trace_on = trace_enabled()
@@ -557,7 +534,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         summary = {
             "step": step,
             "processors_applied": step > 0,
-            "eos_masked": step < self._codec_min_tokens,
+            "eos_masked": False,
             "filtered_candidate_tokens": int(metric_values[0]),
             "eligible_tokens": int(metric_values[1]),
             "raw_eos_logit": float(metric_values[2]),
@@ -592,7 +569,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             codec_ids.append(sampled_id)
 
         is_eos = sampled_id == eos_id
-        is_checkpoint = step in {0, self._codec_min_tokens - 1, self._codec_min_tokens}
+        is_checkpoint = step == 0
         if is_eos or is_checkpoint:
             artifact = save_trace_artifact(
                 "talker_eos" if is_eos else "talker_sampling",
@@ -709,17 +686,21 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             step = int(state.get("step", 0))
             sampled = self._sample_audio_code(hidden[end - 1 : end], codes, request_id, step)
             is_eos = int(sampled.item()) == self._num_audio_tokens - 1
-            state["step"] = int(state.get("step", 0)) + 1
-            reached_limit = int(state["step"]) >= int(state.get("max_tokens", 2048))
+            state["step"] = step + 1
+            condition_step = int(state.get("condition_step", 0)) + 1
+            state["condition_step"] = condition_step
+            reached_limit = condition_step >= _MAX_AUDIO_TOKENS_PER_CONDITION
             chunks = state.get("condition_chunks")
             chunk_index = int(state.get("condition_chunk_index", 0))
             has_more_conditions = isinstance(chunks, list) and chunk_index + 1 < len(chunks)
-            finished = reached_limit or (is_eos and not has_more_conditions)
-            if is_eos and has_more_conditions and not reached_limit:
+            condition_finished = is_eos or reached_limit
+            finished = condition_finished and not has_more_conditions
+            if condition_finished and has_more_conditions:
                 state["condition_chunk_index"] = chunk_index + 1
                 state["condition_cursor"] = 0
                 state["condition_sample_ready"] = False
                 state["conditioning"] = True
+                state["condition_step"] = 0
             state["finished"] = finished
             trace_on = trace_enabled()
             if not is_eos:
@@ -742,7 +723,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             codec_deltas.append(delta)
             terminal_flags.append(torch.tensor(finished, dtype=torch.bool))
             stop_rows.append(hidden.new_tensor([float("-inf"), 0.0] if finished else [0.0, float("-inf")]))
-            if is_eos and has_more_conditions and not reached_limit and trace_enabled():
+            if condition_finished and has_more_conditions and trace_enabled():
                 trace_event(
                     logger,
                     "talker_chunk_transition",
@@ -752,6 +733,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     total_chunks=len(chunks),
                     sampled_steps=int(state["step"]),
                     emitted_codec_tokens=int(state.get("emitted_tokens", 0)),
+                    transition_reason="eos" if is_eos else "max_audio_tokens_per_condition",
+                    condition_sampled_steps=condition_step,
                 )
             if finished and trace_on:
                 codec_hash = update_int_hash(state.get("codec_trace_hash"), [])
@@ -759,12 +742,13 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     logger,
                     "talker_terminal",
                     request_id=request_id,
-                    stop_reason="eos" if is_eos else "max_audio_tokens",
+                    stop_reason="eos" if is_eos else "max_audio_tokens_per_condition",
                     sampled_steps=int(state["step"]),
+                    condition_sampled_steps=condition_step,
                     emitted_codec_tokens=int(state.get("emitted_tokens", 0)),
                     codec_hash=f"{codec_hash:016x}",
                     condition_tokens=int(state.get("condition_tokens", 0)),
-                    max_audio_tokens=int(state.get("max_tokens", 2048)),
+                    max_audio_tokens_per_condition=_MAX_AUDIO_TOKENS_PER_CONDITION,
                     sampled_token=int(sampled.item()),
                     eos_token_id=self._num_audio_tokens - 1,
                     reached_eos=is_eos,

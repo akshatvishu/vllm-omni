@@ -50,7 +50,6 @@ stages:
       temperature: 0.0
       top_p: 1.0
       top_k: -1
-      min_tokens: 50
       # Includes the generated codec steps and later ten-token text condition
       # chunks that the Talker injects after intermediate audio EOS.
       max_tokens: 3072
