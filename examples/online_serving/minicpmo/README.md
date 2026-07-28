@@ -110,9 +110,9 @@ python ../openai_chat_completion_client_for_multimodal_generation.py \
     --port 8099
 ```
 
-Speech output no longer depends on a MiniCPM-specific default in the generic
-serving layer. `chat_template_kwargs.use_tts_template=true` remains an
-explicitly supported model option.
+Speech requests must set `chat_template_kwargs.use_tts_template=true` and
+`chat_template_kwargs.enable_thinking=false`. The first option inserts the TTS
+boundary, and the second closes the thinking block before that boundary.
 
 ## Launch the Gradio demo
 

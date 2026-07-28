@@ -38,7 +38,12 @@ def main() -> None:
         messages=[{"role": "user", "content": args.prompt}],
         modalities=modalities,
         stream=True,
-        extra_body={"chat_template_kwargs": {"use_tts_template": not args.text_only}},
+        extra_body={
+            "chat_template_kwargs": {
+                "use_tts_template": not args.text_only,
+                "enable_thinking": False,
+            }
+        },
     )
 
     pcm_parts: list[bytes] = []

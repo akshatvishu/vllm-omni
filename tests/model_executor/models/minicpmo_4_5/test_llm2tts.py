@@ -10,7 +10,7 @@ Covers ``vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.llm2t
   - structured model_intermediate_buffer carries the thinker ids and text
   - scheduler prompt tokens follow the selected TTS region or output tokens
   - MiniCPM-o 4.5 TTS region detection on 151703 / 151704 tokens
-  - plain chat without TTS markers conditions on the generated assistant span
+  - plain chat without TTS markers produces an explicit empty TTS condition
   - prompt arg is normalized to a list and ``multi_modal_data`` is gated by
     ``requires_multimodal_data``
 """
@@ -142,17 +142,17 @@ class TestInputValidation:
 
 class TestBasicShape:
     def test_request_level_multimodal_output_feeds_orchestrator_bridge(self) -> None:
-        hidden = torch.zeros((2, _HIDDEN_DIM))
+        hidden = torch.zeros((4, _HIDDEN_DIM))
         thinker_output = _make_thinker_output(
             prompt_token_ids=[10],
-            output_token_ids=[20],
+            output_token_ids=[151703, 20, 151704],
             request_multimodal_output={"latent": hidden},
         )
 
         out = llm2tts([thinker_output], prompt=None)
 
         assert out[0]["prompt_token_ids"] == [0, 0, 0]
-        assert torch.equal(torch.tensor(out[0]["model_intermediate_buffer"]["hidden_states"]["tts"]), hidden[1:])
+        assert torch.equal(torch.tensor(out[0]["model_intermediate_buffer"]["hidden_states"]["tts"]), hidden[2:3])
 
     def test_returns_one_entry_per_input(self) -> None:
         hidden = torch.zeros((3, _HIDDEN_DIM))
@@ -173,7 +173,7 @@ class TestBasicShape:
             [_make_thinker_output(prompt_token_ids=[10], output_token_ids=[20], hidden_states=hidden)],
             prompt=None,
         )
-        assert out[0]["prompt_token_ids"] == [0, 0, 0]
+        assert out[0]["prompt_token_ids"] == [0, 0]
         assert "stream_output" not in out[0]["model_intermediate_buffer"]
 
     def test_model_intermediate_buffer_carries_thinker_outputs(self) -> None:
@@ -318,6 +318,14 @@ class TestTtsRegionDetection:
         assert buffer["ids"]["tts"] == [30, 31]
         assert torch.equal(torch.tensor(buffer["hidden_states"]["tts"]), hidden[3:5])
 
+    def test_closed_thinking_before_tts_bos_is_not_handed_to_talker(self) -> None:
+        # The official speech template puts <think></think> in the prompt
+        # before <|tts_bos|>. Only generated answer rows after BOS belong to
+        # the Talker condition.
+        buffer, hidden = self._run([10, 100, 101, 151703], [30, 31, 151704])
+        assert buffer["ids"]["tts"] == [30, 31]
+        assert torch.equal(torch.tensor(buffer["hidden_states"]["tts"]), hidden[4:6])
+
     def test_bos_without_eos_runs_to_end(self) -> None:
         # When BOS is found but EOS is missing (typical for an in-flight or
         # truncated decode), the slice should extend to the end of the
@@ -327,10 +335,11 @@ class TestTtsRegionDetection:
         assert buffer["ids"]["tts"] == [30, 31]
         assert torch.equal(torch.tensor(buffer["hidden_states"]["tts"]), hidden[3:5])
 
-    def test_plain_chat_without_tts_markers_uses_assistant_span(self) -> None:
-        buffer, hidden = self._run([10, 11], [20, 21, 22])
-        assert buffer["ids"]["tts"] == [20, 21, 22]
-        assert torch.equal(torch.tensor(buffer["hidden_states"]["tts"]), hidden[2:5])
+    def test_plain_chat_without_tts_markers_does_not_handoff_assistant_span(self) -> None:
+        buffer, _ = self._run([10, 11], [20, 21, 22])
+        assert buffer["ids"]["tts"] == []
+        assert buffer["hidden_states"]["tts"] == []
+        assert buffer["meta"]["next_stage_prompt_len"] == 2
 
 
 class TestPromptAndMultiModal:

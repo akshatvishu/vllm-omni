@@ -117,6 +117,11 @@ def test_sequential_requests_independent(omni_server, openai_client) -> None:
             "model": omni_server.model,
             "messages": messages_1,
             "stream": True,
+            "modalities": ["text", "audio"],
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            },
         },
         request_num=1,
     )
@@ -127,6 +132,11 @@ def test_sequential_requests_independent(omni_server, openai_client) -> None:
             "model": omni_server.model,
             "messages": messages_2,
             "stream": True,
+            "modalities": ["text", "audio"],
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            },
             "key_words": {"text": ["Beijing"]},
         },
         request_num=1,
@@ -151,7 +161,12 @@ def test_text_to_audio_long_output_001(omni_server, openai_client) -> None:
     request_config = {
         "model": omni_server.model,
         "messages": messages,
+        "modalities": ["text", "audio"],
         "stream": True,
+        "chat_template_kwargs": {
+            "use_tts_template": True,
+            "enable_thinking": False,
+        },
         "key_words": {"audio": ["cat"]},
     }
 
@@ -172,6 +187,11 @@ def test_chinese_text_to_audio(omni_server, openai_client) -> None:
         "model": omni_server.model,
         "messages": messages,
         "stream": True,
+        "modalities": ["text", "audio"],
+        "chat_template_kwargs": {
+            "use_tts_template": True,
+            "enable_thinking": False,
+        },
         "key_words": {"text": ["北京"]},
     }
     openai_client.send_omni_request(request_config)

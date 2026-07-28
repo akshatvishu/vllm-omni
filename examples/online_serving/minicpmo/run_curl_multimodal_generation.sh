@@ -122,7 +122,10 @@ request_body=$(cat <<EOF
   "model": "$MODEL",
   "sampling_params_list": $sampling_params_list,
   "modalities": $MODALITIES,
-  "chat_template_kwargs": {"use_tts_template": $USE_TTS_TEMPLATE},
+  "chat_template_kwargs": {
+    "use_tts_template": $USE_TTS_TEMPLATE,
+    "enable_thinking": false
+  },
   "messages": [
     {
       "role": "system",

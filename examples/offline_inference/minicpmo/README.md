@@ -77,9 +77,10 @@ python end2end.py --query-type text \
 
 ## Notes
 
-- Speech requires `<|tts_bos|>` on the assistant prefix (offline equivalent of
-  online `chat_template_kwargs.use_tts_template=true`). Without it, the talker
-  gets an empty TTS span.
+- Speech requires an empty `<think></think>` block followed by `<|tts_bos|>` on
+  the assistant prefix. This is the offline equivalent of setting online
+  `use_tts_template=true` and `enable_thinking=false`. Without the TTS boundary,
+  the Talker receives an empty condition and returns no audio.
 - Output WAV is **24 kHz mono**.
 - Placeholders in the prompt are MiniCPM-style:
   `(<image>./</image>)`, `(<audio>./</audio>)`, `(<video>./</video>)`.

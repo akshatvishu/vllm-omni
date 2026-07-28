@@ -850,11 +850,6 @@ def llm2tts(
         for idx_t in range(search_start, len(full_token_ids)):
             if full_token_ids[idx_t] == tts_bos_id:
                 tts_bos_idx = idx_t + 1
-        if tts_bos_idx is None and not is_native_duplex_handoff and llm_output_ids:
-            # Audio routing is a model-stage concern, not an OpenAI serving
-            # default. Plain chat templates do not include <|tts_bos|>; in
-            # that case condition the Talker on the generated assistant span.
-            tts_bos_idx = prompt_token_ids_len
 
         tts_eos_idx = None
         if tts_bos_idx is not None:
@@ -875,6 +870,13 @@ def llm2tts(
                 }
             tts_token_ids_slice = torch.tensor(full_token_ids[tts_bos_idx:end_idx], dtype=torch.long)
             tts_hidden_slice = thinker_hidden_states[tts_bos_idx:end_idx].to(torch.float32).contiguous()
+        elif not is_native_duplex_handoff:
+            # Ordinary speech requests must use the MiniCPM-o TTS template.
+            # Without its <|tts_bos|> boundary, do not reinterpret reasoning
+            # or other assistant output as speech. The split Talker treats an
+            # explicit empty condition as a completed request with no audio.
+            tts_token_ids_slice = torch.empty(0, dtype=torch.long)
+            tts_hidden_slice = thinker_hidden_states[:0].to(torch.float32).contiguous()
         elif is_native_duplex_handoff:
             # Official MiniCPM-o duplex does not prefill an assistant
             # <|tts_bos|> boundary before generation. A segment delta can
