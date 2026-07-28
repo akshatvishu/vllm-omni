@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -108,3 +109,35 @@ def trace_event(logger: Any, event: str, **fields: Any) -> None:
         "[MiniCPMO45Trace] %s",
         json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str),
     )
+
+
+def _artifact_value(value: Any) -> Any:
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().contiguous()
+    if isinstance(value, dict):
+        return {key: _artifact_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_artifact_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_artifact_value(item) for item in value)
+    return value
+
+
+def save_trace_artifact(
+    event: str,
+    request_id: str,
+    step: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Save exact replay tensors beside the opt-in MiniCPM trace logs."""
+    if not trace_enabled():
+        return {"path": None, "error": None}
+    trace_dir = Path(os.getenv("MINICPMO45_TRACE_DIR") or os.getenv("TMPDIR") or os.getcwd())
+    request_hash = hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:12]
+    path = trace_dir / f"minicpmo45_{event}_{request_hash}_step{step}.pt"
+    try:
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        torch.save(_artifact_value(payload), path)
+    except Exception as exc:
+        return {"path": str(path), "error": f"{type(exc).__name__}: {exc}"}
+    return {"path": str(path), "error": None}

@@ -31,6 +31,7 @@ from vllm_omni.platforms import current_omni_platform
 
 from .trace import (
     int_sequence_summary,
+    save_trace_artifact,
     tensor_summary,
     trace_enabled,
     trace_event,
@@ -147,6 +148,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         self._batch_stop_logits: torch.Tensor | None = None
         self._request_generators: dict[str, torch.Generator] = {}
         self._request_audio_states: dict[str, dict[str, Any]] = {}
+        self._request_sampling_trace: dict[str, list[dict[str, Any]]] = {}
+        self._request_trace_codec_ids: dict[str, list[int]] = {}
         self._deferred_cleanup_ids: set[str] = set()
 
         tts_config = getattr(config, "tts_config", None)
@@ -322,6 +325,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 "max_tokens": max_tokens,
                 "finished": empty_condition,
             }
+            request_id = str(info_dict.get("request_id", "0"))
             trace_on = trace_enabled()
             if trace_on:
                 state.update(
@@ -329,13 +333,43 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     emitted_tokens=0,
                     codec_trace_hash=None,
                 )
-            request_id = str(info_dict.get("request_id", "0"))
+                request_sampling_trace = getattr(self, "_request_sampling_trace", None)
+                if request_sampling_trace is None:
+                    request_sampling_trace = {}
+                    self._request_sampling_trace = request_sampling_trace
+                request_sampling_trace[request_id] = []
+                request_trace_codec_ids = getattr(self, "_request_trace_codec_ids", None)
+                if request_trace_codec_ids is None:
+                    request_trace_codec_ids = {}
+                    self._request_trace_codec_ids = request_trace_codec_ids
+                request_trace_codec_ids[request_id] = []
             request_states = getattr(self, "_request_audio_states", None)
             if request_states is None:
                 request_states = {}
                 self._request_audio_states = request_states
             request_states[request_id] = state
             if trace_on:
+                condition_artifact = save_trace_artifact(
+                    "talker_condition",
+                    request_id,
+                    0,
+                    {
+                        "request_id": request_id,
+                        "tts_token_ids": token_ids,
+                        "tts_hidden_states": hidden_states,
+                        "condition_embeddings": full_embeds,
+                        "sampling": {
+                            "seed": self._codec_seed,
+                            "temperature": self._codec_temperature,
+                            "top_k": self._codec_top_k,
+                            "top_p": self._codec_top_p,
+                            "repetition_penalty": self._codec_repetition_penalty,
+                            "repetition_window": _REPETITION_WINDOW,
+                            "min_tokens": self._codec_min_tokens,
+                            "max_tokens": max_tokens,
+                        },
+                    },
+                )
                 trace_event(
                     logger,
                     "talker_prefill",
@@ -349,6 +383,13 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     condition_embedding_shape=list(full_embeds.shape),
                     max_audio_tokens=max_tokens,
                     empty_condition=empty_condition,
+                    sampling_seed=self._codec_seed,
+                    sampling_temperature=self._codec_temperature,
+                    sampling_top_k=self._codec_top_k,
+                    sampling_top_p=self._codec_top_p,
+                    sampling_repetition_penalty=self._codec_repetition_penalty,
+                    sampling_min_tokens=self._codec_min_tokens,
+                    condition_artifact=condition_artifact,
                 )
             empty_codes = torch.empty(0, dtype=torch.long, device=embeds.device)
             return (
@@ -392,8 +433,10 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         request_id: str,
         step: int,
     ) -> torch.Tensor:
-        logits = self.head_code[0](hidden_state).float() / self._codec_temperature
+        raw_logits = self.head_code[0](hidden_state).float()
+        logits = raw_logits / self._codec_temperature
         eos_id = self._num_audio_tokens - 1
+        temperature_logits = logits
         # The reference Talker samples the first audio token directly from the
         # temperature-scaled logits. Sampling processors start after audio BOS.
         if step > 0:
@@ -403,20 +446,144 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 penalty=self._codec_repetition_penalty,
                 window_size=_REPETITION_WINDOW,
             )
+            repetition_logits = logits
             logits = _apply_top_k_top_p(
                 logits,
                 top_k=self._codec_top_k,
                 top_p=self._codec_top_p,
                 min_tokens_to_keep=3,
             )
+        else:
+            repetition_logits = logits
+        filtered_logits = logits
         if step < self._codec_min_tokens:
+            logits = logits.clone()
             logits[..., eos_id] = float("-inf")
         probabilities = torch.softmax(logits, dim=-1)
-        return torch.multinomial(
+        generator = self._request_generator(request_id, probabilities.device)
+        trace_on = trace_enabled()
+        rng_state_before = generator.get_state() if trace_on else None
+        sampled = torch.multinomial(
             probabilities,
             num_samples=1,
-            generator=self._request_generator(request_id, probabilities.device),
+            generator=generator,
         ).reshape(())
+        if not trace_on:
+            return sampled
+
+        rng_state_after = generator.get_state()
+        sampled_id = int(sampled.item())
+        flat_raw = raw_logits.reshape(-1)
+        flat_temperature = temperature_logits.reshape(-1)
+        flat_filtered = filtered_logits.reshape(-1)
+        flat_probabilities = probabilities.reshape(-1)
+        sampled_probability = flat_probabilities[sampled_id]
+        eos_probability = flat_probabilities[eos_id]
+        top_count = min(10, int(flat_probabilities.numel()))
+        top_probabilities, top_ids = torch.topk(flat_probabilities, top_count)
+        positive_probabilities = flat_probabilities[flat_probabilities > 0]
+        metric_dtype = flat_raw.dtype
+        metric_values = (
+            torch.stack(
+                [
+                    torch.isfinite(flat_filtered).sum().to(dtype=metric_dtype),
+                    torch.isfinite(logits.reshape(-1)).sum().to(dtype=metric_dtype),
+                    flat_raw[eos_id],
+                    ((flat_raw > flat_raw[eos_id]).sum() + 1).to(dtype=metric_dtype),
+                    flat_temperature[eos_id],
+                    repetition_logits.reshape(-1)[eos_id],
+                    flat_filtered[eos_id],
+                    ((flat_filtered > flat_filtered[eos_id]).sum() + 1).to(dtype=metric_dtype),
+                    eos_probability,
+                    sampled_probability,
+                    ((flat_probabilities > sampled_probability).sum() + 1).to(dtype=metric_dtype),
+                    -(positive_probabilities * torch.log(positive_probabilities)).sum(),
+                ]
+            )
+            .detach()
+            .cpu()
+            .tolist()
+        )
+        top_values = (
+            torch.stack([top_ids.to(dtype=top_probabilities.dtype), top_probabilities], dim=-1).detach().cpu().tolist()
+        )
+        summary = {
+            "step": step,
+            "processors_applied": step > 0,
+            "eos_masked": step < self._codec_min_tokens,
+            "filtered_candidate_tokens": int(metric_values[0]),
+            "eligible_tokens": int(metric_values[1]),
+            "raw_eos_logit": float(metric_values[2]),
+            "raw_eos_rank": int(metric_values[3]),
+            "temperature_eos_logit": float(metric_values[4]),
+            "repetition_eos_logit": float(metric_values[5]),
+            "filtered_eos_logit": float(metric_values[6]),
+            "filtered_eos_rank": int(metric_values[7]),
+            "eos_probability": float(metric_values[8]),
+            "sampled_token": sampled_id,
+            "sampled_probability": float(metric_values[9]),
+            "sampled_rank": int(metric_values[10]),
+            "top_token_ids": [int(value[0]) for value in top_values],
+            "top_probabilities": [float(value[1]) for value in top_values],
+            "entropy": float(metric_values[11]),
+        }
+        sampling_trace = getattr(self, "_request_sampling_trace", None)
+        if sampling_trace is None:
+            sampling_trace = {}
+            self._request_sampling_trace = sampling_trace
+        recent_steps = sampling_trace.setdefault(request_id, [])
+        recent_steps.append(summary)
+        del recent_steps[:-32]
+
+        trace_codec_ids = getattr(self, "_request_trace_codec_ids", None)
+        if trace_codec_ids is None:
+            trace_codec_ids = {}
+            self._request_trace_codec_ids = trace_codec_ids
+        codec_ids = trace_codec_ids.setdefault(request_id, [])
+        codec_ids_before = list(codec_ids)
+        if sampled_id != eos_id:
+            codec_ids.append(sampled_id)
+
+        is_eos = sampled_id == eos_id
+        is_checkpoint = step in {0, self._codec_min_tokens - 1, self._codec_min_tokens}
+        if is_eos or is_checkpoint:
+            artifact = save_trace_artifact(
+                "talker_eos" if is_eos else "talker_sampling",
+                request_id,
+                step,
+                {
+                    "request_id": request_id,
+                    "step": step,
+                    "hidden_state": hidden_state,
+                    "codec_history_before": torch.tensor(codec_ids_before, dtype=torch.long),
+                    "codec_history_after": torch.tensor(codec_ids, dtype=torch.long),
+                    "repetition_history": history,
+                    "raw_logits": raw_logits,
+                    "temperature_logits": temperature_logits,
+                    "repetition_logits": repetition_logits,
+                    "filtered_logits": filtered_logits,
+                    "final_logits": logits,
+                    "probabilities": probabilities,
+                    "rng_state_before": rng_state_before,
+                    "rng_state_after": rng_state_after,
+                    "sampled_token": sampled,
+                    "summary": summary,
+                },
+            )
+            trace_event(
+                logger,
+                "talker_eos_sampling" if is_eos else "talker_sampling_checkpoint",
+                request_id=request_id,
+                **summary,
+                raw_logits=tensor_summary(raw_logits),
+                filtered_logits=tensor_summary(filtered_logits),
+                rng_state_before=tensor_summary(rng_state_before),
+                rng_state_after=tensor_summary(rng_state_after),
+                codec_history=int_sequence_summary(codec_ids),
+                recent_sampling_steps=list(recent_steps),
+                artifact=artifact,
+            )
+        return sampled
 
     def make_omni_output(
         self,
@@ -547,9 +714,13 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
 
     def _flush_deferred_cleanup(self) -> None:
         request_audio_states = getattr(self, "_request_audio_states", {})
+        request_sampling_trace = getattr(self, "_request_sampling_trace", {})
+        request_trace_codec_ids = getattr(self, "_request_trace_codec_ids", {})
         for request_id in self._deferred_cleanup_ids:
             self._request_generators.pop(request_id, None)
             request_audio_states.pop(request_id, None)
+            request_sampling_trace.pop(request_id, None)
+            request_trace_codec_ids.pop(request_id, None)
         self._deferred_cleanup_ids.clear()
 
     def _dummy_hidden_states(
