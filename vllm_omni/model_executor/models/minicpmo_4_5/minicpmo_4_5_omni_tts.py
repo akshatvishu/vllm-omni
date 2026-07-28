@@ -29,6 +29,14 @@ from vllm_omni.experimental.fullduplex.engine.intermediate import get_tts_handof
 from vllm_omni.model_executor.models.output_templates import OmniOutput
 from vllm_omni.platforms import current_omni_platform
 
+from .trace import (
+    int_sequence_summary,
+    tensor_summary,
+    trace_enabled,
+    trace_event,
+    update_int_hash,
+)
+
 logger = init_logger(__name__)
 
 _REPETITION_WINDOW = 16
@@ -314,12 +322,34 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 "max_tokens": max_tokens,
                 "finished": empty_condition,
             }
+            trace_on = trace_enabled()
+            if trace_on:
+                state.update(
+                    condition_tokens=int(token_ids.numel()),
+                    emitted_tokens=0,
+                    codec_trace_hash=None,
+                )
             request_id = str(info_dict.get("request_id", "0"))
             request_states = getattr(self, "_request_audio_states", None)
             if request_states is None:
                 request_states = {}
                 self._request_audio_states = request_states
             request_states[request_id] = state
+            if trace_on:
+                trace_event(
+                    logger,
+                    "talker_prefill",
+                    request_id=request_id,
+                    scheduler_span_tokens=span_len,
+                    computed_offset=offset,
+                    scheduler_prompt_tokens=info_dict.get("_omni_prompt_len"),
+                    condition_tokens=int(token_ids.numel()),
+                    condition_hidden=tensor_summary(hidden_states),
+                    condition_token_ids=int_sequence_summary(token_ids),
+                    condition_embedding_shape=list(full_embeds.shape),
+                    max_audio_tokens=max_tokens,
+                    empty_condition=empty_condition,
+                )
             empty_codes = torch.empty(0, dtype=torch.long, device=embeds.device)
             return (
                 input_ids,
@@ -458,9 +488,16 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             reached_limit = int(state["step"]) >= int(state.get("max_tokens", 2048))
             finished = is_eos or reached_limit
             state["finished"] = finished
+            trace_on = trace_enabled()
             if not is_eos:
                 codes = torch.cat([codes[-(_REPETITION_WINDOW - 1) :], sampled.reshape(1)])
                 delta = sampled.reshape(1, 1)
+                if trace_on:
+                    state["emitted_tokens"] = int(state.get("emitted_tokens", 0)) + 1
+                    state["codec_trace_hash"] = update_int_hash(
+                        state.get("codec_trace_hash"),
+                        [int(sampled.item())],
+                    )
             else:
                 delta = empty_delta
             state["codes"] = codes
@@ -472,6 +509,23 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             codec_deltas.append(delta)
             terminal_flags.append(torch.tensor(finished, dtype=torch.bool))
             stop_rows.append(hidden.new_tensor([float("-inf"), 0.0] if finished else [0.0, float("-inf")]))
+            if finished and trace_on:
+                codec_hash = update_int_hash(state.get("codec_trace_hash"), [])
+                trace_event(
+                    logger,
+                    "talker_terminal",
+                    request_id=request_id,
+                    stop_reason="eos" if is_eos else "max_audio_tokens",
+                    sampled_steps=int(state["step"]),
+                    emitted_codec_tokens=int(state.get("emitted_tokens", 0)),
+                    codec_hash=f"{codec_hash:016x}",
+                    condition_tokens=int(state.get("condition_tokens", 0)),
+                    max_audio_tokens=int(state.get("max_tokens", 2048)),
+                    sampled_token=int(sampled.item()),
+                    eos_token_id=self._num_audio_tokens - 1,
+                    reached_eos=is_eos,
+                    reached_limit=reached_limit,
+                )
 
         self._batch_stop_logits = torch.stack(stop_rows, dim=0) if stop_rows else hidden.new_empty((0, 2))
         # Lists are deliberate: the runner routes element i to request i,

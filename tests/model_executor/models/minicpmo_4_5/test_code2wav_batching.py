@@ -11,6 +11,7 @@ from vllm_omni.model_executor.models.minicpmo_4_5.batched_token2wav import (
 from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_code2wav import (
     MiniCPMO45Code2Wav,
 )
+from vllm_omni.model_executor.models.minicpmo_4_5.trace import update_int_hash
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
@@ -163,7 +164,11 @@ def _info(
     *,
     last_chunk: bool = False,
     cache_epoch: int = 0,
+    codec_chunk_frames: int | None = None,
+    codec_left_context_frames: int = 0,
 ):
+    if codec_chunk_frames is None:
+        codec_chunk_frames = len(codes) - codec_left_context_frames
     return {
         "codes": {"audio": torch.tensor(codes, dtype=torch.long)},
         "meta": {
@@ -171,6 +176,8 @@ def _info(
             "chunk_seq": chunk_seq,
             "cache_epoch": cache_epoch,
             "last_chunk": last_chunk,
+            "codec_chunk_frames": codec_chunk_frames,
+            "codec_left_context_frames": codec_left_context_frames,
             "prompt_cache_id": "shared",
         },
     }
@@ -257,6 +264,53 @@ def test_model_preserves_output_slots_and_prefers_runtime_codes():
     torch.testing.assert_close(audios[0][0], torch.tensor(1.7 * 10))
     torch.testing.assert_close(audios[1][0], torch.tensor(1.7 * 20))
     assert token2wav.flow.encoder.calls[-1] == 2
+
+
+def test_code2wav_trace_matches_transport_and_terminal_totals(mocker):
+    model, _ = _model()
+    events = []
+    mocker.patch(
+        "vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_code2wav.trace_enabled",
+        return_value=True,
+    )
+    mocker.patch(
+        "vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_code2wav.trace_event",
+        side_effect=lambda _logger, event, **fields: events.append((event, fields)),
+    )
+
+    _forward(
+        model,
+        [
+            _info(
+                "req-trace",
+                0,
+                [999, 10, 11],
+                codec_chunk_frames=2,
+                codec_left_context_frames=1,
+            )
+        ],
+    )
+    _forward(
+        model,
+        [
+            _info(
+                "req-trace",
+                1,
+                [11, 12],
+                last_chunk=True,
+                codec_chunk_frames=1,
+                codec_left_context_frames=1,
+            )
+        ],
+    )
+
+    input_events = [fields for event, fields in events if event == "code2wav_input"]
+    output_events = [fields for event, fields in events if event == "code2wav_output"]
+    assert [event["transported_codes"]["count"] for event in input_events] == [3, 2]
+    assert output_events[-1]["last_chunk"] is True
+    assert output_events[-1]["total_codec_tokens"] == 3
+    assert output_events[-1]["total_codec_hash"] == f"{update_int_hash(None, [10, 11, 12]):016x}"
+    assert output_events[-1]["total_audio_samples"] == sum(event["waveform"]["samples"] for event in output_events)
 
 
 def test_mixed_final_exact_buckets_keep_order_and_release_only_final_states():

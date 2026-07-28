@@ -211,6 +211,42 @@ class TestBasicShape:
         assert buffer["ids"]["tts"] == [20, 21]
         assert torch.equal(torch.tensor(buffer["hidden_states"]["tts"]), hidden[2:4])
 
+    def test_trace_records_exact_thinker_handoff(self, mocker) -> None:
+        hidden = torch.arange(5 * _HIDDEN_DIM, dtype=torch.float32).reshape(5, _HIDDEN_DIM)
+        events = []
+        mocker.patch(
+            "vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.trace_enabled",
+            return_value=True,
+        )
+        mocker.patch(
+            "vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.trace_event",
+            side_effect=lambda _logger, event, **fields: events.append((event, fields)),
+        )
+
+        llm2tts(
+            [
+                _make_thinker_output(
+                    prompt_token_ids=[10],
+                    output_token_ids=[151703, 20, 21, 151704],
+                    text="complete English response",
+                    hidden_states=hidden,
+                    request_id="req-trace",
+                )
+            ],
+            prompt=None,
+        )
+
+        assert len(events) == 1
+        event, fields = events[0]
+        assert event == "thinker_to_talker"
+        assert fields["request_id"] == "req-trace"
+        assert fields["output_tokens"] == 4
+        assert fields["tts_bos_index"] == 2
+        assert fields["tts_eos_index"] == 4
+        assert fields["handoff_tokens"]["count"] == 2
+        assert fields["handoff_hidden"]["shape"] == [2, _HIDDEN_DIM]
+        assert fields["output_text"]["tail"] == "complete English response"
+
     def test_latent_in_multimodal_output_takes_precedence(self) -> None:
         # When both ``multimodal_output["latent"]`` and ``hidden_states`` are
         # present, the latent payload must win (this is the steady-state path

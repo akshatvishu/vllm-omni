@@ -26,6 +26,13 @@ from .batched_token2wav import (
     BatchedToken2WavState,
     state_shape_signature,
 )
+from .trace import (
+    int_sequence_summary,
+    trace_enabled,
+    trace_event,
+    update_int_hash,
+    waveform_summary,
+)
 
 logger = init_logger(__name__)
 
@@ -102,6 +109,8 @@ class _WorkItem:
     prompt_wav: str
     last_chunk: bool
     tokens: torch.Tensor
+    codec_chunk_frames: int
+    codec_left_context_frames: int
     previous: _RequestState | None
     segment_text: str
     duplex_turn_id: int | None
@@ -136,6 +145,9 @@ class MiniCPMO45Code2Wav(nn.Module):
         self.backend: BatchedToken2Wav | None = None
         self._states: dict[str, _RequestState] = {}
         self._owned_prompt_wavs: dict[str, tuple[str, str]] = {}
+        self._trace_codec_counts: dict[str, int] = {}
+        self._trace_codec_hashes: dict[str, int | None] = {}
+        self._trace_audio_samples: dict[str, int] = {}
         extra = self._extra_config()
         self._min_batch_size = int(extra.get("code2wav_min_batch_size", 1))
         if self._min_batch_size < 1:
@@ -262,6 +274,8 @@ class MiniCPMO45Code2Wav(nn.Module):
                 prompt_wav=self._default_prompt_wav,
                 last_chunk=False,
                 tokens=segment.new_empty(0, dtype=torch.long),
+                codec_chunk_frames=0,
+                codec_left_context_frames=0,
                 previous=None,
                 segment_text="",
                 duplex_turn_id=None,
@@ -282,6 +296,8 @@ class MiniCPMO45Code2Wav(nn.Module):
                 chunk_seq=chunk_seq,
             )
         last_chunk = bool(_scalar(meta.get("last_chunk"), False))
+        codec_chunk_frames = int(_scalar(meta.get("codec_chunk_frames"), 0))
+        codec_left_context_frames = int(_scalar(meta.get("codec_left_context_frames"), 0))
         codes = info.get("codes")
         audio = codes.get("audio") if isinstance(codes, Mapping) else None
         reference = codes.get("ref") if isinstance(codes, Mapping) else None
@@ -366,6 +382,8 @@ class MiniCPMO45Code2Wav(nn.Module):
             prompt_wav=prompt_wav,
             last_chunk=last_chunk,
             tokens=tokens,
+            codec_chunk_frames=codec_chunk_frames,
+            codec_left_context_frames=codec_left_context_frames,
             previous=previous,
             segment_text=str(_scalar(meta.get("native_duplex_segment_text"), "")),
             duplex_turn_id=int(duplex_turn_id) if duplex_turn_id is not None else None,
@@ -461,6 +479,22 @@ class MiniCPMO45Code2Wav(nn.Module):
                     value_type=type(info).__name__,
                 )
             items.append(self._parse_item(index, str(state_id), segment, info))
+        trace_on = trace_enabled()
+        if trace_on:
+            for item in items:
+                trace_event(
+                    logger,
+                    "code2wav_input",
+                    request_id=item.request_id,
+                    internal_request_id=item.state_id,
+                    cache_epoch=item.cache_epoch,
+                    chunk_seq=item.chunk_seq,
+                    transported_codes=int_sequence_summary(item.tokens),
+                    codec_chunk_frames=item.codec_chunk_frames,
+                    codec_left_context_frames=item.codec_left_context_frames,
+                    last_chunk=item.last_chunk,
+                    has_payload=item.has_payload,
+                )
         state_ids = [item.state_id for item in items]
         if len(state_ids) != len(set(state_ids)):
             raise _batch_error("duplicate_request_in_forward", request_ids=state_ids)
@@ -528,7 +562,35 @@ class MiniCPMO45Code2Wav(nn.Module):
                     states=len(next_states),
                 )
             for item, audio, next_state in zip(bucket, audios, next_states, strict=True):
-                outputs[item.output_index] = audio.reshape(-1).to(dtype=torch.float32)
+                audio_output = audio.reshape(-1).to(dtype=torch.float32)
+                outputs[item.output_index] = audio_output
+                if trace_on:
+                    logical_start = min(item.codec_left_context_frames, int(item.tokens.numel()))
+                    logical_end = min(logical_start + item.codec_chunk_frames, int(item.tokens.numel()))
+                    logical_codes = item.tokens[logical_start:logical_end]
+                    total_codec_tokens = self._trace_codec_counts.get(item.state_id, 0) + int(logical_codes.numel())
+                    total_codec_hash = update_int_hash(
+                        self._trace_codec_hashes.get(item.state_id),
+                        logical_codes.tolist(),
+                    )
+                    total_audio_samples = self._trace_audio_samples.get(item.state_id, 0) + int(audio_output.numel())
+                    self._trace_codec_counts[item.state_id] = total_codec_tokens
+                    self._trace_codec_hashes[item.state_id] = total_codec_hash
+                    self._trace_audio_samples[item.state_id] = total_audio_samples
+                    trace_event(
+                        logger,
+                        "code2wav_output",
+                        request_id=item.request_id,
+                        internal_request_id=item.state_id,
+                        cache_epoch=item.cache_epoch,
+                        chunk_seq=item.chunk_seq,
+                        logical_codes=int_sequence_summary(logical_codes),
+                        waveform=waveform_summary(audio_output),
+                        last_chunk=item.last_chunk,
+                        total_codec_tokens=total_codec_tokens,
+                        total_codec_hash=f"{total_codec_hash:016x}",
+                        total_audio_samples=total_audio_samples,
+                    )
                 pending[item.state_id] = (
                     None
                     if item.last_chunk
@@ -541,10 +603,29 @@ class MiniCPMO45Code2Wav(nn.Module):
                     )
                 )
 
+        if trace_on:
+            for item in sentinels:
+                trace_event(
+                    logger,
+                    "code2wav_output",
+                    request_id=item.request_id,
+                    internal_request_id=item.state_id,
+                    cache_epoch=item.cache_epoch,
+                    chunk_seq=item.chunk_seq,
+                    logical_codes=int_sequence_summary([]),
+                    waveform=waveform_summary(empty),
+                    last_chunk=True,
+                    total_codec_tokens=self._trace_codec_counts.get(item.state_id, 0),
+                    total_codec_hash=f"{update_int_hash(self._trace_codec_hashes.get(item.state_id), []):016x}",
+                    total_audio_samples=self._trace_audio_samples.get(item.state_id, 0),
+                )
         for request_id, state in pending.items():
             if state is None:
                 self._states.pop(request_id, None)
                 self._release_prompt(request_id)
+                self._trace_codec_counts.pop(request_id, None)
+                self._trace_codec_hashes.pop(request_id, None)
+                self._trace_audio_samples.pop(request_id, None)
             else:
                 self._states[request_id] = state
         sample_rate_tensor = torch.as_tensor(sample_rate, dtype=torch.int32)
@@ -579,6 +660,9 @@ class MiniCPMO45Code2Wav(nn.Module):
             state_id = str(request_id)
             self._states.pop(state_id, None)
             self._release_prompt(state_id)
+            self._trace_codec_counts.pop(state_id, None)
+            self._trace_codec_hashes.pop(state_id, None)
+            self._trace_audio_samples.pop(state_id, None)
 
     def make_omni_output(self, model_outputs: Any, **_: Any) -> OmniOutput:
         if isinstance(model_outputs, OmniOutput):

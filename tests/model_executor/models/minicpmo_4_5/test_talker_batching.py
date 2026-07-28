@@ -15,6 +15,7 @@ from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni_tts import (
     MiniCPMO45OmniTTSForConditionalGeneration,
     _max_audio_tokens,
 )
+from vllm_omni.model_executor.models.minicpmo_4_5.trace import update_int_hash
 from vllm_omni.utils.mm_outputs import to_payload_element
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
@@ -177,6 +178,56 @@ def test_eos_is_terminal_once_and_never_enters_codec_history(mocker) -> None:
     assert second.multimodal_outputs["meta"]["finished"][0].item() is False
     assert first_logits.argmax(dim=-1).tolist() == [1]
     assert talker.compute_logits(second.text_hidden_states).argmax(dim=-1).tolist() == [1]
+
+
+def test_terminal_trace_records_early_eos_and_complete_codec_fingerprint(mocker) -> None:
+    talker = _make_talker()
+    mocker.patch.object(talker, "_sample_audio_code", return_value=torch.tensor(7))
+    events = []
+    mocker.patch(
+        "vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni_tts.trace_enabled",
+        return_value=True,
+    )
+    mocker.patch(
+        "vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni_tts.trace_event",
+        side_effect=lambda _logger, event, **fields: events.append((event, fields)),
+    )
+    info = {
+        "request_id": "req-trace",
+        "audio_state": {
+            "step": 2,
+            "max_tokens": 20,
+            "condition_tokens": 9,
+            "emitted_tokens": 2,
+            "codec_trace_hash": update_int_hash(None, [4, 5]),
+        },
+        "audio_codes": {"accumulated": torch.tensor([4, 5])},
+    }
+
+    talker.make_omni_output(
+        torch.ones(1, 2),
+        model_intermediate_buffer=[info],
+        request_token_spans=[(0, 1)],
+    )
+
+    assert events == [
+        (
+            "talker_terminal",
+            {
+                "request_id": "req-trace",
+                "stop_reason": "eos",
+                "sampled_steps": 3,
+                "emitted_codec_tokens": 2,
+                "codec_hash": f"{update_int_hash(None, [4, 5]):016x}",
+                "condition_tokens": 9,
+                "max_audio_tokens": 20,
+                "sampled_token": 7,
+                "eos_token_id": 7,
+                "reached_eos": True,
+                "reached_limit": False,
+            },
+        )
+    ]
 
 
 def test_max_token_terminal_includes_only_new_codec_delta(mocker) -> None:

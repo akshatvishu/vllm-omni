@@ -16,6 +16,14 @@ from vllm_omni.experimental.fullduplex.engine.intermediate import (
     set_tts_handoff,
 )
 from vllm_omni.inputs.data import OmniTokensPrompt
+from vllm_omni.model_executor.models.minicpmo_4_5.trace import (
+    int_sequence_summary,
+    tensor_summary,
+    text_summary,
+    trace_enabled,
+    trace_event,
+    update_int_hash,
+)
 
 logger = logging.getLogger(__name__)
 _MINICPMO45_ASYNC_STATE = "_minicpmo45_async_codec_state"
@@ -273,7 +281,8 @@ def tts2code2wav_async_chunk(
         container[_MINICPMO45_ASYNC_STATE] = state
 
     pending = state["pending"]
-    pending.extend(_extract_codec_delta(multimodal_output, request_id))
+    codec_delta = _extract_codec_delta(multimodal_output, request_id)
+    pending.extend(codec_delta)
     request_finished = getattr(request, "is_finished", None)
     finished = bool(is_finished or (callable(request_finished) and request_finished()))
     chunk_frames, left_context_frames = _codec_config(transfer_manager)
@@ -285,6 +294,10 @@ def tts2code2wav_async_chunk(
     del pending[:new_token_count]
     codec_start = int(state["codec_end"])
     codec_end = codec_start + new_token_count
+    trace_on = trace_enabled()
+    if trace_on:
+        state["codec_trace_count"] = int(state.get("codec_trace_count", 0)) + new_token_count
+        state["codec_trace_hash"] = update_int_hash(state.get("codec_trace_hash"), new_codes)
 
     if new_token_count:
         if codec_start == 0:
@@ -310,6 +323,24 @@ def tts2code2wav_async_chunk(
     chunk_seq = int(getattr(transfer_manager, "put_req_chunk", {}).get(request_id, 0))
     finished_tensor = torch.tensor(last_chunk, dtype=torch.bool)
     ref_audio = state.get("ref_audio") if codec_start == 0 else None
+    if trace_on:
+        trace_event(
+            logger,
+            "talker_to_code2wav",
+            request_id=request_id,
+            internal_request_id=internal_id,
+            chunk_seq=chunk_seq,
+            received_delta=int_sequence_summary(codec_delta),
+            new_codes=int_sequence_summary(new_codes),
+            transported_codes=int_sequence_summary(output_codes),
+            codec_start=codec_start,
+            codec_end=codec_end,
+            pending_codes=len(pending),
+            left_context_frames=len(context),
+            last_chunk=last_chunk,
+            total_codec_tokens=int(state["codec_trace_count"]),
+            total_codec_hash=f"{int(state['codec_trace_hash']):016x}",
+        )
     return OmniPayloadStruct(
         codes=CodesStruct(
             audio=torch.tensor(output_codes, dtype=torch.long),
@@ -370,6 +401,25 @@ def tts2code2wav_full_payload(
 
     ref_audio = codes_info.get("ref")
     finished = torch.tensor(True, dtype=torch.bool)
+    if trace_enabled():
+        codec_hash = update_int_hash(None, codes)
+        trace_event(
+            logger,
+            "talker_to_code2wav",
+            request_id=request_id,
+            internal_request_id=str(internal_id if internal_id is not None else request_id),
+            chunk_seq=0,
+            received_delta=int_sequence_summary(codes),
+            new_codes=int_sequence_summary(codes),
+            transported_codes=int_sequence_summary(output_codes),
+            codec_start=0,
+            codec_end=len(codes),
+            pending_codes=0,
+            left_context_frames=len(context),
+            last_chunk=True,
+            total_codec_tokens=len(codes),
+            total_codec_hash=f"{codec_hash:016x}",
+        )
     return OmniPayloadStruct(
         codes=CodesStruct(
             audio=torch.tensor(output_codes, dtype=torch.long),
@@ -940,6 +990,25 @@ def llm2tts(
                 tts_token_ids_slice,
                 llm_output_ids,
                 prompt_token_ids,
+            )
+        if trace_enabled():
+            trace_hidden = torch.as_tensor(handoff_hidden, dtype=torch.float32) if handoff_hidden is not None else None
+            trace_event(
+                logger,
+                "thinker_to_talker",
+                request_id=str(llm_output.request_id),
+                native_duplex=is_native_duplex_handoff,
+                prompt_tokens=len(prompt_token_ids),
+                output_tokens=len(llm_output_ids),
+                thinker_hidden=tensor_summary(thinker_hidden_states),
+                tts_bos_id=tts_bos_id,
+                tts_bos_index=tts_bos_idx,
+                tts_eos_index=tts_eos_idx,
+                tts_end_ids=sorted(tts_end_ids),
+                handoff_tokens=int_sequence_summary(handoff_ids),
+                handoff_hidden=tensor_summary(trace_hidden),
+                scheduler_prompt_tokens=len(scheduler_prompt_token_ids),
+                output_text=text_summary(thinker_text),
             )
         tts_inputs.append(
             OmniTokensPrompt(

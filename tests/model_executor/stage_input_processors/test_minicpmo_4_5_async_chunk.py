@@ -8,6 +8,7 @@ import pytest
 import torch
 from vllm.v1.request import RequestStatus
 
+from vllm_omni.model_executor.models.minicpmo_4_5.trace import update_int_hash
 from vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni import (
     tts2code2wav_async_chunk,
     tts2code2wav_full_payload,
@@ -106,6 +107,34 @@ def test_short_final_flushes_silence_prefix_and_tail() -> None:
     assert _codes(final) == [4218, 4218, 4218, *range(7)]
     assert final.meta.last_chunk is True
     assert final.meta.finished.item() is True
+
+
+def test_terminal_trace_fingerprints_only_generated_codes(mocker) -> None:
+    manager = _manager()
+    request = _request("req-trace")
+    events = []
+    mocker.patch(
+        "vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.trace_enabled",
+        return_value=True,
+    )
+    mocker.patch(
+        "vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.trace_event",
+        side_effect=lambda _logger, event, **fields: events.append((event, fields)),
+    )
+
+    first_codes = list(range(25))
+    final_codes = list(range(25, 32))
+    assert tts2code2wav_async_chunk(manager, _delta(*first_codes), request, False) is not None
+    manager.put_req_chunk["req-trace"] += 1
+    assert tts2code2wav_async_chunk(manager, _delta(*final_codes), request, True) is not None
+
+    terminal = events[-1]
+    assert terminal[0] == "talker_to_code2wav"
+    assert terminal[1]["last_chunk"] is True
+    assert terminal[1]["total_codec_tokens"] == 32
+    assert terminal[1]["total_codec_hash"] == f"{update_int_hash(None, [*first_codes, *final_codes]):016x}"
+    assert terminal[1]["new_codes"]["count"] == 7
+    assert terminal[1]["transported_codes"]["count"] == 10
 
 
 def test_first_chunk_forwards_reference_voice_and_duplex_identity() -> None:

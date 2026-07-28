@@ -18,7 +18,7 @@ pytestmark = [pytest.mark.full_model, pytest.mark.omni]
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 _MODEL = "openbmb/MiniCPM-o-4_5"
-_CI_DEPLOY = get_deploy_config_path("minicpmo_4_5_batching.yaml")
+_CI_DEPLOY = get_deploy_config_path(os.getenv("MINICPMO45_E2E_DEPLOY_CONFIG", "minicpmo_4_5_batching.yaml"))
 
 test_params = [
     pytest.param(
@@ -137,26 +137,32 @@ def test_sequential_requests_independent(omni_server, openai_client) -> None:
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_text_to_audio_long_output_001(omni_server, openai_client) -> None:
     """
-    Test text input generating a longer audio output to exercise the
-    token2wav decoder across multiple frames.
+    Reproduce the long-story tail-coverage failure from issue #5259 in English.
     Deploy Setting: default 2GPU
-    Input Modal: text (longer prompt)
+    Input Modal: text (at least 500 output words)
     Output Modal: text + audio
     Input Setting: stream=True
     """
+    closing_sentence = "The lantern went dark, and the long journey was complete."
     messages = dummy_messages_from_mix_data(
         system_prompt=get_system_prompt(),
-        content_text="Tell me a short story about a cat in about 50 words.",
+        content_text=(
+            "Write an English story of at least 500 words. "
+            f"End the story with exactly this sentence: {closing_sentence}"
+        ),
     )
 
     request_config = {
         "model": omni_server.model,
         "messages": messages,
         "stream": True,
-        "key_words": {"audio": ["cat"]},
+        "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+        "minimum_text_words": 500,
+        "required_text_suffix": closing_sentence,
+        "required_audio_text": closing_sentence,
     }
 
-    openai_client.send_omni_request(request_config, request_num=get_max_batch_size())
+    openai_client.send_omni_request(request_config, request_num=1)
 
 
 @hardware_test(res={"cuda": "H100", "npu": "A2"}, num_cards=2)

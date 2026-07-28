@@ -33,6 +33,15 @@ from vllm_omni.metrics.modality import (
     observe_audio_first_packet,
     observe_audio_streaming_finalize,
 )
+from vllm_omni.model_executor.models.minicpmo_4_5.trace import (
+    trace_enabled as minicpmo45_trace_enabled,
+)
+from vllm_omni.model_executor.models.minicpmo_4_5.trace import (
+    trace_event as minicpmo45_trace_event,
+)
+from vllm_omni.model_executor.models.minicpmo_4_5.trace import (
+    waveform_summary as minicpmo45_waveform_summary,
+)
 from vllm_omni.model_extras import get_extra_body_params, get_extra_output_params
 
 try:
@@ -2655,6 +2664,8 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
                 )
                 for output in final_res.outputs
             ]
+        trace_minicpmo45 = minicpmo45_trace_enabled() and "minicpm-o-4_5" in str(request.model).lower()
+        trace_waveform = minicpmo45_waveform_summary(audio_tensor) if trace_minicpmo45 else None
         audio_tensor = audio_tensor.detach().cpu().float().numpy()
 
         # Ensure audio is 1D (flatten if needed)
@@ -2688,6 +2699,18 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
 
         audio_response: AudioResponse = self.create_audio(audio_obj)
         audio_base64 = audio_response.audio_data
+        if trace_minicpmo45:
+            minicpmo45_trace_event(
+                logger,
+                "serving_audio",
+                request_id=str(final_res.request_id),
+                stream=stream,
+                sample_rate=sample_rate,
+                response_format=audio_format,
+                waveform=trace_waveform,
+                encoded_base64_chars=len(audio_base64),
+                finish_reasons=[output.finish_reason for output in final_res.outputs],
+            )
 
         # Generate unique ID for the audio
         audio_id = f"audio-{uuid.uuid4().hex[:16]}"
