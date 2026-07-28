@@ -875,8 +875,8 @@ def llm2tts(
             # Without its <|tts_bos|> boundary, do not reinterpret reasoning
             # or other assistant output as speech. The split Talker treats an
             # explicit empty condition as a completed request with no audio.
-            tts_token_ids_slice = torch.empty(0, dtype=torch.long)
-            tts_hidden_slice = thinker_hidden_states[:0].to(torch.float32).contiguous()
+            tts_token_ids_slice = []
+            tts_hidden_slice = []
         elif is_native_duplex_handoff:
             # Official MiniCPM-o duplex does not prefill an assistant
             # <|tts_bos|> boundary before generation. A segment delta can
