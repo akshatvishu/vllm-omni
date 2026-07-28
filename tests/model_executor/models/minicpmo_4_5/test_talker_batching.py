@@ -8,6 +8,7 @@ import pytest
 import torch
 import torch.nn as nn
 
+from vllm_omni.model_executor.models.minicpmo_4_5 import minicpmo_4_5_omni_tts
 from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni import (
     MiniCPMO45OmniForConditionalGeneration,
 )
@@ -80,6 +81,40 @@ def test_audio_token_limit_scales_with_condition_length(
     expected: int,
 ) -> None:
     assert _max_audio_tokens(condition_tokens) == expected
+
+
+def test_first_audio_token_skips_sampling_processors(mocker) -> None:
+    talker = _make_talker()
+    talker.head_code = nn.ModuleList([nn.Identity()])
+    talker._codec_temperature = 0.8
+    talker._codec_top_k = 3
+    talker._codec_top_p = 0.85
+    talker._codec_repetition_penalty = 1.05
+    talker._codec_min_tokens = 2
+    talker._codec_seed = 42
+    repetition_penalty = mocker.spy(minicpmo_4_5_omni_tts, "_apply_repetition_penalty")
+    top_k_top_p = mocker.spy(minicpmo_4_5_omni_tts, "_apply_top_k_top_p")
+    hidden = torch.arange(8, dtype=torch.float32).unsqueeze(0)
+
+    talker._sample_audio_code(
+        hidden,
+        torch.empty(0, dtype=torch.long),
+        "req-reference-parity",
+        step=0,
+    )
+
+    repetition_penalty.assert_not_called()
+    top_k_top_p.assert_not_called()
+
+    talker._sample_audio_code(
+        hidden,
+        torch.tensor([1]),
+        "req-reference-parity",
+        step=1,
+    )
+
+    repetition_penalty.assert_called_once()
+    top_k_top_p.assert_called_once()
 
 
 def test_talker_emits_request_aligned_codec_deltas_after_compaction(mocker) -> None:
