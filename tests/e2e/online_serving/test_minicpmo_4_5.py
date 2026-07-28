@@ -112,9 +112,11 @@ def test_text_to_audio_001(omni_server, openai_client) -> None:
         "messages": messages,
         "stream": True,
         "modalities": ["text", "audio"],
-        "chat_template_kwargs": {
-            "use_tts_template": True,
-            "enable_thinking": False,
+        "extra_body": {
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            }
         },
         "key_words": {"audio": ["Beijing"]},
     }
@@ -146,9 +148,11 @@ def test_audio_to_text_audio_001(omni_server, openai_client) -> None:
         "messages": messages,
         "stream": True,
         "modalities": ["text", "audio"],
-        "chat_template_kwargs": {
-            "use_tts_template": True,
-            "enable_thinking": False,
+        "extra_body": {
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            }
         },
     }
 
@@ -179,9 +183,11 @@ def test_image_to_text_audio_001(omni_server, openai_client) -> None:
         "messages": messages,
         "stream": True,
         "modalities": ["text", "audio"],
-        "chat_template_kwargs": {
-            "use_tts_template": True,
-            "enable_thinking": False,
+        "extra_body": {
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            }
         },
     }
 
@@ -212,9 +218,11 @@ def test_video_to_text_audio_001(omni_server, openai_client) -> None:
         "messages": messages,
         "stream": True,
         "modalities": ["text", "audio"],
-        "chat_template_kwargs": {
-            "use_tts_template": True,
-            "enable_thinking": False,
+        "extra_body": {
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            }
         },
     }
 
@@ -251,9 +259,11 @@ def test_mix_to_text_audio_001(omni_server, openai_client) -> None:
         "messages": messages,
         "stream": True,
         "modalities": ["text", "audio"],
-        "chat_template_kwargs": {
-            "use_tts_template": True,
-            "enable_thinking": False,
+        "extra_body": {
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            }
         },
     }
 
