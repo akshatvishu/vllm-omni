@@ -148,10 +148,9 @@ curl http://localhost:8099/v1/chat/completions \
     }'
 ```
 
-**Text + speech in one response** (the headline 4.5 feature). The model
-bridge conditions the Talker from the generated assistant span, so the
-generic serving layer does not inject MiniCPM-specific template defaults.
-`use_tts_template=true` remains supported when explicitly requested:
+**Text + speech in one response** (the headline 4.5 feature). Set
+`use_tts_template=true` to insert the TTS boundary and
+`enable_thinking=false` to close the thinking block before that boundary:
 
 ```bash
 curl http://localhost:8099/v1/chat/completions \
@@ -160,12 +159,15 @@ curl http://localhost:8099/v1/chat/completions \
         "model": "openbmb/MiniCPM-o-4_5",
         "messages": [{"role": "user", "content": "Say hello, then introduce vLLM in one sentence."}],
         "modalities": ["text", "audio"],
-        "chat_template_kwargs": {"use_tts_template": true}
+        "chat_template_kwargs": {
+            "use_tts_template": true,
+            "enable_thinking": false
+        }
     }'
 ```
 
 When using the OpenAI Python SDK, the same flag can also be sent as
-`extra_body={"chat_template_kwargs": {"use_tts_template": True}}`
+`extra_body={"chat_template_kwargs": {"use_tts_template": True, "enable_thinking": False}}`
 because the client merges `extra_body` into the request root.
 
 Response carries text in one choice's `message.content` and base64 WAV
@@ -265,12 +267,12 @@ vllm serve openbmb/MiniCPM-o-4_5 --omni \
   A missing dep raises `ImportError` at first request with the same
   install hint instead of silently emitting empty audio.
 
-- **TTS conditioning**: the MiniCPM stage bridge can condition speech from
-  the generated assistant span without changing shared serving code.
-  `chat_template_kwargs.use_tts_template=true` remains supported when an
-  explicit `<|tts_bos|>` boundary is desired. For **curl**, put
-  `chat_template_kwargs` at the request root; the OpenAI Python SDK may use
-  `extra_body` because it flattens those fields into the root.
+- **TTS conditioning**: speech requests must set
+  `chat_template_kwargs.use_tts_template=true` and
+  `chat_template_kwargs.enable_thinking=false`. Without `<|tts_bos|>`, the
+  stage bridge sends an empty condition and produces no audio. For **curl**,
+  put `chat_template_kwargs` at the request root; the OpenAI Python SDK may
+  use `extra_body` because it flattens those fields into the root.
 
 - **Reference voice**: request audio is carried on the first codec chunk.
   Code2Wav owns the temporary prompt WAV and prompt-feature cache, and removes

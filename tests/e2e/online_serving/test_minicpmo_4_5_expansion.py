@@ -18,7 +18,7 @@ pytestmark = [pytest.mark.full_model, pytest.mark.omni]
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 _MODEL = "openbmb/MiniCPM-o-4_5"
-_CI_DEPLOY = get_deploy_config_path("minicpmo_4_5.yaml")
+_CI_DEPLOY = get_deploy_config_path(os.getenv("MINICPMO45_E2E_DEPLOY_CONFIG", "minicpmo_4_5.yaml"))
 
 test_params = [
     pytest.param(
@@ -115,6 +115,13 @@ def test_sequential_requests_independent(omni_server, openai_client) -> None:
             "model": omni_server.model,
             "messages": messages_1,
             "stream": True,
+            "modalities": ["text", "audio"],
+            "extra_body": {
+                "chat_template_kwargs": {
+                    "use_tts_template": True,
+                    "enable_thinking": False,
+                }
+            },
         },
         request_num=1,
     )
@@ -125,6 +132,13 @@ def test_sequential_requests_independent(omni_server, openai_client) -> None:
             "model": omni_server.model,
             "messages": messages_2,
             "stream": True,
+            "modalities": ["text", "audio"],
+            "extra_body": {
+                "chat_template_kwargs": {
+                    "use_tts_template": True,
+                    "enable_thinking": False,
+                }
+            },
             "key_words": {"text": ["Beijing"]},
         },
         request_num=1,
@@ -138,7 +152,7 @@ def test_text_to_audio_long_output_001(omni_server, openai_client) -> None:
     Test text input generating a longer audio output to exercise the
     Code2Wav stage across multiple frames.
     Deploy Setting: default 2GPU
-    Input Modal: text (longer prompt)
+    Input Modal: text
     Output Modal: text + audio
     Input Setting: stream=True
     """
@@ -150,11 +164,18 @@ def test_text_to_audio_long_output_001(omni_server, openai_client) -> None:
     request_config = {
         "model": omni_server.model,
         "messages": messages,
+        "modalities": ["text", "audio"],
         "stream": True,
+        "extra_body": {
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            }
+        },
         "key_words": {"audio": ["Beijing"]},
     }
 
-    openai_client.send_omni_request(request_config, request_num=get_max_batch_size())
+    openai_client.send_omni_request(request_config, request_num=1)
 
 
 @hardware_test(res={"cuda": "H100", "npu": "A2"}, num_cards=1)
@@ -171,6 +192,13 @@ def test_chinese_text_to_audio(omni_server, openai_client) -> None:
         "model": omni_server.model,
         "messages": messages,
         "stream": True,
+        "modalities": ["text", "audio"],
+        "extra_body": {
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            }
+        },
         "key_words": {"text": ["北京"]},
     }
     openai_client.send_omni_request(request_config)

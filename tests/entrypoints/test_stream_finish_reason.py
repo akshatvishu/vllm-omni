@@ -17,9 +17,11 @@ Key invariants tested:
 """
 
 import json
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import ANY, MagicMock
 
 import pytest
+import torch
 from vllm.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionRequest,
     ChatCompletionResponseStreamChoice,
@@ -440,6 +442,62 @@ async def test_audio_chunk_without_waveform_keeps_stream_alive():
     finish_reasons = [ch["finish_reason"] for c in chunks for ch in c.get("choices", [])]
     assert finish_reasons.count("stop") == 1, f"Expected 1 stop, got {finish_reasons}"
     assert finish_reasons[-1] == "stop"
+
+
+def test_minicpmo_audio_choice_trace_records_served_waveform(mocker):
+    serving_chat = _build_serving_chat()
+    request = ChatCompletionRequest(
+        model="openbmb/MiniCPM-o-4_5",
+        messages=[{"role": "user", "content": "hello"}],
+        stream=True,
+    )
+    request.modalities = ["text", "audio"]  # type: ignore[attr-defined]
+    audio_output = _make_audio_omni_output(request_id="req-trace")
+    audio_output.request_output.outputs[0].multimodal_output = {
+        "audio": [torch.tensor([0.25, -0.25], dtype=torch.float32)],
+        "sr": [torch.tensor(24000)],
+    }
+    events = []
+    mocker.patch.object(serving_chat, "create_audio", return_value=SimpleNamespace(audio_data="dHJhY2U="))
+    mocker.patch(
+        "vllm_omni.entrypoints.openai.serving_chat.minicpmo45_trace_enabled",
+        return_value=True,
+    )
+    mocker.patch(
+        "vllm_omni.entrypoints.openai.serving_chat.minicpmo45_trace_event",
+        side_effect=lambda _logger, event, **fields: events.append((event, fields)),
+    )
+
+    choices = OmniOpenAIServingChat._create_audio_choice(
+        serving_chat,
+        audio_output,
+        "assistant",
+        request,
+        stream=True,
+    )
+
+    assert not isinstance(choices, MagicMock)
+    assert events == [
+        (
+            "serving_audio",
+            {
+                "request_id": "req-trace",
+                "stream": True,
+                "sample_rate": 24000,
+                "response_format": "wav",
+                "waveform": {
+                    "samples": 2,
+                    "sha256": ANY,
+                    "minimum": -0.25,
+                    "maximum": 0.25,
+                    "rms": 0.25,
+                    "nonfinite": 0,
+                },
+                "encoded_base64_chars": 8,
+                "finish_reasons": ["stop"],
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio

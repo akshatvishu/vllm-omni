@@ -203,6 +203,34 @@ def _is_aborted(request: Any) -> bool:
     return any(marker in status_name for marker in ("ABORT", "CANCEL", "IGNORED", "ERROR"))
 
 
+def _request_finish_reason(request: Any) -> str | None:
+    get_finished_reason = getattr(request, "get_finished_reason", None)
+    if not callable(get_finished_reason):
+        return None
+    reason = get_finished_reason()
+    return str(getattr(reason, "value", reason)) if reason is not None else None
+
+
+def _text_summary(text: str | None) -> dict[str, Any]:
+    if not text:
+        return {}
+    encoded = text.encode("utf-8")
+    return {"text_utf8": list(encoded), "num_text_bytes": len(encoded)}
+
+
+def _thinking_text_summaries(text: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    think_start = text.find("<think>")
+    think_end = text.find("</think>", think_start + len("<think>")) if think_start >= 0 else -1
+    if think_start < 0:
+        return _text_summary(None), _text_summary(text)
+    if think_end < 0:
+        return _text_summary(text[think_start + len("<think>") :]), _text_summary(None)
+    return (
+        _text_summary(text[think_start + len("<think>") : think_end]),
+        _text_summary(text[think_end + len("</think>") :].lstrip()),
+    )
+
+
 def tts2code2wav_async_chunk(
     transfer_manager: Any,
     multimodal_output: Any,
@@ -303,7 +331,6 @@ def tts2code2wav_async_chunk(
     del pending[:new_token_count]
     codec_start = int(state["codec_end"])
     codec_end = codec_start + new_token_count
-
     if new_token_count:
         if codec_start == 0:
             context = [_MINICPMO45_SILENCE_CODE] * left_context_frames
@@ -782,11 +809,6 @@ def llm2tts(
         for idx_t in range(search_start, len(full_token_ids)):
             if full_token_ids[idx_t] == tts_bos_id:
                 tts_bos_idx = idx_t + 1
-        if tts_bos_idx is None and not is_native_duplex_handoff and llm_output_ids:
-            # Audio routing is a model-stage concern, not an OpenAI serving
-            # default. Plain chat templates do not include <|tts_bos|>; in
-            # that case condition the Talker on the generated assistant span.
-            tts_bos_idx = prompt_token_ids_len
 
         tts_eos_idx = None
         if tts_bos_idx is not None:
@@ -807,6 +829,13 @@ def llm2tts(
                 }
             tts_token_ids_slice = torch.tensor(full_token_ids[tts_bos_idx:end_idx], dtype=torch.long)
             tts_hidden_slice = thinker_hidden_states[tts_bos_idx:end_idx].to(torch.float32).contiguous()
+        elif not is_native_duplex_handoff:
+            # Ordinary speech requests must use the MiniCPM-o TTS template.
+            # Without its <|tts_bos|> boundary, do not reinterpret reasoning
+            # or other assistant output as speech. The split Talker treats an
+            # explicit empty condition as a completed request with no audio.
+            tts_token_ids_slice = []
+            tts_hidden_slice = []
         elif is_native_duplex_handoff:
             # Official MiniCPM-o duplex does not prefill an assistant
             # <|tts_bos|> boundary before generation. A segment delta can
@@ -943,8 +972,15 @@ def llm2tts(
             model_intermediate_buffer.setdefault("meta", {})["turn_end"] = True
 
         if handoff_ids is not None and handoff_hidden is not None:
-            condition_suffix_length = 1 if is_native_duplex_handoff else 2
-            condition_length = max(len(handoff_ids), len(handoff_hidden)) + condition_suffix_length
+            # Official streaming_generate sends ten text tokens per Talker
+            # condition. Intermediate chunks add audio BOS; the final chunk
+            # also adds text EOS. Later chunks are injected during Talker
+            # decode, so the scheduler prompt reserves only the first chunk.
+            handoff_length = max(len(handoff_ids), len(handoff_hidden))
+            first_text_chunk_length = min(handoff_length, 10)
+            condition_length = first_text_chunk_length + 1
+            if handoff_length <= 10:
+                condition_length += 1
             scheduler_prompt_token_ids = [0] * condition_length
             handoff_meta = model_intermediate_buffer.setdefault("meta", {})
             handoff_meta["next_stage_prompt_len"] = condition_length

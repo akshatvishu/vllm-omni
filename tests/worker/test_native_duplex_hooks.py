@@ -1459,8 +1459,8 @@ def test_minicpmo_remote_config_patch_handles_nested_and_dict_configs():
 
     assert config.base_model_tp_plan == {}
     assert nested.base_model_tp_plan == {}
-    assert config.tts_config["top_p"] == 0.8
-    assert config.tts_config["top_k"] == 100
+    assert "top_p" not in config.tts_config
+    assert "top_k" not in config.tts_config
     assert config.tts_config["temperature"] == 0.8
     assert config.tts_config["repetition_penalty"] == 1.05
 

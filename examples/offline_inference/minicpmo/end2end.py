@@ -40,10 +40,10 @@ class QueryResult(NamedTuple):
 
 
 def _assistant_prefix(use_tts: bool) -> str:
-    # Matches HF chat_template: assistant header, optional empty <think>, then TTS bos.
+    # Match the HF speech template: close thinking before the TTS boundary.
     prefix = "<|im_start|>assistant\n"
     if use_tts:
-        prefix += "<|tts_bos|>"
+        prefix += "<think>\n\n</think>\n\n<|tts_bos|>"
     return prefix
 
 

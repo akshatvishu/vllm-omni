@@ -27,11 +27,8 @@ stages:
   - stage_id: 1
     max_num_seqs: 2
     async_scheduling: false
-    # The split Talker exposes a binary continue/stop vocabulary; native
-    # segment and turn boundaries travel as explicit output metadata.
     default_sampling_params:
-      max_tokens: 2048
-      min_tokens: 0
+      max_tokens: 3072
       stop_token_ids: [1]
 
   - stage_id: 2

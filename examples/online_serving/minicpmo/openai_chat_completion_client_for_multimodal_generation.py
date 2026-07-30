@@ -82,7 +82,10 @@ def run_multimodal_generation(args, client: OpenAI) -> None:
             audio_path=audio_path,
         )
         extra_body: dict = {
-            "chat_template_kwargs": {"use_tts_template": use_tts},
+            "chat_template_kwargs": {
+                "use_tts_template": use_tts,
+                "enable_thinking": False,
+            },
         }
         if args.query_type == "use_audio_in_video":
             # MiniCPM-o 4.5 does not use Qwen's use_audio_in_video path; keep

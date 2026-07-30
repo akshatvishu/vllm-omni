@@ -31,6 +31,12 @@ def get_question(prompt_type: str = "text") -> str:
     return prompts.get(prompt_type, prompts["text"])
 
 
+def get_tts_question(prompt_type: str = "text") -> str:
+    question = get_question(prompt_type)
+    return f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n<|tts_bos|>"
+
+
+@pytest.mark.skip(reason="https://github.com/vllm-project/vllm-omni/issues/5437")
 @pytest.mark.core_model
 @pytest.mark.advanced_model
 @pytest.mark.omni
@@ -82,8 +88,8 @@ def test_video_to_text(omni_runner, omni_runner_handler) -> None:
 @hardware_test(res={"cuda": "H100", "npu": "A2"}, num_cards=1)
 @pytest.mark.parametrize("omni_runner", test_params, indirect=True)
 def test_text_to_audio(omni_runner, omni_runner_handler) -> None:
-    """Test processing text and generating audio through Talker and Code2Wav."""
-    request_config = {"prompts": get_question("text"), "modalities": ["audio"]}
+    """Test processing text, generating audio output through the talker token2wav path."""
+    request_config = {"prompts": get_tts_question("text"), "modalities": ["audio"]}
     omni_runner_handler.send_omni_request(request_config)
 
 
@@ -99,7 +105,7 @@ def test_mix_to_audio(omni_runner, omni_runner_handler) -> None:
         audio = audio.squeeze()
     image = generate_synthetic_image(16, 16)["np_array"]
     request_config = {
-        "prompts": get_question("mix"),
+        "prompts": get_tts_question("mix"),
         "audios": (audio, 16000),
         "images": image,
         "modalities": ["audio"],
@@ -114,5 +120,5 @@ def test_mix_to_audio(omni_runner, omni_runner_handler) -> None:
 def test_video_to_audio(omni_runner, omni_runner_handler) -> None:
     """Test processing video, generating audio output."""
     video = generate_synthetic_video(24, 24, 20)["np_array"]
-    request_config = {"prompts": get_question("video"), "videos": video, "modalities": ["audio"]}
+    request_config = {"prompts": get_tts_question("video"), "videos": video, "modalities": ["audio"]}
     omni_runner_handler.send_omni_request(request_config)

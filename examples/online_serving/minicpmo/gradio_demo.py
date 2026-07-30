@@ -215,12 +215,15 @@ class ModelEndpoint:
     def build_extras(self) -> dict[str, Any]:
         """Extra kwargs passed to chat.completions.create for this model.
 
-        4.5: use_tts_template=True chat-template flag appends <|tts_bos|>.
+        4.5: close thinking, then append <|tts_bos|> for speech.
         """
         if self.name == MINICPMO45:
             return {
                 "extra_body": {
-                    "chat_template_kwargs": {"use_tts_template": True},
+                    "chat_template_kwargs": {
+                        "use_tts_template": True,
+                        "enable_thinking": False,
+                    },
                     "modalities": ["text", "audio"],
                 },
             }

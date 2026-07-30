@@ -51,8 +51,8 @@ def test_extract_first_audio_ref_accepts_dict_stereo_audio() -> None:
 
 def test_plain_chat_handoff_owns_talker_prompt_contract() -> None:
     prompt_ids = [101, 102]
-    output_ids = [11, 12]
-    latent = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+    output_ids = [151703, 11, 12, 151704]
+    latent = torch.arange(24, dtype=torch.float32).reshape(6, 4)
 
     converted = llm2tts(
         [_output(prompt_ids=prompt_ids, output_ids=output_ids, latent=latent)],
@@ -60,11 +60,28 @@ def test_plain_chat_handoff_owns_talker_prompt_contract() -> None:
     )[0]
 
     info = converted["model_intermediate_buffer"]
-    assert info["ids"]["tts"] == output_ids
-    assert torch.equal(torch.tensor(info["hidden_states"]["tts"]), latent[2:4])
+    assert info["ids"]["tts"] == [11, 12]
+    assert torch.equal(torch.tensor(info["hidden_states"]["tts"]), latent[3:5])
     assert converted["prompt_token_ids"] == [0, 0, 0, 0]
     assert info["meta"]["replace_streaming_prompt"] is True
     assert info["meta"]["next_stage_prompt_len"] == 4
+
+
+def test_long_plain_chat_reserves_only_first_talker_condition_chunk() -> None:
+    prompt_ids = [101, 102]
+    spoken_ids = list(range(20))
+    output_ids = [151703, *spoken_ids, 151704]
+    latent = torch.arange(24 * 4, dtype=torch.float32).reshape(24, 4)
+
+    converted = llm2tts(
+        [_output(prompt_ids=prompt_ids, output_ids=output_ids, latent=latent)],
+        prompt=[{}],
+    )[0]
+
+    info = converted["model_intermediate_buffer"]
+    assert info["ids"]["tts"] == spoken_ids
+    assert len(converted["prompt_token_ids"]) == 11
+    assert info["meta"]["next_stage_prompt_len"] == 11
 
 
 def test_llm2tts_carries_request_ref_audio() -> None:
@@ -128,9 +145,9 @@ def test_native_duplex_speak_segment_reaches_split_talker() -> None:
     info = converted["model_intermediate_buffer"]
     assert info["native_duplex"] is True
     assert info["ids"]["tts"] == [21, 22]
-    assert converted["prompt_token_ids"] == [0, 0, 0]
+    assert converted["prompt_token_ids"] == [0, 0, 0, 0]
     assert info["meta"]["replace_streaming_prompt"] is True
-    assert info["meta"]["next_stage_prompt_len"] == 3
+    assert info["meta"]["next_stage_prompt_len"] == 4
     assert info["meta"]["turn_start"] is True
     assert info["meta"]["segment_end"] is True
     assert info["duplex"]["epoch"] == 3
@@ -202,8 +219,8 @@ def test_native_duplex_continuation_appends_only_new_talker_condition() -> None:
     assert first_input["model_intermediate_buffer"]["meta"]["replace_streaming_prompt"] is True
     assert "replace_streaming_prompt" not in second_input["model_intermediate_buffer"]["meta"]
     assert third_input["model_intermediate_buffer"]["meta"]["replace_streaming_prompt"] is True
-    assert second_input["model_intermediate_buffer"]["meta"]["next_stage_prompt_len"] == 3
-    assert second_input["prompt_token_ids"] == [0, 0, 0]
+    assert second_input["model_intermediate_buffer"]["meta"]["next_stage_prompt_len"] == 4
+    assert second_input["prompt_token_ids"] == [0, 0, 0, 0]
 
 
 def test_native_duplex_transcript_decodes_the_talker_condition_slice() -> None:

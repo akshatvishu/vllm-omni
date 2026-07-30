@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 import tempfile
 import threading
 import wave
@@ -530,6 +531,58 @@ def _resolve_audio_transcript(
     return convert_audio_bytes_to_text(audio_bytes)
 
 
+def _text_audio_mismatch_details(
+    *,
+    text: str,
+    transcript: str,
+    similarity: float,
+    threshold: float,
+    audio_bytes: bytes | None,
+) -> str:
+    text_clean = preprocess_text(text)
+    transcript_clean = preprocess_text(transcript)
+    return (
+        "The audio content is not same as the text: "
+        f"similarity={similarity:.6f}, threshold={threshold:.6f}, "
+        f"text_chars={len(text)}, transcript_chars={len(transcript)}, "
+        f"text_words={len(text_clean.split())}, transcript_words={len(transcript_clean.split())}, "
+        f"audio_bytes={len(audio_bytes or b'')}, "
+        f"text_tail={text[-300:]!r}, transcript_tail={transcript[-300:]!r}"
+    )
+
+
+def _assert_long_form_requirements(
+    *,
+    text: str,
+    transcript: str | None,
+    request_config: dict[str, Any],
+) -> None:
+    text_clean = preprocess_text(text)
+    minimum_text_words = request_config.get("minimum_text_words")
+    if minimum_text_words is not None:
+        actual_words = len(text_clean.split())
+        assert actual_words >= int(minimum_text_words), (
+            f"Text output is too short: words={actual_words}, minimum={minimum_text_words}, text_tail={text[-300:]!r}"
+        )
+
+    required_text_suffix = request_config.get("required_text_suffix")
+    if required_text_suffix:
+        suffix_clean = preprocess_text(str(required_text_suffix))
+        assert text_clean.endswith(suffix_clean), (
+            f"Text output is missing the required suffix: required={required_text_suffix!r}, text_tail={text[-300:]!r}"
+        )
+
+    required_audio_text = request_config.get("required_audio_text")
+    if required_audio_text:
+        assert transcript is not None, "No audio transcript for required tail-text validation"
+        required_audio_clean = preprocess_text(str(required_audio_text))
+        transcript_clean = preprocess_text(transcript)
+        assert required_audio_clean in transcript_clean, (
+            f"Audio output is missing required text: required={required_audio_text!r}, "
+            f"transcript_tail={transcript[-300:]!r}"
+        )
+
+
 def assert_omni_response(response: Any, request_config: dict[str, Any], run_level):
     """
     Validate response results.
@@ -561,6 +614,11 @@ def assert_omni_response(response: Any, request_config: dict[str, Any], run_leve
         if "text" in modalities:
             assert response.text_content is not None, "No text output is generated"
             print(f"text content is: {response.text_content}")
+            _assert_long_form_requirements(
+                text=response.text_content,
+                transcript=transcript,
+                request_config=request_config,
+            )
 
         # Verify keywords in output
         word_types = ["text", "image", "audio", "video"]
@@ -597,10 +655,8 @@ def assert_omni_response(response: Any, request_config: dict[str, Any], run_leve
                 if len(text_output) <= _SHORT_TEXT_THRESHOLD or len(transcript) <= _SHORT_TEXT_THRESHOLD:
                     shorter = text_output.lower() if len(text_output) <= len(transcript) else transcript.lower()
                     longer = transcript.lower() if len(text_output) <= len(transcript) else text_output.lower()
-                    import re as _re
-
-                    shorter_clean = _re.sub(r"[^\w\s]", "", shorter).strip()
-                    longer_clean = _re.sub(r"[^\w\s]", "", longer).strip()
+                    shorter_clean = re.sub(r"[^\w\s]", "", shorter).strip()
+                    longer_clean = re.sub(r"[^\w\s]", "", longer).strip()
                     assert shorter_clean and (shorter_clean in longer_clean), (
                         f"The audio content is not same as the text "
                         f"(short-text containment check failed: "
@@ -613,7 +669,13 @@ def assert_omni_response(response: Any, request_config: dict[str, Any], run_leve
                         text_output.lower(),
                     )
                     print(f"similarity is: {similarity}")
-                    assert similarity > similarity_threshold, "The audio content is not same as the text"
+                    assert similarity > similarity_threshold, _text_audio_mismatch_details(
+                        text=text_output,
+                        transcript=transcript,
+                        similarity=similarity,
+                        threshold=similarity_threshold,
+                        audio_bytes=getattr(response, "audio_bytes", None),
+                    )
             if audio_ref_text:
                 assert transcript is not None, "No audio transcript for reference-text validation"
                 audio_similarity = cosine_similarity_text(
