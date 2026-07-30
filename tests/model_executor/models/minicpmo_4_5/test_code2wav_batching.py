@@ -279,6 +279,164 @@ def test_model_preserves_output_slots_and_prefers_runtime_codes():
     assert token2wav.flow.encoder.calls[-1] == 2
 
 
+def test_code2wav_projects_duplex_metadata_to_final_audio_output():
+    model, token2wav = _model()
+    segment = _info("duplex", 0, [10, 11])
+    segment_text_utf8 = torch.tensor(list(b"hello"), dtype=torch.uint8)
+    segment["meta"].update(
+        {
+            "duplex_epoch": 3,
+            "duplex_turn_id": 7,
+            "llm_output_text_utf8": segment_text_utf8,
+            "tts_is_last_chunk": True,
+            "turn_end": False,
+        }
+    )
+
+    segment_output = _forward(model, [segment])
+
+    assert segment_output.multimodal_outputs["meta.turn_end"][0].item() is False
+    assert token2wav.flow.encoder.last_chunk_calls[-1] is False
+    assert "duplex" in model._states
+
+    final = _info("duplex", 1, [12, 13], last_chunk=True)
+    final["meta"].update(segment["meta"])
+    final["meta"]["chunk_seq"] = 1
+    final["meta"]["last_chunk"] = True
+    final["meta"]["turn_end"] = True
+    output = _forward(model, [final])
+
+    payload = output.multimodal_outputs
+    assert "meta" not in payload
+    assert payload["meta.duplex_epoch"][0].item() == 3
+    assert payload["meta.duplex_turn_id"][0].item() == 7
+    torch.testing.assert_close(
+        payload["meta.llm_output_text_utf8"][0],
+        segment_text_utf8,
+    )
+    assert payload["meta.tts_is_last_chunk"][0].item() is True
+    assert payload["meta.turn_end"][0].item() is True
+    assert token2wav.flow.encoder.last_chunk_calls[-1] is True
+    assert "duplex" not in model._states
+
+
+def test_initial_empty_segment_marker_initializes_stream_without_audio():
+    model, token2wav = _model()
+    boundary = _info("duplex", 0, [])
+    boundary["meta"].update(
+        {
+            "code_flat_numel": 0,
+            "tts_is_last_chunk": True,
+            "turn_end": False,
+        }
+    )
+
+    output = _forward(model, [boundary])
+
+    assert output.multimodal_outputs["model_outputs"][0].numel() == 0
+    assert "duplex" in model._states
+    assert token2wav.hift.calls == []
+
+    resumed = _info(
+        "duplex",
+        1,
+        [4218, 4218, 4218, 10, 11, 12, 13, 14],
+    )
+    output = _forward(model, [resumed])
+
+    assert output.multimodal_outputs["model_outputs"][0].numel() > 0
+    assert "duplex" in model._states
+
+
+def test_shared_runtime_prompt_recreates_missing_file_before_second_owner(tmp_path, monkeypatch):
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    model, _ = _model()
+    reference = torch.tensor([0.0, 0.25, -0.25, 0.0])
+
+    first = _info("voice-a", 0, [10, 11])
+    first["codes"]["ref"] = reference
+    first["meta"]["ref_audio_sr"] = 16000
+    first["meta"].pop("prompt_cache_id")
+    _forward(model, [first], request_ids=["internal-a"])
+
+    prompt_key = model._request_prompt_keys["internal-a"]
+    prompt_path = Path(model._runtime_prompts[prompt_key].path)
+    prompt_path.unlink()
+
+    second = _info("voice-b", 0, [12, 13])
+    second["codes"]["ref"] = reference
+    second["meta"]["ref_audio_sr"] = 16000
+    second["meta"].pop("prompt_cache_id")
+    _forward(model, [second], request_ids=["internal-b"])
+
+    assert prompt_path.is_file()
+    assert model._runtime_prompts[prompt_key].owners == {"internal-a", "internal-b"}
+
+    model.on_requests_finished(["internal-a"])
+    assert prompt_path.is_file()
+    assert model._runtime_prompts[prompt_key].owners == {"internal-b"}
+
+    model.on_requests_finished(["internal-b"])
+    assert not prompt_path.exists()
+    assert prompt_key not in model._runtime_prompts
+
+
+def test_runtime_prompt_write_failure_does_not_publish_partial_file(tmp_path, monkeypatch):
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    model, _ = _model()
+    reference = torch.tensor([0.0, 0.25, -0.25, 0.0])
+
+    def fail_after_partial_write(path, *_args, **_kwargs):
+        Path(path).write_bytes(b"partial")
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr(
+        "vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_code2wav.sf.write",
+        fail_after_partial_write,
+    )
+
+    with pytest.raises(OSError, match="simulated write failure"):
+        model._materialize_runtime_prompt(reference, 16000)
+
+    assert len(model._runtime_prompts) == 1
+    entry = next(iter(model._runtime_prompts.values()))
+    assert not Path(entry.path).exists()
+    assert list(Path(entry.path).parent.iterdir()) == []
+
+
+def test_runtime_prompt_files_are_isolated_between_model_instances(tmp_path, monkeypatch):
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    first_model, _ = _model()
+    second_model, _ = _model()
+    reference = torch.tensor([0.0, 0.25, -0.25, 0.0])
+
+    def runtime_ref_info(request_id: str):
+        info = _info(request_id, 0, [10, 11])
+        info["codes"]["ref"] = reference
+        info["meta"]["ref_audio_sr"] = 16000
+        info["meta"].pop("prompt_cache_id")
+        return info
+
+    _forward(first_model, [runtime_ref_info("voice-a")], request_ids=["internal-a"])
+    _forward(second_model, [runtime_ref_info("voice-b")], request_ids=["internal-b"])
+
+    first_key = first_model._request_prompt_keys["internal-a"]
+    second_key = second_model._request_prompt_keys["internal-b"]
+    first_path = Path(first_model._runtime_prompts[first_key].path)
+    second_path = Path(second_model._runtime_prompts[second_key].path)
+    assert first_key == second_key
+    assert first_path != second_path
+    assert first_path.is_file()
+    assert second_path.is_file()
+
+    first_model.on_requests_finished(["internal-a"])
+    assert not first_path.exists()
+    assert second_path.is_file()
+
+    second_model.on_requests_finished(["internal-b"])
+    assert not second_path.exists()
+
+
 def test_mixed_final_exact_buckets_keep_order_and_release_only_final_states():
     model, _ = _model()
     _forward(

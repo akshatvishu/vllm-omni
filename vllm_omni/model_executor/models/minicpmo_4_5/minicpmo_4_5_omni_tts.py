@@ -42,6 +42,7 @@ _CODEC_TOP_P = 0.85
 _CODEC_REPETITION_PENALTY = 1.05
 _TEXT_CHUNK_SIZE = 10
 _MAX_AUDIO_TOKENS_PER_CONDITION = 500
+_DUPLEX_CODEC_TOKENS_PER_CHUNK = 26
 
 
 def _restore_weight_norm_weight(weight_g: torch.Tensor, weight_v: torch.Tensor) -> torch.Tensor:
@@ -185,7 +186,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         self.make_empty_intermediate_tensors = self.tts_model.make_empty_intermediate_tensors
 
     def _boundary_embeddings(self) -> torch.Tensor:
-        """Embed the ``<text_eos><audio_bos>`` tail every condition ends with."""
+        """Embed the ``<text_eos><audio_bos>`` tail for the last normal chunk."""
         ids = torch.tensor(
             [self._text_eos_id, self._tts_bos_id],
             device=self.emb_text.weight.device,
@@ -205,6 +206,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         self,
         tts_token_ids: torch.Tensor,
         tts_hidden_states: torch.Tensor,
+        *,
+        native_duplex: bool = False,
     ) -> list[torch.Tensor]:
         if tts_token_ids.numel() == 0 or tts_hidden_states.numel() == 0:
             return [self._boundary_embeddings()]
@@ -222,6 +225,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         if self._normalize:
             hidden_embeds = F.normalize(hidden_embeds, p=2, dim=-1)
         condition = text_embeds + hidden_embeds
+        if native_duplex:
+            return [torch.cat([condition, self._audio_bos_embedding()], dim=0)]
         chunks = list(condition.split(_TEXT_CHUNK_SIZE, dim=0))
         audio_bos = self._audio_bos_embedding()
         chunks = [torch.cat([chunk, audio_bos], dim=0) for chunk in chunks]
@@ -268,11 +273,18 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     "MiniCPM-o Talker received an empty condition (request %s); this request produces no audio.",
                     info_dict.get("request_id"),
                 )
-            condition_chunks = self._build_condition_chunks(token_ids, hidden_states)
+            native_duplex = bool(info_dict.get("native_duplex", False))
+            condition_chunks = self._build_condition_chunks(
+                token_ids,
+                hidden_states,
+                native_duplex=native_duplex,
+            )
             first_chunk_embeds = condition_chunks[0]
             offset = int(info_dict.get("_omni_num_computed_tokens", 0))
-            if offset == 0 and span_len > first_chunk_embeds.shape[0]:
-                prefix_len = span_len - first_chunk_embeds.shape[0]
+            prompt_len = info_dict.get("_omni_prompt_len")
+            target_len = int(prompt_len) if prompt_len is not None else offset + span_len
+            prefix_len = target_len - first_chunk_embeds.shape[0]
+            if prefix_len > 0:
                 placeholder_ids = torch.zeros(
                     prefix_len,
                     dtype=torch.long,
@@ -292,15 +304,30 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     f"prompt_len={info_dict.get('_omni_prompt_len')}"
                 )
             request_id = str(info_dict.get("request_id", "0"))
-            state = {
-                "step": 0,
-                "condition_step": 0,
-                "finished": empty_condition,
-                "condition_chunks": condition_chunks,
-                "condition_chunk_index": 0,
-                "condition_cursor": 0,
-                "conditioning": False,
-            }
+            if native_duplex:
+                meta = info_dict.get("meta")
+                # Native duplex keeps the older one-segment Talker contract.
+                duplex_boundary = isinstance(meta, dict) and (
+                    bool(meta.get("turn_start", False)) or bool(meta.get("turn_end", False))
+                )
+                state = {
+                    "mode": "native_duplex",
+                    "step": 0,
+                    "finished": empty_condition,
+                    "max_tokens": _DUPLEX_CODEC_TOKENS_PER_CHUNK,
+                    "min_tokens": 0 if duplex_boundary else _DUPLEX_CODEC_TOKENS_PER_CHUNK,
+                }
+            else:
+                state = {
+                    "mode": "streaming",
+                    "step": 0,
+                    "condition_step": 0,
+                    "finished": empty_condition,
+                    "condition_chunks": condition_chunks,
+                    "condition_chunk_index": 0,
+                    "condition_cursor": 0,
+                    "conditioning": False,
+                }
             request_states = getattr(self, "_request_audio_states", None)
             if request_states is None:
                 request_states = {}
@@ -375,7 +402,13 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
     ) -> torch.Tensor:
         raw_logits = self.head_code[0](hidden_state).float()
         logits = raw_logits / self._codec_temperature
-        if step > 0:
+        request_states = getattr(self, "_request_audio_states", {})
+        state = request_states.get(request_id)
+        min_tokens = int(state.get("min_tokens", 0)) if isinstance(state, dict) else 0
+        eos_id = self._num_audio_tokens - 1
+        if step < min_tokens:
+            logits[..., eos_id] = float("-inf")
+        if history.numel() > 0:
             logits = _apply_repetition_penalty(
                 logits,
                 history,
@@ -523,28 +556,38 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             sampled = self._sample_audio_code(hidden[end - 1 : end], codes, request_id, step)
             is_eos = int(sampled.item()) == self._num_audio_tokens - 1
             state["step"] = step + 1
-            condition_step = int(state.get("condition_step", 0)) + 1
-            state["condition_step"] = condition_step
-            reached_limit = condition_step >= _MAX_AUDIO_TOKENS_PER_CONDITION
-            chunks = state.get("condition_chunks")
-            chunk_index = int(state.get("condition_chunk_index", 0))
-            has_more_conditions = isinstance(chunks, list) and chunk_index + 1 < len(chunks)
-            condition_finished = is_eos or reached_limit
-            finished = condition_finished and not has_more_conditions
-            if condition_finished and has_more_conditions:
-                state["condition_chunk_index"] = chunk_index + 1
-                state["condition_cursor"] = 0
-                state["condition_sample_ready"] = False
-                state["conditioning"] = True
-                state["condition_step"] = 0
-            state["finished"] = finished
-            # MiniCPMTTS.generate_chunk consumes the boundary sample but
-            # returns only codes that were fed into the retained KV state.
-            if not is_eos and not reached_limit:
-                codes = torch.cat([codes[-(_REPETITION_WINDOW - 1) :], sampled.reshape(1)])
-                delta = sampled.reshape(1, 1)
+            if state.get("mode") == "native_duplex":
+                reached_limit = int(state["step"]) >= int(state.get("max_tokens", _DUPLEX_CODEC_TOKENS_PER_CHUNK))
+                finished = is_eos or reached_limit
+                state["finished"] = finished
+                if not is_eos and not reached_limit:
+                    codes = torch.cat([codes[-(_REPETITION_WINDOW - 1) :], sampled.reshape(1)])
+                    delta = sampled.reshape(1, 1)
+                else:
+                    delta = empty_delta
             else:
-                delta = empty_delta
+                condition_step = int(state.get("condition_step", 0)) + 1
+                state["condition_step"] = condition_step
+                reached_limit = condition_step >= _MAX_AUDIO_TOKENS_PER_CONDITION
+                chunks = state.get("condition_chunks")
+                chunk_index = int(state.get("condition_chunk_index", 0))
+                has_more_conditions = isinstance(chunks, list) and chunk_index + 1 < len(chunks)
+                condition_finished = is_eos or reached_limit
+                finished = condition_finished and not has_more_conditions
+                if condition_finished and has_more_conditions:
+                    # Normal chat follows streaming_generate: audio EOS or the
+                    # 500-step budget advances to the next text condition.
+                    state["condition_chunk_index"] = chunk_index + 1
+                    state["condition_cursor"] = 0
+                    state["condition_sample_ready"] = False
+                    state["conditioning"] = True
+                    state["condition_step"] = 0
+                state["finished"] = finished
+                if not is_eos:
+                    codes = torch.cat([codes[-(_REPETITION_WINDOW - 1) :], sampled.reshape(1)])
+                    delta = sampled.reshape(1, 1)
+                else:
+                    delta = empty_delta
             state["codes"] = codes
             info["audio_state"] = state
             info["audio_codes"] = {

@@ -176,6 +176,25 @@ class TestBasicShape:
         assert out[0]["prompt_token_ids"] == [0, 0]
         assert "stream_output" not in out[0]["model_intermediate_buffer"]
 
+    def test_native_duplex_scheduler_prompt_uses_single_condition_length(self) -> None:
+        hidden = torch.zeros((4, _HIDDEN_DIM))
+        thinker_output = _make_thinker_output(
+            prompt_token_ids=[10],
+            output_token_ids=[20, 21, 22],
+            text="segment",
+            hidden_states=hidden,
+            request_multimodal_output={
+                "duplex_prompt_token_ids": [10],
+                "special_token_ids": {"tts_bos_token_id": 151703},
+            },
+        )
+
+        out = llm2tts([thinker_output], prompt=None, _streaming_context=SimpleNamespace(bridge_states={}))
+
+        assert out[0]["prompt_token_ids"] == [0, 0, 0]
+        assert out[0]["model_intermediate_buffer"]["meta"]["next_stage_prompt_len"] == 3
+        assert out[0]["model_intermediate_buffer"]["meta"]["replace_streaming_prompt"] is True
+
     def test_model_intermediate_buffer_carries_thinker_outputs(self) -> None:
         prompt_ids = [10, 11, 12]
         out_ids = [20, 21]

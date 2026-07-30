@@ -203,34 +203,6 @@ def _is_aborted(request: Any) -> bool:
     return any(marker in status_name for marker in ("ABORT", "CANCEL", "IGNORED", "ERROR"))
 
 
-def _request_finish_reason(request: Any) -> str | None:
-    get_finished_reason = getattr(request, "get_finished_reason", None)
-    if not callable(get_finished_reason):
-        return None
-    reason = get_finished_reason()
-    return str(getattr(reason, "value", reason)) if reason is not None else None
-
-
-def _text_summary(text: str | None) -> dict[str, Any]:
-    if not text:
-        return {}
-    encoded = text.encode("utf-8")
-    return {"text_utf8": list(encoded), "num_text_bytes": len(encoded)}
-
-
-def _thinking_text_summaries(text: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    think_start = text.find("<think>")
-    think_end = text.find("</think>", think_start + len("<think>")) if think_start >= 0 else -1
-    if think_start < 0:
-        return _text_summary(None), _text_summary(text)
-    if think_end < 0:
-        return _text_summary(text[think_start + len("<think>") :]), _text_summary(None)
-    return (
-        _text_summary(text[think_start + len("<think>") : think_end]),
-        _text_summary(text[think_end + len("</think>") :].lstrip()),
-    )
-
-
 def tts2code2wav_async_chunk(
     transfer_manager: Any,
     multimodal_output: Any,
@@ -972,22 +944,25 @@ def llm2tts(
             model_intermediate_buffer.setdefault("meta", {})["turn_end"] = True
 
         if handoff_ids is not None and handoff_hidden is not None:
-            # Official streaming_generate sends ten text tokens per Talker
-            # condition. Intermediate chunks add audio BOS; the final chunk
-            # also adds text EOS. Later chunks are injected during Talker
-            # decode, so the scheduler prompt reserves only the first chunk.
             handoff_length = max(len(handoff_ids), len(handoff_hidden))
-            first_text_chunk_length = min(handoff_length, 10)
-            condition_length = first_text_chunk_length + 1
-            if handoff_length <= 10:
-                condition_length += 1
-            scheduler_prompt_token_ids = [0] * condition_length
             handoff_meta = model_intermediate_buffer.setdefault("meta", {})
-            handoff_meta["next_stage_prompt_len"] = condition_length
-            # Native duplex resumes one Talker request within a turn, but a new
-            # assistant turn must discard the previous turn's prompt and KV.
-            if not is_native_duplex_handoff or native_turn_start:
+            if is_native_duplex_handoff:
+                # Duplex resumes one Talker request inside a turn, so stage 1
+                # reserves exactly the current segment plus audio BOS.
+                condition_length = handoff_length + 1
+                if native_turn_start:
+                    handoff_meta["replace_streaming_prompt"] = True
+            else:
+                # Official streaming_generate sends ten text tokens per Talker
+                # condition. Intermediate chunks add audio BOS. Only the final
+                # chunk also adds text EOS.
+                first_text_chunk_length = min(handoff_length, 10)
+                condition_length = first_text_chunk_length + 1
+                if handoff_length <= 10:
+                    condition_length += 1
                 handoff_meta["replace_streaming_prompt"] = True
+            scheduler_prompt_token_ids = [0] * condition_length
+            handoff_meta["next_stage_prompt_len"] = condition_length
         else:
             scheduler_prompt_token_ids = _build_tts_scheduler_prompt_token_ids(
                 tts_token_ids_slice,

@@ -97,14 +97,17 @@ def run_multimodal_generation(args, client: OpenAI) -> None:
         futures = [
             executor.submit(
                 client.chat.completions.create,
-                messages=[
-                    get_system_prompt(),
-                    payload["prompt"],
-                ],
-                model=model_name,
-                modalities=output_modalities,
-                extra_body=payload["extra_body"],
-                stream=args.stream,
+                **{
+                    "messages": [
+                        get_system_prompt(),
+                        payload["prompt"],
+                    ],
+                    "model": model_name,
+                    "modalities": output_modalities,
+                    "extra_body": payload["extra_body"],
+                    "stream": args.stream,
+                    **({"max_tokens": args.max_tokens} if args.max_tokens is not None else {}),
+                },
             )
             for payload in request_payloads
         ]
@@ -229,6 +232,12 @@ def parse_args():
         type=str,
         default=None,
         help="Comma-separated prompts for concurrent requests.",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="Optional request max_tokens override.",
     )
     return parser.parse_args()
 

@@ -11,8 +11,6 @@ from tests.helpers.assertions import (
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
-pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
-
 
 def test_short_transcript_repeat_passes_containment_fallback():
     _assert_transcript_matches(

@@ -13,6 +13,7 @@ from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni import (
     MiniCPMO45OmniForConditionalGeneration,
 )
 from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni_tts import (
+    _DUPLEX_CODEC_TOKENS_PER_CHUNK,
     _MAX_AUDIO_TOKENS_PER_CONDITION,
     MiniCPMO45OmniTTSForConditionalGeneration,
     _restore_weight_norm_weight,
@@ -343,7 +344,9 @@ def test_intermediate_eos_prefills_next_condition_before_sampling(mocker) -> Non
     )
     next_condition = torch.tensor([[10.0, 0.0], [20.0, 0.0]])
     state = {
+        "mode": "streaming",
         "step": 3,
+        "condition_step": 0,
         "finished": False,
         "condition_chunks": [torch.zeros(1, 2), next_condition],
         "condition_chunk_index": 0,
@@ -411,6 +414,7 @@ def test_condition_limit_prefills_next_condition_without_finishing_request(mocke
     talker = _make_talker()
     sample = mocker.patch.object(talker, "_sample_audio_code", return_value=torch.tensor(3))
     state = {
+        "mode": "streaming",
         "step": 700,
         "condition_step": _MAX_AUDIO_TOKENS_PER_CONDITION - 1,
         "finished": False,
@@ -431,10 +435,10 @@ def test_condition_limit_prefills_next_condition_without_finishing_request(mocke
         request_token_spans=[(0, 1)],
     )
 
-    assert output.multimodal_outputs["codes"]["audio"][0].shape == (0, 1)
+    assert output.multimodal_outputs["codes"]["audio"][0].tolist() == [[3]]
     assert output.multimodal_outputs["meta"]["finished"][0].item() is False
     assert talker.compute_logits(output.text_hidden_states).argmax(dim=-1).tolist() == [0]
-    assert info["audio_codes"]["accumulated"].tolist() == [4, 5]
+    assert info["audio_codes"]["accumulated"].tolist() == [4, 5, 3]
     request_state = info["audio_state"]
     assert request_state["step"] == 701
     assert request_state["condition_step"] == 0
@@ -449,6 +453,7 @@ def test_final_condition_limit_is_terminal_and_includes_new_codec_delta(mocker) 
     info = {
         "request_id": "req-limit",
         "audio_state": {
+            "mode": "streaming",
             "step": 1,
             "condition_step": _MAX_AUDIO_TOKENS_PER_CONDITION - 1,
         },
@@ -461,10 +466,8 @@ def test_final_condition_limit_is_terminal_and_includes_new_codec_delta(mocker) 
         request_token_spans=[(0, 1)],
     )
 
-    # MiniCPMTTS.generate_chunk samples once at the max-token boundary to
-    # advance RNG state, but the sampled code is not fed into KV or returned.
-    assert info["audio_codes"]["accumulated"].tolist() == [4, 5]
-    assert output.multimodal_outputs["codes"]["audio"][0].shape == (0, 1)
+    assert info["audio_codes"]["accumulated"].tolist() == [4, 5, 3]
+    assert output.multimodal_outputs["codes"]["audio"][0].tolist() == [[3]]
     assert output.multimodal_outputs["meta"]["finished"][0].item() is True
     assert talker.compute_logits(output.text_hidden_states).argmax(dim=-1).tolist() == [1]
 
@@ -478,7 +481,7 @@ def test_request_local_state_survives_missing_runner_buffer_update(mocker) -> No
     )
     first_info = {
         "request_id": "req-local-state",
-        "audio_state": {"step": 1, "condition_step": 1},
+        "audio_state": {"mode": "streaming", "step": 1, "condition_step": 1},
         "audio_codes": {"accumulated": torch.tensor([4])},
     }
 
@@ -567,6 +570,44 @@ def test_chunked_prefill_tail_aligns_condition_with_prompt_length(mocker) -> Non
     assert state["condition_chunk_index"] == 0
 
 
+@pytest.mark.parametrize(
+    ("meta", "expected_min_tokens"),
+    [
+        ({"turn_start": True}, 0),
+        ({}, _DUPLEX_CODEC_TOKENS_PER_CHUNK),
+        ({"turn_end": True}, 0),
+    ],
+)
+def test_native_duplex_prefill_uses_official_chunk_limits(
+    mocker,
+    meta,
+    expected_min_tokens,
+) -> None:
+    talker = _make_talker()
+    talker.emb_text = nn.Embedding(1, 2)
+    mocker.patch.object(
+        talker,
+        "_build_condition_chunks",
+        return_value=[torch.ones(3, 2)],
+    )
+
+    talker.preprocess(
+        torch.zeros(3, dtype=torch.long),
+        None,
+        _omni_is_prefill=True,
+        request_id="req-duplex-chunk",
+        native_duplex=True,
+        meta=meta,
+        tts_token_ids=torch.tensor([1]),
+        tts_hidden_states=torch.ones(1, 2),
+    )
+
+    state = talker._request_audio_states["req-duplex-chunk"]
+    assert state["mode"] == "native_duplex"
+    assert state["min_tokens"] == expected_min_tokens
+    assert state["max_tokens"] == _DUPLEX_CODEC_TOKENS_PER_CHUNK
+
+
 def test_native_duplex_condition_matches_official_text_plus_audio_bos() -> None:
     talker = _make_talker()
     talker.emb_text = nn.Embedding(16, 2)
@@ -583,16 +624,17 @@ def test_native_duplex_condition_matches_official_text_plus_audio_bos() -> None:
     chunks = talker._build_condition_chunks(
         token_ids,
         hidden_states,
+        native_duplex=True,
     )
     condition = chunks[0]
 
     expected_text = talker.emb_text(token_ids) + hidden_states
     expected = torch.cat(
-        [expected_text, talker._boundary_embeddings()],
+        [expected_text, talker._audio_bos_embedding()],
         dim=0,
     )
     assert torch.equal(condition, expected)
-    assert condition.shape[0] == token_ids.shape[0] + 2
+    assert condition.shape[0] == token_ids.shape[0] + 1
 
 
 def test_request_cleanup_evicts_ar_rng_and_decode_state() -> None:

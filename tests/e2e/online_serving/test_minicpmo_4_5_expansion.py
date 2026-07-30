@@ -180,6 +180,40 @@ def test_text_to_audio_long_output_001(omni_server, openai_client) -> None:
 
 @hardware_test(res={"cuda": "H100", "npu": "A2"}, num_cards=1)
 @pytest.mark.parametrize("omni_server", test_params, indirect=True)
+def test_text_to_audio_500_word_story(omni_server, openai_client) -> None:
+    """
+    Test longer text generation with matching spoken output.
+    """
+    closing = "The lantern went dark and the long journey was complete"
+    messages = dummy_messages_from_mix_data(
+        system_prompt=get_system_prompt(),
+        content_text=(f"Tell me a story in at least 500 words. End the final sentence exactly with: {closing}."),
+    )
+
+    request_config = {
+        "model": omni_server.model,
+        "messages": messages,
+        "modalities": ["text", "audio"],
+        "stream": True,
+        "max_tokens": 1024,
+        "minimum_text_words": 500,
+        "required_text_suffix": closing,
+        "required_audio_text": closing,
+        "similarity_threshold": 0.55,
+        "transcript_escalation_model": "large-v3",
+        "extra_body": {
+            "chat_template_kwargs": {
+                "use_tts_template": True,
+                "enable_thinking": False,
+            }
+        },
+    }
+
+    openai_client.send_omni_request(request_config, request_num=1)
+
+
+@hardware_test(res={"cuda": "H100", "npu": "A2"}, num_cards=1)
+@pytest.mark.parametrize("omni_server", test_params, indirect=True)
 def test_chinese_text_to_audio(omni_server, openai_client) -> None:
     """
     Test Chinese text input generating audio output.
