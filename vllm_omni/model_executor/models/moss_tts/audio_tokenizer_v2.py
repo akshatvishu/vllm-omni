@@ -1051,10 +1051,14 @@ class MossAudioTokenizerProjectedTransformer(StreamingContainer):
         self.input_dimension = input_dimension
         self.output_dimension = output_dimension
 
-        self.input_proj = nn.Linear(input_dimension, d_model, bias=False)
+        self.input_proj = (
+            nn.Linear(input_dimension, d_model, bias=False) if d_model != input_dimension else nn.Identity()
+        )
         self.transformer = MossAudioTokenizerTransformer(d_model=d_model, **kwargs)
         self.conv_layout = conv_layout
-        self.output_proj = nn.Linear(d_model, output_dimension, bias=False)
+        self.output_proj = (
+            nn.Linear(d_model, output_dimension, bias=False) if d_model != output_dimension else nn.Identity()
+        )
 
     def forward(self, x, input_lengths, *args, **kwargs):
         x = self.input_proj(x.transpose(1, 2))  # (B, D, T) -> (B, T, D)
