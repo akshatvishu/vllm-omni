@@ -33,7 +33,6 @@ _OMNI_RUNNER_PARAM = (
 pytestmark = [
     pytest.mark.slow,
     pytest.mark.tts,
-    pytest.mark.skip(reason="https://github.com/vllm-project/vllm-omni/issues/4700"),
     pytest.mark.parametrize("omni_runner", [_OMNI_RUNNER_PARAM], indirect=True),
 ]
 
@@ -118,7 +117,7 @@ def _collect_audio(omni_runner: OmniRunner, request: dict) -> tuple[torch.Tensor
     raise AssertionError("No stage outputs received")
 
 
-@hardware_test(res={"cuda": "L4"})
+@hardware_test(res={"cuda": "L4", "rocm": "MI325"}, num_cards=1)
 def test_moss_tts_realtime_english(omni_runner: OmniRunner, ref_audio_path) -> None:
     """MossTTSRealtime: English voice_clone produces non-empty 24 kHz audio."""
     req = _build_request("This is a real-time TTS streaming test.", ref_audio_path)
