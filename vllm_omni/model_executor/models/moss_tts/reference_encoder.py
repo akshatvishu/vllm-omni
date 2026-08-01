@@ -19,7 +19,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import torch
-import torchaudio
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
@@ -31,6 +30,8 @@ def _encode_wav_sync(processor: Any, wav_list: list, sr: int, sr_target: int, n_
     if wav.dim() == 1:
         wav = wav.unsqueeze(0)
     if sr != sr_target:
+        import torchaudio
+
         wav = torchaudio.functional.resample(wav, sr, sr_target)
     with torch.no_grad():
         codes_list = processor.encode_audios_from_wav([wav], sampling_rate=sr_target, n_vq=n_vq)
@@ -42,6 +43,8 @@ def _encode_realtime_wav_sync(codec: Any, wav_list: list, sr: int) -> torch.Tens
     if wav.dim() == 1:
         wav = wav.unsqueeze(0)
     if sr != 24000:
+        import torchaudio
+
         wav = torchaudio.functional.resample(wav, sr, 24000)
 
     with torch.no_grad():

@@ -997,12 +997,16 @@ class MossTTSRealtimeTalkerForGeneration(nn.Module):
             remaining = (info_dict.get("ids", {}) or {}).get("all")
             if not isinstance(remaining, list):
                 remaining = []
+            max_new_frames = info_dict.get("max_new_frames")
+            if isinstance(max_new_frames, (list, tuple)):
+                max_new_frames = max_new_frames[0] if max_new_frames else None
             info_update: dict[str, Any] = {
                 "audio_state": {
                     "is_stopping": False,
                     "step": 0,
                     "text_cursor": 0,
                     "remaining_text": list(remaining),
+                    "max_new_frames": int(max_new_frames) if max_new_frames is not None else -1,
                 },
                 "audio_codes": {"current": current_codes},
                 "ref_offset": ref_offset + span_len,
@@ -1112,10 +1116,13 @@ class MossTTSRealtimeTalkerForGeneration(nn.Module):
                     )
 
                 ch0 = int(new_codes[0].item())
+                state["step"] = int(state.get("step", 0)) + 1
+                max_new_frames = int(state.get("max_new_frames", -1))
+                if max_new_frames > 0 and state["step"] >= max_new_frames:
+                    state["is_stopping"] = True
                 # Stop condition mirrors upstream: codebook 0 == eos_audio_id.
                 if ch0 == self.AUDIO_EOS:
                     state["is_stopping"] = True
-                    state["step"] = int(state.get("step", 0)) + 1
                     info["audio_codes"] = {
                         "current": new_codes,
                         "accumulated": (info.get("audio_codes", {}) or {}).get("accumulated"),
@@ -1124,7 +1131,6 @@ class MossTTSRealtimeTalkerForGeneration(nn.Module):
 
                 if ch0 in (self.AUDIO_BOS, self.audio_pad_token):
                     # Skip the bos / pad frames — they don't decode to real audio.
-                    state["step"] = int(state.get("step", 0)) + 1
                     info["audio_codes"] = {
                         "current": new_codes,
                         "accumulated": (info.get("audio_codes", {}) or {}).get("accumulated"),
@@ -1138,7 +1144,6 @@ class MossTTSRealtimeTalkerForGeneration(nn.Module):
                     updated_acc = new_codes.unsqueeze(0)
 
                 info["audio_codes"] = {"current": new_codes, "accumulated": updated_acc}
-                state["step"] = int(state.get("step", 0)) + 1
                 per_req_codes[i] = new_codes.unsqueeze(0)
                 have_codes = True
 
