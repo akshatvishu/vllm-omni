@@ -244,22 +244,53 @@ def tts2code2wav_async_chunk(
             "last_terminal_turn": None,
         }
         container[_MINICPMO45_STREAM_RECORD] = record
+        logger.info(
+            "[MiniCPM-o][Stage1->Stage2][stream-start] request_id=%s internal_id=%s",
+            request_id,
+            internal_id,
+        )
     elif internal_id in record["retired_internal_ids"]:
+        logger.debug(
+            "[MiniCPM-o][Stage1->Stage2][drop-retired] request_id=%s internal_id=%s",
+            request_id,
+            internal_id,
+        )
         return None
     elif record["internal_id"] != internal_id:
+        previous_internal_id = record["internal_id"]
         record["retired_internal_ids"].add(record["internal_id"])
         record["internal_id"] = internal_id
         record["cache_epoch"] = int(record["cache_epoch"]) + 1
         record["chunk_seq"] = 0
         record["last_terminal_turn"] = None
         _drop_codec_state(transfer_manager, request_id)
+        logger.info(
+            "[MiniCPM-o][Stage1->Stage2][epoch-reset] request_id=%s old_internal_id=%s "
+            "new_internal_id=%s cache_epoch=%s",
+            request_id,
+            previous_internal_id,
+            internal_id,
+            record["cache_epoch"],
+        )
 
     if _is_aborted(request):
         record["retired_internal_ids"].add(internal_id)
         _drop_codec_state(transfer_manager, request_id)
+        logger.warning(
+            "[MiniCPM-o][Stage1->Stage2][abort] request_id=%s internal_id=%s cache_epoch=%s",
+            request_id,
+            internal_id,
+            record["cache_epoch"],
+        )
         return None
 
     if native_duplex and turn_end and record.get("last_terminal_turn") == duplex_turn_key:
+        logger.debug(
+            "[MiniCPM-o][Stage1->Stage2][drop-duplicate-terminal] request_id=%s cache_epoch=%s duplex_turn=%s",
+            request_id,
+            record["cache_epoch"],
+            duplex_turn_key,
+        )
         return None
 
     state = container.get(_MINICPMO45_ASYNC_STATE)
@@ -376,11 +407,38 @@ def tts2code2wav_async_chunk(
         ),
         request_id=request_id,
     )
+    payload_cache_epoch = int(record["cache_epoch"])
     if last_chunk and native_duplex:
         record["last_terminal_turn"] = duplex_turn_key
         record["cache_epoch"] = int(record["cache_epoch"]) + 1
         record["chunk_seq"] = 0
         _drop_codec_state(transfer_manager, request_id)
+    log_args = (
+        request_id,
+        payload_cache_epoch,
+        chunk_seq,
+        new_token_count,
+        code_flat_numel,
+        len(pending),
+        flush_pending,
+        last_chunk,
+        flush_pending,
+        turn_end,
+    )
+    if flush_pending or last_chunk:
+        logger.info(
+            "[MiniCPM-o][Stage1->Stage2][codec-window] request_id=%s cache_epoch=%s "
+            "chunk_seq=%s new_codes=%s output_codes=%s pending_remaining=%s "
+            "flush_pending=%s last_chunk=%s tts_is_last_chunk=%s turn_end=%s",
+            *log_args,
+        )
+    else:
+        logger.debug(
+            "[MiniCPM-o][Stage1->Stage2][codec-window] request_id=%s cache_epoch=%s "
+            "chunk_seq=%s new_codes=%s output_codes=%s pending_remaining=%s "
+            "flush_pending=%s last_chunk=%s tts_is_last_chunk=%s turn_end=%s",
+            *log_args,
+        )
     return payload
 
 
@@ -397,6 +455,15 @@ def tts2code2wav_full_payload(
     _, left_context_frames = _codec_config(transfer_manager)
     context = [_MINICPMO45_SILENCE_CODE] * left_context_frames if codes else []
     output_codes = [*context, *codes]
+    logger.info(
+        "[MiniCPM-o][Stage1->Stage2][full-payload] request_id=%s codec_tokens=%s "
+        "left_context=%s output_codes=%s last_chunk=%s",
+        request_id,
+        len(codes),
+        len(context),
+        len(output_codes),
+        True,
+    )
 
     request_info = getattr(request, "additional_information", None)
     if not isinstance(request_info, Mapping):
@@ -969,6 +1036,24 @@ def llm2tts(
                 llm_output_ids,
                 prompt_token_ids,
             )
+        handoff_meta = model_intermediate_buffer.get("meta")
+        if not isinstance(handoff_meta, Mapping):
+            handoff_meta = {}
+        logger.debug(
+            "[MiniCPM-o][Stage0->Stage1][handoff] request_id=%s native_duplex=%s "
+            "tts_tokens=%s hidden_rows=%s condition_prompt_len=%s replace_prompt=%s "
+            "next_stage_prompt_len=%s turn_start=%s turn_end=%s segment_end=%s",
+            llm_output.request_id,
+            is_native_duplex_handoff,
+            len(handoff_ids) if handoff_ids is not None else 0,
+            int(tts_hidden_slice.shape[0]) if isinstance(tts_hidden_slice, torch.Tensor) else 0,
+            len(scheduler_prompt_token_ids),
+            bool(handoff_meta.get("replace_streaming_prompt", False)),
+            handoff_meta.get("next_stage_prompt_len"),
+            bool(handoff_meta.get("turn_start", False)),
+            bool(handoff_meta.get("turn_end", False)),
+            bool(handoff_meta.get("segment_end", False)),
+        )
         tts_inputs.append(
             OmniTokensPrompt(
                 prompt_token_ids=scheduler_prompt_token_ids,

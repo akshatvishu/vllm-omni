@@ -333,6 +333,21 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 request_states = {}
                 self._request_audio_states = request_states
             request_states[request_id] = state
+            logger.info(
+                "[MiniCPM-o][Stage1][prefill] request_id=%s mode=%s input_span=%s "
+                "prompt_len=%s computed_offset=%s tts_tokens=%s hidden_rows=%s "
+                "condition_count=%s condition_lengths=%s empty_condition=%s",
+                request_id,
+                state["mode"],
+                span_len,
+                target_len,
+                offset,
+                int(token_ids.shape[0]),
+                int(hidden_states.shape[0]),
+                len(condition_chunks),
+                [int(chunk.shape[0]) for chunk in condition_chunks],
+                empty_condition,
+            )
             empty_codes = torch.empty(0, dtype=torch.long, device=embeds.device)
             return (
                 input_ids,
@@ -369,6 +384,17 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             cursor += span_len
             state["condition_cursor"] = cursor
             state["condition_sample_ready"] = cursor == int(chunk.shape[0])
+            logger.info(
+                "[MiniCPM-o][Stage1][condition-prefill] request_id=%s condition_index=%s/%s "
+                "cursor=%s span=%s condition_len=%s sample_ready=%s",
+                request_id,
+                chunk_index,
+                len(chunks),
+                cursor,
+                span_len,
+                int(chunk.shape[0]),
+                state["condition_sample_ready"],
+            )
             return input_ids, embeds, {"audio_state": state}
 
         current = (info_dict.get("audio_codes", {}) or {}).get("current")
@@ -560,6 +586,16 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 reached_limit = int(state["step"]) >= int(state.get("max_tokens", _DUPLEX_CODEC_TOKENS_PER_CHUNK))
                 finished = is_eos or reached_limit
                 state["finished"] = finished
+                if finished:
+                    logger.info(
+                        "[MiniCPM-o][Stage1][duplex-boundary] request_id=%s reason=%s "
+                        "step=%s emitted_codes=%s max_tokens=%s",
+                        request_id,
+                        "audio_eos" if is_eos else "audio_limit",
+                        state["step"],
+                        int(state["step"]) - int(is_eos),
+                        state.get("max_tokens", _DUPLEX_CODEC_TOKENS_PER_CHUNK),
+                    )
                 if not is_eos and not reached_limit:
                     codes = torch.cat([codes[-(_REPETITION_WINDOW - 1) :], sampled.reshape(1)])
                     delta = sampled.reshape(1, 1)
@@ -574,6 +610,21 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 has_more_conditions = isinstance(chunks, list) and chunk_index + 1 < len(chunks)
                 condition_finished = is_eos or reached_limit
                 finished = condition_finished and not has_more_conditions
+                if condition_finished:
+                    logger.info(
+                        "[MiniCPM-o][Stage1][condition-boundary] request_id=%s "
+                        "condition_index=%s/%s reason=%s condition_steps=%s emitted_codes=%s "
+                        "has_more_conditions=%s next_condition_index=%s kv_action=%s",
+                        request_id,
+                        chunk_index,
+                        len(chunks) if isinstance(chunks, list) else 0,
+                        "audio_eos" if is_eos else "audio_limit_500",
+                        condition_step,
+                        condition_step - int(is_eos),
+                        has_more_conditions,
+                        chunk_index + 1 if has_more_conditions else None,
+                        "append_native_kv",
+                    )
                 if condition_finished and has_more_conditions:
                     # Normal chat follows streaming_generate: audio EOS or the
                     # 500-step budget advances to the next text condition.
@@ -627,6 +678,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
     def _flush_deferred_cleanup(self) -> None:
         request_audio_states = getattr(self, "_request_audio_states", {})
         for request_id in self._deferred_cleanup_ids:
+            logger.info("[MiniCPM-o][Stage1][cleanup] request_id=%s", request_id)
             self._request_generators.pop(request_id, None)
             request_audio_states.pop(request_id, None)
         self._deferred_cleanup_ids.clear()

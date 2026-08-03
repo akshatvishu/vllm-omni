@@ -324,6 +324,11 @@ class MiniCPMO45Code2Wav(nn.Module):
             # not codec data, and one bogus frame is shorter than the vocoder's
             # lookahead window. Such a step carries no producer metadata at
             # all, so it cannot be held to the payload contract below either.
+            logger.debug(
+                "[MiniCPM-o][Stage2][placeholder] request_id=%s state_id=%s",
+                request_id or state_id,
+                state_id,
+            )
             return _WorkItem(
                 output_index=index,
                 state_id=state_id,
@@ -421,6 +426,20 @@ class MiniCPMO45Code2Wav(nn.Module):
         segment_text_utf8 = meta.get("llm_output_text_utf8")
         if not isinstance(segment_text_utf8, torch.Tensor):
             segment_text_utf8 = torch.empty(0, dtype=torch.uint8)
+        logger.debug(
+            "[MiniCPM-o][Stage2][input] request_id=%s state_id=%s cache_epoch=%s "
+            "chunk_seq=%s codec_tokens=%s last_chunk=%s tts_is_last_chunk=%s "
+            "segment_end=%s turn_end=%s",
+            request_id,
+            state_id,
+            cache_epoch,
+            chunk_seq,
+            int(tokens.numel()),
+            last_chunk,
+            tts_is_last_chunk,
+            bool(_scalar(meta.get("segment_end"), False)),
+            bool(_scalar(meta.get("turn_end"), False)),
+        )
         return _WorkItem(
             output_index=index,
             state_id=state_id,
@@ -627,6 +646,25 @@ class MiniCPMO45Code2Wav(nn.Module):
                 )
         for bucket in buckets.values():
             batch_size = len(bucket)
+            log_args = (
+                [item.request_id for item in bucket],
+                batch_size,
+                int(bucket[0].tokens.numel()),
+                [item.last_chunk for item in bucket],
+                [item.tts_is_last_chunk for item in bucket],
+            )
+            if any(item.last_chunk or item.tts_is_last_chunk for item in bucket):
+                logger.info(
+                    "[MiniCPM-o][Stage2][decode] request_ids=%s batch_size=%s codec_len=%s "
+                    "last_chunks=%s tts_last_chunks=%s",
+                    *log_args,
+                )
+            else:
+                logger.debug(
+                    "[MiniCPM-o][Stage2][decode] request_ids=%s batch_size=%s codec_len=%s "
+                    "last_chunks=%s tts_last_chunks=%s",
+                    *log_args,
+                )
             try:
                 features = self.backend.prepare_prompt(
                     bucket[0].prompt_cache_id,
@@ -702,6 +740,7 @@ class MiniCPMO45Code2Wav(nn.Module):
     def on_requests_finished(self, finished_req_ids: set[str] | list[str]) -> None:
         for request_id in finished_req_ids:
             state_id = str(request_id)
+            logger.info("[MiniCPM-o][Stage2][cleanup] request_id=%s", state_id)
             self._states.pop(state_id, None)
             self._release_request_prompt(state_id)
 
