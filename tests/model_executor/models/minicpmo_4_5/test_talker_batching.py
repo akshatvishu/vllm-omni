@@ -778,6 +778,17 @@ def test_talker_rejects_native_duplex_without_fence_identity(mocker) -> None:
         )
 
 
+def test_talker_rejects_missing_persistent_request_id() -> None:
+    talker = _make_talker()
+
+    with pytest.raises(RuntimeError, match="missing its persistent request_id"):
+        talker.make_omni_output(
+            torch.ones(1, 2),
+            model_intermediate_buffer=[{}],
+            request_token_spans=[(0, 1)],
+        )
+
+
 def test_incomplete_prefill_emits_no_code_and_does_not_advance_state(mocker) -> None:
     talker = _make_talker()
     sample = mocker.patch.object(talker, "_sample_audio_code", return_value=torch.tensor(2))

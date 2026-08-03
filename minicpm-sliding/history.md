@@ -2309,3 +2309,11 @@ Fetching 31 files: 100%|██████████| 31/31 [00:00<00:00, 3110
 **Changed:** MiniCPM runner position snapshots are now per-call and validated only during prefill; sidecar KV cursor validation remains active during decode.
 
 **Tests:** Added a regression for stale prefill metadata on native decode; GPU E2E remains unproven.
+
+## 2026-08-04 request identity boundary
+
+**Observed:** Copying runner position metadata also copied away `request_id`, so Talker output fell back to request index `0` and lost its codec state.
+
+**Changed:** Persisted `request_id` before isolating per-call position metadata and made missing output identity fail with an explicit diagnostic.
+
+**Tests:** Added runner identity-isolation and missing-output-identity regressions; GPU E2E remains unproven.

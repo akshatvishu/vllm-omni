@@ -1557,6 +1557,32 @@ class OmniGPUModelRunner(GPUModelRunner):
 
         return req_infos
 
+    def _prepare_request_infos_for_preprocess(
+        self,
+        req_id: str,
+        req_state: CachedRequestState | None,
+    ) -> dict:
+        """Keep request identity persistent while isolating runner metadata."""
+        requires_position_invariants = getattr(self.model, "requires_request_position_invariants", False)
+        persistent_infos = self.model_intermediate_buffer.get(req_id, {})
+        if requires_position_invariants:
+            if not isinstance(persistent_infos, dict):
+                persistent_infos = {}
+                self.model_intermediate_buffer[req_id] = persistent_infos
+            persistent_infos["request_id"] = req_id
+
+        req_infos = self._maybe_attach_mimo_audio_req_infos(req_state, persistent_infos, req_id)
+        if not isinstance(req_infos, dict):
+            req_infos = {}
+        req_infos["request_id"] = req_id
+        if requires_position_invariants:
+            # Runner metadata is per invocation; keep it out of the
+            # persistent model-owned request state.
+            req_infos = dict(req_infos)
+            req_infos.pop("_omni_position_start", None)
+            req_infos.pop("_omni_position_end", None)
+        return req_infos
+
     def _maybe_run_batch_preprocess(self, req_ids: list[str], device: torch.device) -> None:
         """Run an optional model-specific batch preprocess hook.
 
@@ -1774,17 +1800,8 @@ class OmniGPUModelRunner(GPUModelRunner):
 
             preprocess_input_ids = input_ids if input_ids is not None else self.input_ids.gpu[:num_input_tokens]
             for req_index, req_id in enumerate(self.input_batch.req_ids):
-                req_infos = self.model_intermediate_buffer.get(req_id, {})
-
-                # mimo-audio check
                 req_state = self.requests.get(req_id)
-                req_infos = self._maybe_attach_mimo_audio_req_infos(req_state, req_infos, req_id)
-                if requires_request_position_invariants:
-                    # Runner metadata is per invocation; keep it out of the
-                    # persistent model-owned request state.
-                    req_infos = dict(req_infos) if isinstance(req_infos, dict) else {}
-                    req_infos.pop("_omni_position_start", None)
-                    req_infos.pop("_omni_position_end", None)
+                req_infos = self._prepare_request_infos_for_preprocess(req_id, req_state)
 
                 start_offset = int(self.query_start_loc.cpu[req_index])
                 sched_tokens = int(num_scheduled_tokens_np[req_index])
@@ -1792,7 +1809,6 @@ class OmniGPUModelRunner(GPUModelRunner):
                 span_len = int(e) - int(s)
 
                 # call the custom process function
-                req_infos["request_id"] = req_id
                 req_infos["duplex_token_offset"] = int(self.input_batch.num_computed_tokens_cpu[req_index])
                 req_infos["duplex_prompt_len"] = len(req_state.prompt_token_ids) if req_state is not None else None
                 prompt_token_ids = getattr(req_state, "prompt_token_ids", ()) if req_state is not None else ()

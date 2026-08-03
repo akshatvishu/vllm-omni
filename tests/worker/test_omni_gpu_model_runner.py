@@ -680,3 +680,24 @@ def test_maybe_attach_mimo_audio_req_infos_no_req_state_returns_input():
 
     # When no req_state, helper should be a no-op.
     assert result is req_infos
+
+
+def test_prepare_request_infos_persists_identity_but_isolates_positions():
+    runner = _make_runner(req_ids=("r1",))
+    runner.model = SimpleNamespace(requires_request_position_invariants=True)
+    persistent_infos = {"audio_state": {"step": 0}}
+    runner.model_intermediate_buffer["r1"] = persistent_infos
+
+    request_infos = OmniGPUModelRunner._prepare_request_infos_for_preprocess(
+        runner,
+        "r1",
+        runner.requests["r1"],
+    )
+    request_infos["_omni_position_start"] = 0
+    request_infos["_omni_position_end"] = 1
+
+    assert persistent_infos["request_id"] == "r1"
+    assert request_infos is not persistent_infos
+    assert request_infos["request_id"] == "r1"
+    assert "_omni_position_start" not in persistent_infos
+    assert "_omni_position_end" not in persistent_infos

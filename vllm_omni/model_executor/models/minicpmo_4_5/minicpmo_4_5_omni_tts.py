@@ -1321,7 +1321,19 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     sliding_recompute_flags.append(torch.tensor(False, dtype=torch.bool))
                     sliding_recompute_prompt_lengths.append(torch.tensor(0, dtype=torch.long))
                 continue
-            request_id = str(info.get("request_id", index))
+            raw_request_id = info.get("request_id")
+            if raw_request_id is None:
+                logger.error(
+                    "[MiniCPM-o][Stage1][request-identity-failure] missing persistent request_id "
+                    "request_index=%s info_keys=%s",
+                    index,
+                    sorted(info),
+                )
+                raise RuntimeError(
+                    "MiniCPM-o Talker output is missing its persistent request_id: "
+                    f"request_index={index} info_keys={sorted(info)}"
+                )
+            request_id = str(raw_request_id)
             request_states = getattr(self, "_request_audio_states", None)
             if request_states is None:
                 request_states = {}
