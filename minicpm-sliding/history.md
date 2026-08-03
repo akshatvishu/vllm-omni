@@ -89,6 +89,14 @@ Command: `.venv/bin/pytest -q tests/model_executor/models/minicpmo_4_5/test_talk
 
 **Unproven:** These checks do not prove sliding recompute, long-form audio continuity, or an end-to-end server request.
 
+### 2026-08-03 E2E log correction
+
+**Observed:** The first GPU request reached the condition 1 to 2 sliding boundary, then Stage 1 failed because serialized condition chunks were on CPU while codec embeddings were on CUDA. Evidence: [`minicpm-sliding-server.log`](minicpm-sliding-server.log), lines 2164 to 2220.
+
+**Changed:** Recomputed conditions now follow the Talker device, and `audio_state.condition_chunks` stays GPU-resident through runner buffer updates with explicit normalization logging.
+
+**Tested:** The targeted Talker and runner regression suite passed 50 tests; GPU E2E remains unproven.
+
 ## Future entry template
 
 ### YYYY-MM-DD short title

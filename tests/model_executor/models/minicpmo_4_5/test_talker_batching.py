@@ -137,6 +137,40 @@ def test_sliding_recompute_prefill_uses_full_previous_audio_context() -> None:
     assert update["audio_state"]["condition_step"] == 0
 
 
+def test_sliding_recompute_normalizes_transport_condition_device() -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = True
+    talker._sliding_window_size = 2
+    talker._sliding_recomputed_chunks = 1
+    talker.emb_text = nn.Embedding(1, 2).to("meta")
+    talker.emb_code = nn.ModuleList([nn.Embedding(64, 2).to("meta")])
+    state = {
+        "mode": "streaming",
+        "condition_chunk_index": 1,
+        "condition_cursor": 0,
+        "condition_step": 0,
+        "conditioning": False,
+        "finished": False,
+        "sliding_recompute_pending": True,
+        "completed_condition_audio": [{"condition_index": 0, "codes": [1, 2]}],
+        "condition_chunks": [torch.ones(1, 2), torch.zeros(1, 2)],
+    }
+    talker._request_audio_states["req-device"] = state
+
+    _, embeds, _ = talker.preprocess(
+        torch.zeros(4, dtype=torch.long),
+        None,
+        _omni_is_prefill=True,
+        _omni_num_computed_tokens=0,
+        _omni_prompt_len=4,
+        request_id="req-device",
+        audio_state=state,
+    )
+
+    assert embeds.device.type == "meta"
+    assert all(chunk.device.type == "meta" for chunk in state["condition_chunks"])
+
+
 def test_sliding_recompute_emits_prompt_replacement_at_condition_boundary(mocker) -> None:
     talker = _make_talker()
     talker._sliding_recompute_enabled = True

@@ -118,6 +118,9 @@ class MiniCPMO45OmniForConditionalGeneration(nn.Module, SupportsMultiModal, Supp
             # Initialize multimodal components if needed
             if hasattr(self.talker, "init_multi_modal"):
                 self.talker.init_multi_modal(config)
+            # Keep the Talker's request-local condition tensors and codec codes
+            # on the runner device across model_intermediate_buffer updates.
+            self.gpu_resident_buffer_keys: set[tuple[str, str]] = set(self.talker.gpu_resident_buffer_keys)
             self.model = self.talker
         else:
             raise ValueError(f"Invalid model stage: {self.model_stage}. Must be one of: 'llm', 'tts'")

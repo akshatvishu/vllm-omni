@@ -159,6 +159,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         self.gpu_resident_buffer_keys: set[tuple[str, str]] = {
             ("audio_codes", "current"),
             ("audio_codes", "accumulated"),
+            ("audio_state", "condition_chunks"),
         }
         self._init_native_talker(prefix)
 
@@ -283,7 +284,52 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         prompt_len += int(chunks[condition_index].shape[0])
         return prompt_len, audio_tokens
 
-    def _build_sliding_recompute_condition(self, state: dict[str, Any], condition_index: int) -> torch.Tensor:
+    def _condition_chunk_on_device(
+        self,
+        state: dict[str, Any],
+        condition_index: int,
+        request_id: str,
+    ) -> torch.Tensor:
+        chunks = state.get("condition_chunks")
+        if not isinstance(chunks, list):
+            raise RuntimeError("MiniCPM-o Talker is missing condition chunks")
+        if condition_index < 0 or condition_index >= len(chunks):
+            raise RuntimeError(
+                "MiniCPM-o Talker condition index is out of range: "
+                f"request_id={request_id} condition_index={condition_index} condition_count={len(chunks)}"
+            )
+        chunk = chunks[condition_index]
+        if not isinstance(chunk, torch.Tensor):
+            raise RuntimeError(
+                "MiniCPM-o Talker condition chunk is not a tensor: "
+                f"request_id={request_id} condition_index={condition_index} type={type(chunk).__name__}"
+            )
+        target_module = getattr(self, "emb_text", None)
+        if target_module is None:
+            target_module = self.emb_code[0]
+        target = target_module.weight
+        if chunk.device != target.device or chunk.dtype != target.dtype:
+            logger.warning(
+                "[MiniCPM-o][Stage1][condition-device-normalize] request_id=%s "
+                "condition_index=%s source_device=%s target_device=%s source_dtype=%s target_dtype=%s",
+                request_id,
+                condition_index,
+                chunk.device,
+                target.device,
+                chunk.dtype,
+                target.dtype,
+            )
+            chunk = chunk.to(device=target.device, dtype=target.dtype)
+            chunks[condition_index] = chunk
+        return chunk
+
+    def _build_sliding_recompute_condition(
+        self,
+        state: dict[str, Any],
+        condition_index: int,
+        *,
+        request_id: str = "unknown",
+    ) -> torch.Tensor:
         """Build previous condition/audio embeddings plus the active condition."""
         _, _, recomputed_chunks = self._sliding_recompute_settings()
         chunks = state.get("condition_chunks")
@@ -303,7 +349,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     "MiniCPM-o sliding recompute cannot rebuild condition "
                     f"{condition_index}: missing previous condition {previous_index}"
                 )
-            embeddings.append(chunks[previous_index])
+            embeddings.append(self._condition_chunk_on_device(state, previous_index, request_id))
             codes = item.get("codes", [])
             if codes:
                 code_ids = torch.as_tensor(
@@ -312,7 +358,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     dtype=torch.long,
                 )
                 embeddings.append(self.emb_code[0](code_ids))
-        embeddings.append(chunks[condition_index])
+        embeddings.append(self._condition_chunk_on_device(state, condition_index, request_id))
         return torch.cat(embeddings, dim=0)
 
     def _build_condition_chunks(
@@ -365,7 +411,11 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
 
         if isinstance(state, dict) and state.get("sliding_recompute_pending"):
             condition_index = int(state.get("condition_chunk_index", 0))
-            recompute_embeds = self._build_sliding_recompute_condition(state, condition_index)
+            recompute_embeds = self._build_sliding_recompute_condition(
+                state,
+                condition_index,
+                request_id=request_id,
+            )
             prompt_len = info_dict.get("_omni_prompt_len")
             target_len = int(prompt_len) if prompt_len is not None else int(recompute_embeds.shape[0])
             if target_len < recompute_embeds.shape[0]:
@@ -550,7 +600,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 raise RuntimeError(
                     f"MiniCPM-o Talker is missing its next text condition chunk for request {request_id}"
                 )
-            chunk = chunks[chunk_index]
+            chunk = self._condition_chunk_on_device(state, chunk_index, request_id)
             embeds = chunk[cursor : cursor + span_len]
             if embeds.shape[0] != span_len:
                 raise RuntimeError(

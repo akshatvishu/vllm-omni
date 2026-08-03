@@ -1994,9 +1994,12 @@ class OmniGPUModelRunner(GPUModelRunner):
                     # If the tensor is already on the CPU, there is no need to unload it to the CPU.
                     dest[key] = t.contiguous()
         elif isinstance(value, list):
-            dest[key] = [
-                (item.detach().to("cpu").contiguous() if isinstance(item, torch.Tensor) else item) for item in value
-            ]
+            if key in gpu_keys:
+                dest[key] = [(item.detach().clone() if isinstance(item, torch.Tensor) else item) for item in value]
+            else:
+                dest[key] = [
+                    (item.detach().to("cpu").contiguous() if isinstance(item, torch.Tensor) else item) for item in value
+                ]
         else:
             dest[key] = value
 

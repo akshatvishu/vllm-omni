@@ -427,6 +427,22 @@ def test_update_intermediate_buffer_writes_to_buffer_and_setattr(monkeypatch):
     assert info_cpu["my_list"] == [3, 4]
 
 
+def test_update_intermediate_buffer_preserves_gpu_resident_tensor_lists():
+    runner = _make_runner(req_ids=("r1",))
+    runner.model = SimpleNamespace(gpu_resident_buffer_keys={("audio_state", "condition_chunks")})
+    chunks = [torch.ones(2, device="meta")]
+
+    OmniGPUModelRunner._update_intermediate_buffer(
+        runner,
+        "r1",
+        {"audio_state": {"condition_chunks": chunks}},
+    )
+
+    stored = runner.model_intermediate_buffer["r1"]["audio_state"]["condition_chunks"]
+    assert stored[0].device.type == "meta"
+    assert stored[0] is not chunks[0]
+
+
 def test_update_intermediate_buffer_accumulates():
     """Validate that successive merges accumulate keys in the buffer."""
     runner = _make_runner(req_ids=("r1",), hidden_size=4)
