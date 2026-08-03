@@ -347,6 +347,46 @@ def test_sliding_recompute_rejects_runner_position_mismatch() -> None:
         )
 
 
+def test_native_decode_ignores_stale_prefill_runner_positions() -> None:
+    talker = _make_talker()
+    state = {
+        "recompute_epoch": 0,
+        _KV_CACHE_EPOCH: 0,
+        _KV_NEXT_POSITION: 0,
+        _KV_PREFILL_STARTED: False,
+        "initial_prefill_pending": True,
+    }
+    prefill_info = {
+        "_omni_num_computed_tokens": 0,
+        "_omni_position_start": 0,
+        "_omni_position_end": 1,
+    }
+
+    talker._validate_kv_input_progress(
+        state,
+        prefill_info,
+        span_len=2,
+        is_prefill=True,
+        request_id="req-stale-runner-position",
+        source="initial_condition",
+    )
+
+    stale_decode_info = {
+        **prefill_info,
+        "_omni_num_computed_tokens": 2,
+    }
+    talker._validate_kv_input_progress(
+        state,
+        stale_decode_info,
+        span_len=1,
+        is_prefill=False,
+        request_id="req-stale-runner-position",
+        source="native_kv_decode",
+    )
+
+    assert state[_KV_NEXT_POSITION] == 3
+
+
 @pytest.mark.parametrize(
     ("expected_prompt_len", "runner_prompt_len", "is_prefill", "error"),
     [

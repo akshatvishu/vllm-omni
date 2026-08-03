@@ -2301,3 +2301,11 @@ Fetching 31 files: 100%|██████████| 31/31 [00:00<00:00, 3110
 **Changed:** Made the scheduler reject a sliding replacement without a positive `kv_cache_epoch` and include the epoch in the fresh-session reset logs.
 
 **Tests:** 47 Talker tests, 23 scheduler/config tests, and 27 stage/Talker tests pass; GPU E2E remains unproven.
+
+## 2026-08-04 runner position metadata lifetime
+
+**Observed:** Native decode reused prefill position snapshots from persistent request metadata and failed before codec generation.
+
+**Changed:** MiniCPM runner position snapshots are now per-call and validated only during prefill; sidecar KV cursor validation remains active during decode.
+
+**Tests:** Added a regression for stale prefill metadata on native decode; GPU E2E remains unproven.

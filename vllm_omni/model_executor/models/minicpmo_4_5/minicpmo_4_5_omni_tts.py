@@ -336,21 +336,24 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 f"actual={offset} epoch={state[_KV_CACHE_EPOCH]}"
             )
 
-        actual_position_start = info_dict.get("_omni_position_start")
-        actual_position_end = info_dict.get("_omni_position_end")
         expected_position_end = offset + span_len - 1
-        if actual_position_start is not None and int(actual_position_start) != offset:
-            raise RuntimeError(
-                "MiniCPM-o Talker runner position does not match scheduler offset: "
-                f"request_id={request_id} source={source} scheduler_offset={offset} "
-                f"runner_position_start={actual_position_start}"
-            )
-        if actual_position_end is not None and int(actual_position_end) != expected_position_end:
-            raise RuntimeError(
-                "MiniCPM-o Talker runner position span is invalid: "
-                f"request_id={request_id} source={source} expected_end={expected_position_end} "
-                f"runner_position_end={actual_position_end}"
-            )
+        if is_prefill:
+            # The runner captures these snapshots only for prefill. Decode
+            # keeps the sidecar cursor check without re-reading host positions.
+            actual_position_start = info_dict.get("_omni_position_start")
+            actual_position_end = info_dict.get("_omni_position_end")
+            if actual_position_start is not None and int(actual_position_start) != offset:
+                raise RuntimeError(
+                    "MiniCPM-o Talker runner position does not match scheduler offset: "
+                    f"request_id={request_id} source={source} scheduler_offset={offset} "
+                    f"runner_position_start={actual_position_start}"
+                )
+            if actual_position_end is not None and int(actual_position_end) != expected_position_end:
+                raise RuntimeError(
+                    "MiniCPM-o Talker runner position span is invalid: "
+                    f"request_id={request_id} source={source} expected_end={expected_position_end} "
+                    f"runner_position_end={actual_position_end}"
+                )
 
         next_position = offset + span_len
         session_prompt_len = state.get(_KV_SESSION_PROMPT_LEN)

@@ -1727,6 +1727,7 @@ class OmniGPUModelRunner(GPUModelRunner):
             decode_start_offsets = []
             decode_batch_items = []
             batch_decode_preprocess = getattr(self.model, "preprocess_decode_batch", None)
+            requires_request_position_invariants = getattr(self.model, "requires_request_position_invariants", False)
 
             def flush_decode_batch() -> None:
                 nonlocal inputs_embeds
@@ -1778,6 +1779,12 @@ class OmniGPUModelRunner(GPUModelRunner):
                 # mimo-audio check
                 req_state = self.requests.get(req_id)
                 req_infos = self._maybe_attach_mimo_audio_req_infos(req_state, req_infos, req_id)
+                if requires_request_position_invariants:
+                    # Runner metadata is per invocation; keep it out of the
+                    # persistent model-owned request state.
+                    req_infos = dict(req_infos) if isinstance(req_infos, dict) else {}
+                    req_infos.pop("_omni_position_start", None)
+                    req_infos.pop("_omni_position_end", None)
 
                 start_offset = int(self.query_start_loc.cpu[req_index])
                 sched_tokens = int(num_scheduled_tokens_np[req_index])
@@ -1795,7 +1802,7 @@ class OmniGPUModelRunner(GPUModelRunner):
                 req_infos["_omni_prompt_len"] = prompt_len
                 req_infos["_omni_num_computed_tokens"] = num_computed_tokens
                 req_infos["_omni_is_prefill"] = is_prefill
-                if getattr(self.model, "requires_request_position_invariants", False) and is_prefill:
+                if requires_request_position_invariants and is_prefill:
                     if positions.ndim != 1:
                         raise RuntimeError(
                             "MiniCPM-o Talker requires one-dimensional linear runner positions, "
