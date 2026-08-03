@@ -143,16 +143,23 @@ def test_minicpmo_sliding_recompute_rejects_cached_admission() -> None:
     assert sched._minicpmo_sliding_recompute_pending == {request.request_id: 19}
 
 
-def test_minicpmo_sliding_recompute_clears_pending_after_new_admission() -> None:
+def test_minicpmo_sliding_recompute_accepts_post_schedule_live_progress() -> None:
     sched = _make_scheduler(stage_id=1)
     request = _make_request()
     request.prompt_token_ids = [0] * 19
     request.num_prompt_tokens = 19
+    request.num_computed_tokens = 19
     sched.requests = {request.request_id: request}
     sched._minicpmo_sliding_recompute_pending[request.request_id] = 19
 
     scheduler_output = SimpleNamespace(
-        scheduled_new_reqs=[SimpleNamespace(req_id=request.request_id)],
+        scheduled_new_reqs=[
+            SimpleNamespace(
+                req_id=request.request_id,
+                prompt_token_ids=[0] * 19,
+                num_computed_tokens=0,
+            )
+        ],
         scheduled_cached_reqs=SimpleNamespace(req_ids=[]),
     )
 
@@ -168,7 +175,39 @@ def test_minicpmo_sliding_recompute_rejects_new_admission_with_stale_prompt() ->
     sched._minicpmo_sliding_recompute_pending[request.request_id] = 19
 
     scheduler_output = SimpleNamespace(
-        scheduled_new_reqs=[SimpleNamespace(req_id=request.request_id)],
+        scheduled_new_reqs=[
+            SimpleNamespace(
+                req_id=request.request_id,
+                prompt_token_ids=request.prompt_token_ids,
+                num_computed_tokens=0,
+            )
+        ],
+        scheduled_cached_reqs=SimpleNamespace(req_ids=[]),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid prompt state"):
+        sched._validate_minicpmo_sliding_recompute_schedule(scheduler_output)
+
+    assert sched._minicpmo_sliding_recompute_pending == {request.request_id: 19}
+
+
+def test_minicpmo_sliding_recompute_rejects_prefilled_new_admission() -> None:
+    sched = _make_scheduler(stage_id=1)
+    request = _make_request()
+    request.prompt_token_ids = [0] * 19
+    request.num_prompt_tokens = 19
+    request.num_computed_tokens = 19
+    sched.requests = {request.request_id: request}
+    sched._minicpmo_sliding_recompute_pending[request.request_id] = 19
+
+    scheduler_output = SimpleNamespace(
+        scheduled_new_reqs=[
+            SimpleNamespace(
+                req_id=request.request_id,
+                prompt_token_ids=[0] * 19,
+                num_computed_tokens=19,
+            )
+        ],
         scheduled_cached_reqs=SimpleNamespace(req_ids=[]),
     )
 

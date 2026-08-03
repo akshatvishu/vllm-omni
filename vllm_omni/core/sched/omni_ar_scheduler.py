@@ -218,7 +218,8 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         if not pending:
             return
 
-        new_req_ids = {req.req_id for req in scheduler_output.scheduled_new_reqs}
+        new_reqs = {req.req_id: req for req in scheduler_output.scheduled_new_reqs}
+        new_req_ids = set(new_reqs)
         cached_req_ids = set(scheduler_output.scheduled_cached_reqs.req_ids)
         cached_resets = set(pending).intersection(cached_req_ids)
         if cached_resets:
@@ -233,27 +234,33 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         admitted = set(pending).intersection(new_req_ids)
         for request_id in admitted:
             request = self.requests.get(request_id)
+            new_req_data = new_reqs[request_id]
             prompt_len = pending[request_id]
-            actual_prompt_len = len(request.prompt_token_ids or ()) if request is not None else None
-            if request is None or actual_prompt_len != prompt_len or request.num_computed_tokens != 0:
+            actual_prompt_len = len(new_req_data.prompt_token_ids or ())
+            fresh_num_computed_tokens = new_req_data.num_computed_tokens
+            if request is None or actual_prompt_len != prompt_len or fresh_num_computed_tokens != 0:
                 logger.error(
                     "[MiniCPM-o][Stage1][sliding-recompute-error] request_id=%s "
                     "fresh admission has invalid prompt state expected_prompt_len=%s "
-                    "actual_prompt_len=%s num_computed_tokens=%s",
+                    "actual_prompt_len=%s new_data_num_computed_tokens=%s "
+                    "live_num_computed_tokens=%s",
                     request_id,
                     prompt_len,
                     actual_prompt_len,
+                    fresh_num_computed_tokens,
                     request.num_computed_tokens if request is not None else None,
                 )
                 raise RuntimeError("MiniCPM-o sliding recompute fresh admission has invalid prompt state")
             logger.info(
                 "[MiniCPM-o][Stage1][sliding-recompute-admit] request_id=%s "
                 "path=scheduled_new_reqs prompt_len=%s actual_prompt_len=%s "
-                "num_computed_tokens=%s kv_action=fresh_session_prefill",
+                "new_data_num_computed_tokens=%s live_num_computed_tokens=%s "
+                "kv_action=fresh_session_prefill",
                 request_id,
                 prompt_len,
                 actual_prompt_len,
-                request.num_computed_tokens if request is not None else None,
+                fresh_num_computed_tokens,
+                request.num_computed_tokens,
             )
         for request_id in admitted:
             pending.pop(request_id, None)
