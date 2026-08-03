@@ -1,0 +1,6 @@
+# Synchronous MiniCPM-o 4.5 Talker baseline for sliding-recompute diagnostics.
+base_config: minicpmo_4_5.yaml
+
+stages:
+  - stage_id: 1
+    async_scheduling: false

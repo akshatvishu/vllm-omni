@@ -40,6 +40,7 @@ _CODEC_TEMPERATURE = 0.8
 _CODEC_TOP_K = 25
 _CODEC_TOP_P = 0.85
 _CODEC_REPETITION_PENALTY = 1.05
+_CODEC_DIAGNOSTIC_STEPS = frozenset({1, 25, 100, 500})
 _TEXT_CHUNK_SIZE = 10
 _MAX_AUDIO_TOKENS_PER_CONDITION = 500
 _DUPLEX_CODEC_TOKENS_PER_CHUNK = 26
@@ -411,6 +412,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
 
         if isinstance(state, dict) and state.get("sliding_recompute_pending"):
             condition_index = int(state.get("condition_chunk_index", 0))
+            state["prefill_source"] = "sliding_recompute"
             recompute_embeds = self._build_sliding_recompute_condition(
                 state,
                 condition_index,
@@ -433,10 +435,17 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     "MiniCPM-o sliding recompute runner prompt length is invalid: "
                     f"request_id={request_id} value={raw_runner_prompt_len!r}"
                 ) from exc
+            if recompute_embeds.is_meta:
+                recompute_input_checksum: float | str = "unavailable"
+                recompute_input_l2: float | str = "unavailable"
+            else:
+                recompute_input_checksum = float(recompute_embeds.float().sum().item())
+                recompute_input_l2 = float(recompute_embeds.float().square().sum().sqrt().item())
             logger.info(
                 "[MiniCPM-o][Stage1][sliding-recompute-prefill-input] request_id=%s "
                 "condition_index=%s runner_prompt_len=%s expected_prompt_len=%s "
-                "rebuilt_len=%s computed_offset=%s is_prefill=%s",
+                "rebuilt_len=%s computed_offset=%s is_prefill=%s prefill_source=%s "
+                "recompute_epoch=%s previous_audio_tokens=%s input_checksum=%s input_l2=%s",
                 request_id,
                 condition_index,
                 runner_prompt_len,
@@ -444,6 +453,11 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 rebuilt_len,
                 info_dict.get("_omni_num_computed_tokens", 0),
                 is_prefill,
+                state.get("prefill_source"),
+                state.get("recompute_epoch", 0),
+                state.get("sliding_recompute_audio_tokens", 0),
+                recompute_input_checksum,
+                recompute_input_l2,
             )
             if not is_prefill:
                 raise ValueError(
@@ -478,13 +492,15 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 logger.info(
                     "[MiniCPM-o][Stage1][sliding-recompute-prefill] request_id=%s "
                     "condition_index=%s prompt_len=%s computed_offset=%s span=%s "
-                    "previous_audio_tokens=%s reset_offset=0",
+                    "previous_audio_tokens=%s reset_offset=0 prefill_source=%s recompute_epoch=%s",
                     request_id,
                     condition_index,
                     target_len,
                     offset,
                     span_len,
                     state.get("sliding_recompute_audio_tokens", 0),
+                    state.get("prefill_source"),
+                    state.get("recompute_epoch", 0),
                 )
             empty_codes = torch.empty(0, dtype=torch.long, device=embeds.device)
             return (
@@ -568,6 +584,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     "finished": empty_condition,
                     "max_tokens": _DUPLEX_CODEC_TOKENS_PER_CHUNK,
                     "min_tokens": 0 if duplex_boundary else _DUPLEX_CODEC_TOKENS_PER_CHUNK,
+                    "prefill_source": "initial_condition",
+                    "recompute_epoch": 0,
                 }
             else:
                 state = {
@@ -579,6 +597,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     "condition_chunk_index": 0,
                     "condition_cursor": 0,
                     "conditioning": False,
+                    "prefill_source": "initial_condition",
+                    "recompute_epoch": 0,
                 }
                 if self._sliding_recompute_settings()[0]:
                     state.update(
@@ -595,7 +615,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             logger.info(
                 "[MiniCPM-o][Stage1][prefill] request_id=%s mode=%s input_span=%s "
                 "prompt_len=%s computed_offset=%s tts_tokens=%s hidden_rows=%s "
-                "condition_count=%s condition_lengths=%s empty_condition=%s",
+                "condition_count=%s condition_lengths=%s empty_condition=%s "
+                "prefill_source=%s recompute_epoch=%s",
                 request_id,
                 state["mode"],
                 span_len,
@@ -606,6 +627,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 len(condition_chunks),
                 [int(chunk.shape[0]) for chunk in condition_chunks],
                 empty_condition,
+                state.get("prefill_source"),
+                state.get("recompute_epoch", 0),
             )
             empty_codes = torch.empty(0, dtype=torch.long, device=embeds.device)
             return (
@@ -621,6 +644,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             )
 
         if state.get("conditioning"):
+            state["prefill_source"] = "native_kv_condition"
             chunks = state.get("condition_chunks")
             chunk_index = int(state.get("condition_chunk_index", 0))
             cursor = int(state.get("condition_cursor", 0))
@@ -641,7 +665,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             state["condition_sample_ready"] = cursor == int(chunk.shape[0])
             logger.info(
                 "[MiniCPM-o][Stage1][condition-prefill] request_id=%s condition_index=%s/%s "
-                "cursor=%s span=%s condition_len=%s sample_ready=%s",
+                "cursor=%s span=%s condition_len=%s sample_ready=%s prefill_source=%s "
+                "recompute_epoch=%s",
                 request_id,
                 chunk_index,
                 len(chunks),
@@ -649,6 +674,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 span_len,
                 int(chunk.shape[0]),
                 state["condition_sample_ready"],
+                state.get("prefill_source"),
+                state.get("recompute_epoch", 0),
             )
             return input_ids, embeds, {"audio_state": state}
 
@@ -687,8 +714,10 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         state = request_states.get(request_id)
         min_tokens = int(state.get("min_tokens", 0)) if isinstance(state, dict) else 0
         eos_id = self._num_audio_tokens - 1
-        if step < min_tokens:
+        eos_masked_by_min_tokens = step < min_tokens
+        if eos_masked_by_min_tokens:
             logits[..., eos_id] = float("-inf")
+        pre_filter_logits = logits
         if history.numel() > 0:
             logits = _apply_repetition_penalty(
                 logits,
@@ -702,13 +731,106 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 top_p=self._codec_top_p,
                 min_tokens_to_keep=3,
             )
+        filtered_logits = logits
         probabilities = torch.softmax(logits, dim=-1)
         generator = self._request_generator(request_id, probabilities.device)
-        return torch.multinomial(
+        sampled = torch.multinomial(
             probabilities,
             num_samples=1,
             generator=generator,
         ).reshape(())
+        self._log_codec_sampling_diagnostics(
+            request_id=request_id,
+            state=state if isinstance(state, dict) else {},
+            hidden_state=hidden_state,
+            history=history,
+            step=step,
+            raw_logits=raw_logits,
+            pre_filter_logits=pre_filter_logits,
+            filtered_logits=filtered_logits,
+            probabilities=probabilities,
+            sampled=sampled,
+            eos_id=eos_id,
+            eos_masked_by_min_tokens=eos_masked_by_min_tokens,
+        )
+        return sampled
+
+    def _log_codec_sampling_diagnostics(
+        self,
+        *,
+        request_id: str,
+        state: dict[str, Any],
+        hidden_state: torch.Tensor,
+        history: torch.Tensor,
+        step: int,
+        raw_logits: torch.Tensor,
+        pre_filter_logits: torch.Tensor,
+        filtered_logits: torch.Tensor,
+        probabilities: torch.Tensor,
+        sampled: torch.Tensor,
+        eos_id: int,
+        eos_masked_by_min_tokens: bool,
+    ) -> None:
+        mode = str(state.get("mode", "unknown"))
+        if mode == "streaming":
+            condition_step = int(state.get("condition_step", step)) + 1
+            condition_index = int(state.get("condition_chunk_index", -1))
+        else:
+            condition_step = int(step) + 1
+            condition_index = -1
+        if condition_step not in _CODEC_DIAGNOSTIC_STEPS:
+            return
+
+        def row(values: torch.Tensor) -> torch.Tensor:
+            return values.reshape(-1)
+
+        def rank(values: torch.Tensor) -> int:
+            values_row = row(values)
+            eos_logit = values_row[eos_id]
+            return int((values_row > eos_logit).sum().item()) + 1
+
+        raw_row = row(raw_logits)
+        pre_filter_row = row(pre_filter_logits)
+        filtered_row = row(filtered_logits)
+        probability_row = row(probabilities)
+        eos_pre_filter_finite = bool(torch.isfinite(pre_filter_row[eos_id]).item())
+        eos_filtered = not bool(torch.isfinite(filtered_row[eos_id]).item())
+        hidden_float = hidden_state.float()
+        history_tail = history.reshape(-1)[-_REPETITION_WINDOW:].detach().cpu().tolist()
+        top_id = int(filtered_row.argmax().item())
+        logger.info(
+            "[MiniCPM-o][Stage1][codec-sampling] request_id=%s mode=%s "
+            "prefill_source=%s recompute_epoch=%s condition_index=%s condition_step=%s "
+            "global_step=%s history_len=%s history_tail=%s hidden_checksum=%.6g hidden_l2=%.6g "
+            "raw_eos_logit=%.6g pre_filter_eos_logit=%.6g pre_filter_eos_prob=%.6g "
+            "pre_filter_eos_rank=%s post_filter_eos_logit=%.6g post_filter_eos_prob=%.6g "
+            "post_filter_eos_rank=%s eos_masked_by_min_tokens=%s eos_filtered=%s "
+            "eos_removed_by_warper=%s sampled_id=%s top_id=%s top_prob=%.6g",
+            request_id,
+            mode,
+            state.get("prefill_source", "unknown"),
+            state.get("recompute_epoch", 0),
+            condition_index,
+            condition_step,
+            step,
+            int(history.numel()),
+            history_tail,
+            float(hidden_float.sum().item()),
+            float(hidden_float.square().sum().sqrt().item()),
+            float(raw_row[eos_id].item()),
+            float(pre_filter_row[eos_id].item()),
+            float(torch.softmax(pre_filter_row, dim=-1)[eos_id].item()),
+            rank(pre_filter_row),
+            float(filtered_row[eos_id].item()),
+            float(probability_row[eos_id].item()),
+            rank(filtered_row),
+            eos_masked_by_min_tokens,
+            eos_filtered,
+            eos_pre_filter_finite and eos_filtered,
+            int(sampled.item()),
+            top_id,
+            float(probability_row[top_id].item()),
+        )
 
     def make_omni_output(
         self,
@@ -904,6 +1026,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                                 state,
                                 next_condition_index,
                             )
+                            state["recompute_epoch"] = int(state.get("recompute_epoch", 0)) + 1
                             state["sliding_recompute_pending"] = True
                             state["sliding_recompute_prompt_len"] = recompute_prompt_len
                             state["sliding_recompute_audio_tokens"] = recompute_audio_tokens
@@ -912,23 +1035,33 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                             logger.info(
                                 "[MiniCPM-o][Stage1][sliding-recompute-schedule] request_id=%s "
                                 "previous_condition_index=%s next_condition_index=%s "
-                                "recomputed_chunks=%s previous_audio_tokens=%s prompt_len=%s reset_offset=0",
+                                "recomputed_chunks=%s previous_audio_tokens=%s prompt_len=%s reset_offset=0 "
+                                "next_prefill_source=sliding_recompute recompute_epoch=%s",
                                 request_id,
                                 chunk_index,
                                 next_condition_index,
                                 self._sliding_recompute_settings()[2],
                                 recompute_audio_tokens,
                                 recompute_prompt_len,
+                                state["recompute_epoch"],
                             )
                         else:
                             state["conditioning"] = True
                     else:
                         state["conditioning"] = True
                 if condition_finished:
+                    next_prefill_source = None
+                    if has_more_conditions:
+                        next_prefill_source = (
+                            "sliding_recompute"
+                            if kv_action == "sliding_recompute_prompt_replace"
+                            else "native_kv_condition"
+                        )
                     logger.info(
                         "[MiniCPM-o][Stage1][condition-boundary] request_id=%s "
                         "condition_index=%s/%s reason=%s condition_steps=%s emitted_codes=%s "
-                        "has_more_conditions=%s next_condition_index=%s kv_action=%s",
+                        "has_more_conditions=%s next_condition_index=%s kv_action=%s "
+                        "next_prefill_source=%s recompute_epoch=%s",
                         request_id,
                         chunk_index,
                         len(chunks) if isinstance(chunks, list) else 0,
@@ -938,6 +1071,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                         has_more_conditions,
                         chunk_index + 1 if has_more_conditions else None,
                         kv_action,
+                        next_prefill_source,
+                        state.get("recompute_epoch", 0),
                     )
                 state["finished"] = finished
                 if not is_eos:

@@ -37,7 +37,7 @@ Run the server in the first shell and preserve the complete log.
 ```bash
 cd /scratch/workspace/vllm-omni
 set -o pipefail
-export VLLM_LOGGING_LEVEL=DEBUG
+export VLLM_LOGGING_LEVEL=INFO
 
 vllm-omni serve openbmb/MiniCPM-o-4_5 \
   --omni \
@@ -69,6 +69,67 @@ python examples/online_serving/minicpmo/openai_chat_completion_client_for_multim
 ```
 
 Save the returned audio without trimming it and record its duration, sample rate, channel count, and file size.
+
+Transcribe the exact returned file with the repository utility:
+
+```bash
+python t.py <sliding-audio-file> --model large \
+  2>&1 | tee minicpm-sliding-whisper.log
+```
+
+## Check the diagnostic logging
+
+The new Talker diagnostics log codec sampling at condition steps 1, 25, 100, and 500, plus every recompute boundary. They include the prefill source, recompute epoch, hidden-state checksums, EOS probabilities before and after filtering, EOS filtering flags, sampled ID, and repetition-history tail.
+
+Run these commands after the request completes:
+
+```bash
+cd /scratch/workspace/vllm-omni
+
+rg "\[MiniCPM-o\]\[Stage1\]\[codec-sampling\]" minicpm-sliding-server.log
+rg "\[MiniCPM-o\]\[Stage1\]\[(condition-boundary|sliding-recompute-schedule|sliding-recompute-prefill-input|sliding-recompute-prefill)\]" minicpm-sliding-server.log
+rg "\[MiniCPM-o\]\[Stage1\]\[codec-sampling\].*condition_index=(13|14|15)" minicpm-sliding-server.log
+if rg -n "Traceback|EngineDeadError|500 Internal Server Error|ValueError: MiniCPM-o" minicpm-sliding-server.log; then
+  echo "runtime failure found"
+  exit 1
+fi
+```
+
+For every `sliding_recompute` sample, verify `prefill_source=sliding_recompute`, an increased `recompute_epoch`, a bounded `condition_step`, and a matching preceding `sliding-recompute-prefill` line. Compare `raw_eos_logit`, `pre_filter_eos_prob`, `post_filter_eos_prob`, `eos_filtered`, `eos_removed_by_warper`, `hidden_checksum`, and `sampled_id` around the first capped condition.
+
+## Native-cache A/B run
+
+Stop the sliding server and repeat the same client request with the synchronous native-cache diagnostic overlay. This keeps Stage 1 scheduling fixed while leaving `minicpmo_sliding_recompute` disabled.
+
+```bash
+cd /scratch/workspace/vllm-omni
+set -o pipefail
+export VLLM_LOGGING_LEVEL=INFO
+
+vllm-omni serve openbmb/MiniCPM-o-4_5 \
+  --omni \
+  --port 28889 \
+  --trust-remote-code \
+  --deploy-config vllm_omni/deploy/minicpmo_4_5_native_diagnostic.yaml \
+  --interleave-mm-strings \
+  2>&1 | tee minicpm-native-server.log
+```
+
+In a second shell, run the identical request and save its output as `minicpm-native-client.log`:
+
+```bash
+cd /scratch/workspace/vllm-omni
+set -o pipefail
+
+python examples/online_serving/minicpmo/openai_chat_completion_client_for_multimodal_generation.py \
+  --model openbmb/MiniCPM-o-4_5 \
+  --query-type text \
+  --port 28889 \
+  --prompt "Write an original English story of at least 1,200 words. Use clear spoken language, maintain a consistent setting and character names, do not repeat sentences, do not ask follow up questions, and end the story naturally." \
+  2>&1 | tee minicpm-native-client.log
+```
+
+Transcribe the returned native audio with `python t.py <native-audio-file> --model large`. A diagnostic comparison is evidence only; the feature remains unproven until the complete sliding audio is intelligible and has no repeated, missing, or truncated segment.
 
 ## Required log checks
 

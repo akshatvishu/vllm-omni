@@ -136,6 +136,7 @@ def test_sliding_recompute_prefill_uses_full_previous_audio_context() -> None:
     assert torch.equal(embeds, expected)
     assert update["audio_state"]["sliding_recompute_pending"] is False
     assert update["audio_state"]["condition_step"] == 0
+    assert update["audio_state"]["prefill_source"] == "sliding_recompute"
 
 
 @pytest.mark.parametrize(
@@ -313,6 +314,66 @@ def test_first_audio_token_skips_sampling_processors(mocker) -> None:
 
     repetition_penalty.assert_called_once()
     top_k_top_p.assert_called_once()
+
+
+def test_codec_sampling_diagnostics_report_filter_and_recompute_state(mocker) -> None:
+    talker = _make_talker()
+    talker.head_code = nn.ModuleList([nn.Identity()])
+    talker._codec_temperature = 0.8
+    talker._codec_top_k = 3
+    talker._codec_top_p = 0.85
+    talker._codec_repetition_penalty = 1.05
+    talker._codec_seed = 42
+    talker._request_audio_states["req-diagnostics"] = {
+        "mode": "streaming",
+        "condition_chunk_index": 14,
+        "condition_step": 24,
+        "prefill_source": "sliding_recompute",
+        "recompute_epoch": 2,
+    }
+    info = mocker.patch.object(minicpmo_4_5_omni_tts.logger, "info")
+
+    talker._sample_audio_code(
+        torch.tensor([[8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 0.0]]),
+        torch.tensor([1]),
+        "req-diagnostics",
+        step=99,
+    )
+
+    diagnostic_calls = [call for call in info.call_args_list if "[codec-sampling]" in call.args[0]]
+    assert len(diagnostic_calls) == 1
+    args = diagnostic_calls[0].args
+    assert args[1:4] == ("req-diagnostics", "streaming", "sliding_recompute")
+    assert args[5:7] == (14, 25)
+    assert args[19] is False
+    assert args[20] is True
+    assert args[21] is True
+
+
+def test_codec_sampling_diagnostics_are_bounded_to_selected_steps(mocker) -> None:
+    talker = _make_talker()
+    talker.head_code = nn.ModuleList([nn.Identity()])
+    talker._codec_temperature = 0.8
+    talker._codec_top_k = 3
+    talker._codec_top_p = 0.85
+    talker._codec_repetition_penalty = 1.05
+    talker._codec_seed = 42
+    talker._request_audio_states["req-diagnostics-bounded"] = {
+        "mode": "streaming",
+        "condition_chunk_index": 14,
+        "condition_step": 25,
+        "prefill_source": "sliding_recompute",
+    }
+    info = mocker.patch.object(minicpmo_4_5_omni_tts.logger, "info")
+
+    talker._sample_audio_code(
+        torch.ones(1, 8),
+        torch.tensor([1]),
+        "req-diagnostics-bounded",
+        step=100,
+    )
+
+    assert not any("[codec-sampling]" in call.args[0] for call in info.call_args_list)
 
 
 def test_audio_eos_is_not_masked_on_first_sampling_step(mocker) -> None:
@@ -753,6 +814,7 @@ def test_chunked_prefill_tail_aligns_condition_with_prompt_length(mocker) -> Non
     state = talker._request_audio_states["req-chunked-prefill"]
     assert state["condition_step"] == 0
     assert state["condition_chunk_index"] == 0
+    assert state["prefill_source"] == "initial_condition"
 
 
 @pytest.mark.parametrize(

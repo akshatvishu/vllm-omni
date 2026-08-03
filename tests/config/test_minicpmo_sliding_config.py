@@ -43,3 +43,17 @@ def test_minicpmo_sliding_recompute_rejects_async_scheduling() -> None:
     assert pipeline is not None
     with pytest.raises(ValueError, match="requires async_scheduling=false"):
         merge_pipeline_deploy(pipeline, deploy)
+
+
+def test_minicpmo_native_diagnostic_overlay_keeps_sliding_disabled() -> None:
+    native = load_deploy_config(_REPO_ROOT / "vllm_omni/deploy/minicpmo_4_5_native_diagnostic.yaml")
+    native_stage = next(stage for stage in native.stages if stage.stage_id == 1)
+
+    assert native_stage.async_scheduling is False
+    assert native_stage.minicpmo_sliding_recompute is None
+
+    pipeline = resolve_pipeline_config("minicpmo_4_5")
+    assert pipeline is not None
+    resolved_stages = merge_pipeline_deploy(pipeline, native)
+    assert resolved_stages[1].yaml_engine_args["async_scheduling"] is False
+    assert "minicpmo_sliding_recompute" not in resolved_stages[1].yaml_engine_args
