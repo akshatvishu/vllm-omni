@@ -231,14 +231,14 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         return enabled, window_size, recomputed_chunks
 
     def _should_recompute_condition(self, condition_index: int) -> bool:
-        """Match MiniCPM-o's official sliding_recompute cadence."""
-        enabled, window_size, recomputed_chunks = self._sliding_recompute_settings()
+        """Match TTSStreamingGenerator's streaming recompute boundary."""
+        enabled, _, _ = self._sliding_recompute_settings()
         if not enabled:
             return False
-        return (
-            condition_index >= window_size
-            and (condition_index - recomputed_chunks) % (window_size - recomputed_chunks) == 0
-        )
+        # The active original streaming path recomputes every condition after
+        # the first; its chunk window settings belong to the separate
+        # interleaved_generate path.
+        return condition_index >= 1
 
     def _record_completed_condition(self, state: dict[str, Any], condition_index: int) -> None:
         """Retain only the bounded audio history needed by the next recompute."""

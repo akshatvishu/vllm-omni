@@ -78,17 +78,26 @@ def test_audio_token_limit_matches_official_per_condition_limit() -> None:
     assert _MAX_AUDIO_TOKENS_PER_CONDITION == 500
 
 
-def test_sliding_recompute_matches_official_condition_cadence() -> None:
+def test_sliding_recompute_matches_official_streaming_cadence() -> None:
     talker = _make_talker()
     talker._sliding_recompute_enabled = True
     talker._sliding_window_size = 4
     talker._sliding_recomputed_chunks = 1
 
-    assert not talker._should_recompute_condition(3)
+    assert not talker._should_recompute_condition(0)
+    assert talker._should_recompute_condition(1)
+    assert talker._should_recompute_condition(2)
+    assert talker._should_recompute_condition(3)
     assert talker._should_recompute_condition(4)
-    assert not talker._should_recompute_condition(5)
-    assert not talker._should_recompute_condition(6)
-    assert talker._should_recompute_condition(7)
+
+
+def test_sliding_recompute_cadence_is_disabled_without_opt_in() -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = False
+    talker._sliding_window_size = 2
+    talker._sliding_recomputed_chunks = 1
+
+    assert all(not talker._should_recompute_condition(index) for index in range(6))
 
 
 def test_sliding_recompute_prefill_uses_full_previous_audio_context() -> None:
