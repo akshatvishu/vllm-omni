@@ -424,6 +424,7 @@ class StageDeployConfig:
     minicpmo_sliding_recompute: bool | None = None
     minicpmo_sliding_window_size: int | None = None
     minicpmo_sliding_recomputed_chunks: int | None = None
+    minicpmo_codec_sampling_params: dict[str, Any] | None = None
 
     # === Pass-through stage engine fields ===
     # Pass-through stage engine args that are not represented above.

@@ -392,6 +392,12 @@ def test_sub_config_fields_match_rfc_scopes():
         "enable_multithread_weight_load",
         "num_weight_load_threads",
         "disable_autocast",
+        # MiniCPM-o Talker deployment overrides are model-owned and remain
+        # separate from generic stage sampling parameters.
+        "minicpmo_sliding_recompute",
+        "minicpmo_sliding_window_size",
+        "minicpmo_sliding_recomputed_chunks",
+        "minicpmo_codec_sampling_params",
         # Per-stage checkpoint resolution for repos whose stages live in
         # subfolders (e.g. Audex): mirrors StagePipelineConfig on the
         # legacy engine-args path.

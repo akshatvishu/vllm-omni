@@ -71,6 +71,7 @@ class _ModelEngineOverrides(TypedDict, total=False):
     minicpmo_sliding_recompute: bool
     minicpmo_sliding_window_size: int
     minicpmo_sliding_recomputed_chunks: int
+    minicpmo_codec_sampling_params: dict[str, Any]
 
 
 class _LoadEngineOverrides(TypedDict, total=False):
@@ -276,6 +277,7 @@ class OmniStageModelConfig:
     minicpmo_sliding_recompute: bool = False
     minicpmo_sliding_window_size: int = Field(default=2, ge=1)
     minicpmo_sliding_recomputed_chunks: int = Field(default=1, ge=0)
+    minicpmo_codec_sampling_params: dict[str, Any] | None = None
     # Per-stage checkpoint/tokenizer subdirectories under the model root
     # (e.g. Audex stage 0 → checkpoint_folder_audiogen). Mirrors
     # StagePipelineConfig.model_subdir/tokenizer_subdir on the legacy path.

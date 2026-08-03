@@ -180,6 +180,7 @@ class OmniEngineArgs(EngineArgs):
     minicpmo_sliding_recompute: bool = False
     minicpmo_sliding_window_size: int = 2
     minicpmo_sliding_recomputed_chunks: int = 1
+    minicpmo_codec_sampling_params: dict[str, Any] | None = None
 
     @classmethod
     def _add_omni_specific_args(cls, parser: argparse.ArgumentParser) -> argparse.ArgumentParser:

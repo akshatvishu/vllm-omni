@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 import torch.nn as nn
@@ -16,6 +18,7 @@ from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni_tts import (
     _DUPLEX_CODEC_TOKENS_PER_CHUNK,
     _MAX_AUDIO_TOKENS_PER_CONDITION,
     MiniCPMO45OmniTTSForConditionalGeneration,
+    _resolve_codec_sampling_params,
     _restore_weight_norm_weight,
 )
 from vllm_omni.utils.mm_outputs import to_payload_element
@@ -76,6 +79,78 @@ def _routed(output, index: int):
 
 def test_audio_token_limit_matches_official_per_condition_limit() -> None:
     assert _MAX_AUDIO_TOKENS_PER_CONDITION == 500
+
+
+def test_codec_sampling_defaults_ignore_nested_hf_sampling_fields() -> None:
+    config = SimpleNamespace(
+        tts_config=SimpleNamespace(
+            temperature=0.6,
+            top_p=0.95,
+            top_k=20,
+            repetition_penalty=1.0,
+            seed=7,
+        )
+    )
+
+    source, params = _resolve_codec_sampling_params(config)
+
+    assert source == "vllm_omni_default"
+    assert params == {
+        "temperature": 0.8,
+        "top_p": 0.85,
+        "top_k": 25,
+        "repetition_penalty": 1.05,
+        "seed": 42,
+    }
+
+
+def test_codec_sampling_deploy_values_override_vllm_omni_defaults() -> None:
+    config = SimpleNamespace(
+        minicpmo_codec_sampling_params={
+            "temperature": 0.7,
+            "top_p": 0.95,
+            "top_k": 20,
+            "repetition_penalty": 1.1,
+            "seed": 9,
+        }
+    )
+
+    source, params = _resolve_codec_sampling_params(config)
+
+    assert source == "vllm_omni_deploy"
+    assert params == {
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "top_k": 20,
+        "repetition_penalty": 1.1,
+        "seed": 9,
+    }
+
+
+@pytest.mark.parametrize(
+    ("override", "error"),
+    [
+        ({"unknown": 1}, "Unknown MiniCPM codec sampling parameter"),
+        ({1: 1}, "Unknown MiniCPM codec sampling parameter"),
+        ({"temperature": 0}, "temperature must be finite and positive"),
+        ({"top_p": 0}, "top_p must be in"),
+        ({"top_k": 0}, "top_k must be a positive integer"),
+        ({"repetition_penalty": float("nan")}, "repetition_penalty must be finite and positive"),
+        ({"seed": 1.5}, "seed must be an integer"),
+    ],
+)
+def test_codec_sampling_deploy_values_reject_invalid_overrides(override, error) -> None:
+    config = SimpleNamespace(minicpmo_codec_sampling_params=override)
+
+    with pytest.raises((TypeError, ValueError), match=error):
+        _resolve_codec_sampling_params(config)
+
+
+def test_codec_sampling_deploy_values_must_be_a_mapping() -> None:
+    config = SimpleNamespace(minicpmo_codec_sampling_params=[("top_p", 0.95)])
+
+    with pytest.raises(TypeError, match="must be a mapping"):
+        _resolve_codec_sampling_params(config)
 
 
 def test_sliding_recompute_matches_official_streaming_cadence() -> None:

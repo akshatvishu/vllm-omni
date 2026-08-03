@@ -11,6 +11,13 @@ from vllm_omni.config.stage_config import load_deploy_config, merge_pipeline_dep
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXPECTED_CODEC_SAMPLING_PARAMS = {
+    "temperature": 0.8,
+    "top_p": 0.85,
+    "top_k": 25,
+    "repetition_penalty": 1.05,
+    "seed": 42,
+}
 
 
 def test_minicpmo_sliding_overlay_is_explicitly_opt_in() -> None:
@@ -19,6 +26,8 @@ def test_minicpmo_sliding_overlay_is_explicitly_opt_in() -> None:
 
     base_stage = next(stage for stage in base.stages if stage.stage_id == 1)
     sliding_stage = next(stage for stage in sliding.stages if stage.stage_id == 1)
+    assert base_stage.minicpmo_codec_sampling_params == _EXPECTED_CODEC_SAMPLING_PARAMS
+    assert sliding_stage.minicpmo_codec_sampling_params == _EXPECTED_CODEC_SAMPLING_PARAMS
     assert base_stage.minicpmo_sliding_recompute is None
     assert sliding_stage.minicpmo_sliding_recompute is True
     assert sliding_stage.async_scheduling is False
@@ -32,6 +41,7 @@ def test_minicpmo_sliding_overlay_is_explicitly_opt_in() -> None:
     assert resolved_stages[1].yaml_engine_args["async_scheduling"] is False
     assert resolved_stages[1].yaml_engine_args["minicpmo_sliding_window_size"] == 2
     assert resolved_stages[1].yaml_engine_args["minicpmo_sliding_recomputed_chunks"] == 1
+    assert resolved_stages[1].yaml_engine_args["minicpmo_codec_sampling_params"] == _EXPECTED_CODEC_SAMPLING_PARAMS
 
 
 def test_minicpmo_sliding_recompute_rejects_async_scheduling() -> None:

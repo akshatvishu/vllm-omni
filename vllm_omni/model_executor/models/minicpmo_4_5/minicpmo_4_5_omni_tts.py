@@ -11,7 +11,8 @@ Pipeline:
   4. Continuously generate request-aligned discrete audio-code deltas
 """
 
-from collections.abc import Iterable
+import math
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import torch
@@ -47,13 +48,85 @@ _DUPLEX_CODEC_TOKENS_PER_CHUNK = 26
 _MINICPMO_SLIDING_RECOMPUTE = "minicpmo_sliding_recompute"
 _MINICPMO_SLIDING_WINDOW_SIZE = "minicpmo_sliding_window_size"
 _MINICPMO_SLIDING_RECOMPUTED_CHUNKS = "minicpmo_sliding_recomputed_chunks"
+_MINICPMO_CODEC_SAMPLING_PARAMS = "minicpmo_codec_sampling_params"
 _DEFAULT_SLIDING_WINDOW_SIZE = 2
 _DEFAULT_SLIDING_RECOMPUTED_CHUNKS = 1
+_CODEC_SAMPLING_KEYS = frozenset(
+    {
+        "seed",
+        "temperature",
+        "top_k",
+        "top_p",
+        "repetition_penalty",
+    }
+)
 
 
 def _restore_weight_norm_weight(weight_g: torch.Tensor, weight_v: torch.Tensor) -> torch.Tensor:
     """Materialize ``weight_norm(..., dim=0)`` checkpoint parameters."""
     return torch._weight_norm(weight_v, weight_g, dim=0)
+
+
+def _resolve_codec_sampling_params(config: Any) -> tuple[str, dict[str, float | int]]:
+    """Resolve codec sampling from vLLM-Omni config, never HF generation config."""
+    overrides = getattr(config, _MINICPMO_CODEC_SAMPLING_PARAMS, None)
+    if overrides is None:
+        source = "vllm_omni_default"
+        overrides = {}
+    elif not isinstance(overrides, Mapping):
+        raise TypeError(f"{_MINICPMO_CODEC_SAMPLING_PARAMS} must be a mapping, got {type(overrides).__name__}")
+    else:
+        source = "vllm_omni_deploy"
+        unknown = [key for key in overrides if key not in _CODEC_SAMPLING_KEYS]
+        if unknown:
+            raise ValueError(f"Unknown MiniCPM codec sampling parameter(s): {unknown}")
+
+    params: dict[str, float | int] = {
+        "seed": _CODEC_SEED,
+        "temperature": _CODEC_TEMPERATURE,
+        "top_k": _CODEC_TOP_K,
+        "top_p": _CODEC_TOP_P,
+        "repetition_penalty": _CODEC_REPETITION_PENALTY,
+    }
+    params.update(dict(overrides))
+
+    seed = params["seed"]
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ValueError(f"MiniCPM codec seed must be an integer, got {seed!r}")
+
+    top_k = params["top_k"]
+    if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k <= 0:
+        raise ValueError(f"MiniCPM codec top_k must be a positive integer, got {top_k!r}")
+
+    for name in ("temperature", "repetition_penalty"):
+        value = params[name]
+        if (
+            isinstance(value, bool)
+            or not isinstance(
+                value,
+                (int, float),
+            )
+            or not math.isfinite(float(value))
+            or value <= 0
+        ):
+            raise ValueError(f"MiniCPM codec {name} must be finite and positive, got {value!r}")
+
+    top_p = params["top_p"]
+    if (
+        isinstance(top_p, bool)
+        or not isinstance(top_p, (int, float))
+        or not math.isfinite(float(top_p))
+        or not 0 < top_p <= 1
+    ):
+        raise ValueError(f"MiniCPM codec top_p must be in (0, 1], got {top_p!r}")
+
+    return source, {
+        "seed": int(seed),
+        "temperature": float(params["temperature"]),
+        "top_k": int(top_k),
+        "top_p": float(top_p),
+        "repetition_penalty": float(params["repetition_penalty"]),
+    }
 
 
 def _apply_repetition_penalty(
@@ -127,6 +200,12 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         self._request_generators: dict[str, torch.Generator] = {}
         self._request_audio_states: dict[str, dict[str, Any]] = {}
         self._deferred_cleanup_ids: set[str] = set()
+        self._codec_sampling_source, codec_sampling_params = _resolve_codec_sampling_params(config)
+        self._codec_seed = int(codec_sampling_params["seed"])
+        self._codec_temperature = float(codec_sampling_params["temperature"])
+        self._codec_top_k = int(codec_sampling_params["top_k"])
+        self._codec_top_p = float(codec_sampling_params["top_p"])
+        self._codec_repetition_penalty = float(codec_sampling_params["repetition_penalty"])
 
         tts_config = getattr(config, "tts_config", None)
         if tts_config is None and getattr(config, "model_type", None) == "minicpmtts":
@@ -138,13 +217,19 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             self._num_audio_tokens = getattr(tts_config, "num_audio_tokens", 6562)
             self._hidden_size = getattr(tts_config, "hidden_size", 768)
             self._normalize = getattr(tts_config, "normalize_projected_hidden", True)
-            self._codec_seed = int(getattr(tts_config, "seed", _CODEC_SEED))
-            self._codec_temperature = float(getattr(tts_config, "temperature", _CODEC_TEMPERATURE))
-            self._codec_top_k = int(getattr(tts_config, "top_k", _CODEC_TOP_K))
-            self._codec_top_p = float(getattr(tts_config, "top_p", _CODEC_TOP_P))
-            self._codec_repetition_penalty = float(getattr(tts_config, "repetition_penalty", _CODEC_REPETITION_PENALTY))
         else:
             self._tts_config = None
+
+        logger.info(
+            "[MiniCPM-o][Stage1][codec-config] source=%s temperature=%s top_k=%s top_p=%s "
+            "repetition_penalty=%s seed=%s",
+            self._codec_sampling_source,
+            self._codec_temperature,
+            self._codec_top_k,
+            self._codec_top_p,
+            self._codec_repetition_penalty,
+            self._codec_seed,
+        )
 
         self._sliding_recompute_enabled = bool(getattr(config, _MINICPMO_SLIDING_RECOMPUTE, False))
         window_size = getattr(config, _MINICPMO_SLIDING_WINDOW_SIZE, _DEFAULT_SLIDING_WINDOW_SIZE)
