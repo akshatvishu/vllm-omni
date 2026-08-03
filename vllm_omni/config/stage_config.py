@@ -941,6 +941,8 @@ def merge_pipeline_deploy(
         # an encoder. Do not make vLLM profile dummy multimodal inputs for them.
         if not ps.requires_multimodal_data:
             engine_args.setdefault("skip_mm_profiling", True)
+        if engine_args.get("minicpmo_sliding_recompute", False) and engine_args.get("async_scheduling", True):
+            raise ValueError("MiniCPM-o sliding recompute requires async_scheduling=false on its AR stage")
         sched_cls = _resolve_scheduler(
             ps.execution_type,
             engine_args.get("async_scheduling", True),

@@ -3,6 +3,7 @@ base_config: minicpmo_4_5.yaml
 
 stages:
   - stage_id: 1
+    async_scheduling: false
     minicpmo_sliding_recompute: true
     minicpmo_sliding_window_size: 2
     minicpmo_sliding_recomputed_chunks: 1

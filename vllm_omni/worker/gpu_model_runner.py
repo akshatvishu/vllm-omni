@@ -538,6 +538,37 @@ class OmniGPUModelRunner(GPUModelRunner):
         for new_req_data in scheduler_output.scheduled_new_reqs:
             req_id = new_req_data.req_id
             if req_id in self.requests:
+                req_state = self.requests[req_id]
+                old_prompt_len = len(getattr(req_state, "prompt_token_ids", None) or ())
+                new_prompt_len = len(getattr(new_req_data, "prompt_token_ids", None) or ())
+                model_config = getattr(self, "model_config", None)
+                hf_config = getattr(model_config, "hf_config", None)
+                sliding_enabled = bool(
+                    getattr(
+                        hf_config,
+                        "minicpmo_sliding_recompute",
+                        getattr(model_config, "minicpmo_sliding_recompute", False),
+                    )
+                )
+                if sliding_enabled and old_prompt_len != new_prompt_len:
+                    if new_req_data.num_computed_tokens != 0:
+                        raise RuntimeError(
+                            "MiniCPM-o sliding recompute prompt replacement must start at "
+                            f"num_computed_tokens=0, got {new_req_data.num_computed_tokens} "
+                            f"for request_id={req_id}"
+                        )
+                    logger.info(
+                        "[MiniCPM-o][Stage1][runner-session-reset] request_id=%s "
+                        "old_prompt_len=%s new_prompt_len=%s old_computed_tokens=%s "
+                        "new_computed_tokens=%s input_batch_present=%s "
+                        "kv_action=runner_cached_prompt_replace",
+                        req_id,
+                        old_prompt_len,
+                        new_prompt_len,
+                        getattr(req_state, "num_computed_tokens", None),
+                        new_req_data.num_computed_tokens,
+                        req_id in self.input_batch.req_id_to_index,
+                    )
                 self._update_streaming_input_additional_info(new_req_data, req_id)
                 req_state = self._update_streaming_request(req_id, new_req_data)
                 reqs_to_add.append(req_state)

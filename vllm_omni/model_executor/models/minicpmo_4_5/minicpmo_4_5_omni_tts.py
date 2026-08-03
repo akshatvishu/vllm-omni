@@ -416,24 +416,52 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 condition_index,
                 request_id=request_id,
             )
-            prompt_len = info_dict.get("_omni_prompt_len")
-            target_len = int(prompt_len) if prompt_len is not None else int(recompute_embeds.shape[0])
-            if target_len < recompute_embeds.shape[0]:
+            rebuilt_len = int(recompute_embeds.shape[0])
+            raw_expected_prompt_len = state.get("sliding_recompute_prompt_len")
+            try:
+                expected_prompt_len = int(raw_expected_prompt_len)
+            except (TypeError, ValueError) as exc:
                 raise ValueError(
-                    "MiniCPM-o sliding recompute prompt is shorter than its rebuilt condition: "
-                    f"request_id={request_id} prompt_len={target_len} rebuilt_len={recompute_embeds.shape[0]}"
+                    "MiniCPM-o sliding recompute state is missing its authoritative prompt length: "
+                    f"request_id={request_id} value={raw_expected_prompt_len!r}"
+                ) from exc
+            raw_runner_prompt_len = info_dict.get("_omni_prompt_len")
+            try:
+                runner_prompt_len = int(raw_runner_prompt_len)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "MiniCPM-o sliding recompute runner prompt length is invalid: "
+                    f"request_id={request_id} value={raw_runner_prompt_len!r}"
+                ) from exc
+            logger.info(
+                "[MiniCPM-o][Stage1][sliding-recompute-prefill-input] request_id=%s "
+                "condition_index=%s runner_prompt_len=%s expected_prompt_len=%s "
+                "rebuilt_len=%s computed_offset=%s is_prefill=%s",
+                request_id,
+                condition_index,
+                runner_prompt_len,
+                expected_prompt_len,
+                rebuilt_len,
+                info_dict.get("_omni_num_computed_tokens", 0),
+                is_prefill,
+            )
+            if not is_prefill:
+                raise ValueError(
+                    f"MiniCPM-o sliding recompute must enter through a prefill boundary: request_id={request_id}"
                 )
-            prefix_len = target_len - recompute_embeds.shape[0]
-            if prefix_len > 0:
-                placeholder_ids = torch.zeros(
-                    prefix_len,
-                    dtype=torch.long,
-                    device=self.emb_text.weight.device,
+            if expected_prompt_len != rebuilt_len:
+                raise ValueError(
+                    "MiniCPM-o sliding recompute state does not match its rebuilt condition: "
+                    f"request_id={request_id} expected_prompt_len={expected_prompt_len} "
+                    f"rebuilt_len={rebuilt_len}"
                 )
-                recompute_embeds = torch.cat(
-                    [self.emb_text(placeholder_ids), recompute_embeds],
-                    dim=0,
+            if runner_prompt_len != expected_prompt_len:
+                raise ValueError(
+                    "MiniCPM-o sliding recompute runner prompt does not match its rebuilt condition: "
+                    f"request_id={request_id} runner_prompt_len={runner_prompt_len} "
+                    f"expected_prompt_len={expected_prompt_len}"
                 )
+            target_len = expected_prompt_len
             offset = int(info_dict.get("_omni_num_computed_tokens", 0))
             embeds = recompute_embeds[offset : offset + span_len]
             if embeds.shape[0] != span_len:

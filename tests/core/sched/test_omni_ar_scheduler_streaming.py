@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pytest
 import torch
@@ -34,6 +34,9 @@ def _make_scheduler(*, stage_id: int = 0) -> OmniARScheduler:
     sched.log_stats = False
     sched.chunk_transfer_adapter = None
     sched.skipped_waiting = set()
+    sched.scheduler_config = SimpleNamespace(async_scheduling=False)
+    sched.reset_preempted_req_ids = set()
+    sched._minicpmo_sliding_recompute_pending = {}
     return sched
 
 
@@ -78,6 +81,7 @@ def test_minicpmo_sliding_recompute_replaces_prompt_and_requeues_request() -> No
         "meta": {"ref_audio_sr": 24000},
     }
     request.model_intermediate_buffer = {"audio_state": {"step": 7}}
+    sched._preempt_request = MagicMock()
 
     sched._apply_minicpmo_sliding_recompute(request, prompt_len=19)
 
@@ -93,6 +97,85 @@ def test_minicpmo_sliding_recompute_replaces_prompt_and_requeues_request() -> No
     }
     assert request.model_intermediate_buffer is None
     assert sched.chunk_transfer_adapter.requests_num_chunks_sent == {}
+    sched._preempt_request.assert_called_once_with(request, ANY)
+    assert sched._minicpmo_sliding_recompute_pending == {request.request_id: 19}
+
+
+def test_minicpmo_sliding_recompute_rejects_async_scheduler_without_mutation() -> None:
+    sched = _make_scheduler(stage_id=1)
+    sched.scheduler_config.async_scheduling = True
+    sched.vllm_config.model_config.hf_config = SimpleNamespace(minicpmo_sliding_recompute=True)
+    request = _make_request()
+    request.status = RequestStatus.RUNNING
+    old_prompt = request.prompt_token_ids.copy()
+    sched._preempt_request = MagicMock()
+
+    with pytest.raises(RuntimeError, match="requires async_scheduling=False"):
+        sched._apply_minicpmo_sliding_recompute(request, prompt_len=19)
+
+    assert request.prompt_token_ids == old_prompt
+    sched._preempt_request.assert_not_called()
+    assert sched._minicpmo_sliding_recompute_pending == {}
+
+
+def test_minicpmo_sliding_recompute_rejects_non_running_request() -> None:
+    sched = _make_scheduler(stage_id=1)
+    sched.vllm_config.model_config.hf_config = SimpleNamespace(minicpmo_sliding_recompute=True)
+    request = _make_request()
+
+    with pytest.raises(RuntimeError, match="requires a running request"):
+        sched._apply_minicpmo_sliding_recompute(request, prompt_len=19)
+
+
+def test_minicpmo_sliding_recompute_rejects_cached_admission() -> None:
+    sched = _make_scheduler(stage_id=1)
+    request = _make_request()
+    sched._minicpmo_sliding_recompute_pending[request.request_id] = 19
+
+    scheduler_output = SimpleNamespace(
+        scheduled_new_reqs=[],
+        scheduled_cached_reqs=SimpleNamespace(req_ids=[request.request_id]),
+    )
+
+    with pytest.raises(RuntimeError, match="scheduled_new_reqs"):
+        sched._validate_minicpmo_sliding_recompute_schedule(scheduler_output)
+
+    assert sched._minicpmo_sliding_recompute_pending == {request.request_id: 19}
+
+
+def test_minicpmo_sliding_recompute_clears_pending_after_new_admission() -> None:
+    sched = _make_scheduler(stage_id=1)
+    request = _make_request()
+    request.prompt_token_ids = [0] * 19
+    request.num_prompt_tokens = 19
+    sched.requests = {request.request_id: request}
+    sched._minicpmo_sliding_recompute_pending[request.request_id] = 19
+
+    scheduler_output = SimpleNamespace(
+        scheduled_new_reqs=[SimpleNamespace(req_id=request.request_id)],
+        scheduled_cached_reqs=SimpleNamespace(req_ids=[]),
+    )
+
+    sched._validate_minicpmo_sliding_recompute_schedule(scheduler_output)
+
+    assert sched._minicpmo_sliding_recompute_pending == {}
+
+
+def test_minicpmo_sliding_recompute_rejects_new_admission_with_stale_prompt() -> None:
+    sched = _make_scheduler(stage_id=1)
+    request = _make_request()
+    sched.requests = {request.request_id: request}
+    sched._minicpmo_sliding_recompute_pending[request.request_id] = 19
+
+    scheduler_output = SimpleNamespace(
+        scheduled_new_reqs=[SimpleNamespace(req_id=request.request_id)],
+        scheduled_cached_reqs=SimpleNamespace(req_ids=[]),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid prompt state"):
+        sched._validate_minicpmo_sliding_recompute_schedule(scheduler_output)
+
+    assert sched._minicpmo_sliding_recompute_pending == {request.request_id: 19}
 
 
 def test_minicpmo_sliding_recompute_reads_flat_payload_metadata() -> None:

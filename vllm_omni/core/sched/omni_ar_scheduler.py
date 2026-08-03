@@ -127,6 +127,9 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         self._latest_omni_connector_output: OmniConnectorOutput | None = None
         # Snapshot prompt length for each streaming input update
         self._new_prompt_len_snapshot: dict[str, int] = {}
+        # Requests in this map must be admitted through scheduled_new_reqs so
+        # the worker replaces its cached prompt and KV session.
+        self._minicpmo_sliding_recompute_pending: dict[str, int] = {}
 
     def _get_confirmed_num_computed_tokens(self, request: Request) -> int:
         """num_computed_tokens minus async placeholders (KV actually on GPU)."""
@@ -210,15 +213,84 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
             preserved["meta"] = {"ref_audio_sr": meta["ref_audio_sr"]}
         return preserved or None
 
+    def _validate_minicpmo_sliding_recompute_schedule(self, scheduler_output: SchedulerOutput) -> None:
+        pending = self._minicpmo_sliding_recompute_pending
+        if not pending:
+            return
+
+        new_req_ids = {req.req_id for req in scheduler_output.scheduled_new_reqs}
+        cached_req_ids = set(scheduler_output.scheduled_cached_reqs.req_ids)
+        cached_resets = set(pending).intersection(cached_req_ids)
+        if cached_resets:
+            request_id = sorted(cached_resets)[0]
+            logger.error(
+                "[MiniCPM-o][Stage1][sliding-recompute-error] request_id=%s "
+                "reset was scheduled as cached request; prompt/KV session was not replaced",
+                request_id,
+            )
+            raise RuntimeError("MiniCPM-o sliding recompute must be admitted through scheduled_new_reqs")
+
+        admitted = set(pending).intersection(new_req_ids)
+        for request_id in admitted:
+            request = self.requests.get(request_id)
+            prompt_len = pending[request_id]
+            actual_prompt_len = len(request.prompt_token_ids or ()) if request is not None else None
+            if request is None or actual_prompt_len != prompt_len or request.num_computed_tokens != 0:
+                logger.error(
+                    "[MiniCPM-o][Stage1][sliding-recompute-error] request_id=%s "
+                    "fresh admission has invalid prompt state expected_prompt_len=%s "
+                    "actual_prompt_len=%s num_computed_tokens=%s",
+                    request_id,
+                    prompt_len,
+                    actual_prompt_len,
+                    request.num_computed_tokens if request is not None else None,
+                )
+                raise RuntimeError("MiniCPM-o sliding recompute fresh admission has invalid prompt state")
+            logger.info(
+                "[MiniCPM-o][Stage1][sliding-recompute-admit] request_id=%s "
+                "path=scheduled_new_reqs prompt_len=%s actual_prompt_len=%s "
+                "num_computed_tokens=%s kv_action=fresh_session_prefill",
+                request_id,
+                prompt_len,
+                actual_prompt_len,
+                request.num_computed_tokens if request is not None else None,
+            )
+        for request_id in admitted:
+            pending.pop(request_id, None)
+
     def _apply_minicpmo_sliding_recompute(self, request: Request, prompt_len: int) -> None:
-        """Reset one Talker session through the normal vLLM prompt boundary."""
-        computed_before = request.num_computed_tokens
-        placeholders = getattr(request, "num_output_placeholders", 0)
-        if placeholders > 0:
-            request.async_tokens_to_discard = placeholders
-            request.num_computed_tokens = max(0, request.num_computed_tokens - placeholders)
-            request.num_output_placeholders = 0
+        """Reset one Talker session through a fresh synchronous vLLM prompt."""
+        scheduler_config = getattr(self, "scheduler_config", None)
+        if getattr(scheduler_config, "async_scheduling", False):
+            logger.error(
+                "[MiniCPM-o][Stage1][sliding-recompute-error] request_id=%s "
+                "sliding recompute requires async_scheduling=False",
+                request.request_id,
+            )
+            raise RuntimeError("MiniCPM-o sliding recompute requires async_scheduling=False")
+
+        if request.status != RequestStatus.RUNNING:
+            raise RuntimeError(
+                "MiniCPM-o sliding recompute requires a running request, "
+                f"got status={request.status} request_id={request.request_id}"
+            )
+
+        old_prompt_len = len(request.prompt_token_ids or ())
+        old_computed_tokens = request.num_computed_tokens
+        logger.info(
+            "[MiniCPM-o][Stage1][sliding-recompute-reset-start] request_id=%s "
+            "old_prompt_len=%s old_computed_tokens=%s new_prompt_len=%s "
+            "kv_action=preempt_and_free",
+            request.request_id,
+            old_prompt_len,
+            old_computed_tokens,
+            prompt_len,
+        )
+
         request.spec_token_ids = []
+        # Use vLLM's preemption path so the old request blocks, encoder state,
+        # and in-flight bookkeeping are released before the new prompt is queued.
+        self._preempt_request(request, time())
 
         update = StreamingUpdate(
             mm_features=getattr(request, "mm_features", None),
@@ -240,12 +312,19 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         skipped_waiting = getattr(self, "skipped_waiting", ())
         if request not in waiting and request not in skipped_waiting:
             self._enqueue_waiting_request(request)
+        reset_preempted_req_ids = getattr(self, "reset_preempted_req_ids", None)
+        if reset_preempted_req_ids is not None:
+            reset_preempted_req_ids.discard(request.request_id)
+        self._minicpmo_sliding_recompute_pending[request.request_id] = prompt_len
         logger.info(
             "[MiniCPM-o][Stage1][sliding-recompute-reset] request_id=%s "
-            "old_computed_tokens=%s prompt_len=%s reset_offset=0 status=%s",
+            "old_prompt_len=%s old_computed_tokens=%s prompt_len=%s "
+            "num_computed_tokens=%s reset_offset=0 status=%s kv_action=fresh_session_prefill",
             request.request_id,
-            computed_before,
+            old_prompt_len,
+            old_computed_tokens,
             prompt_len,
+            request.num_computed_tokens,
             request.status,
         )
 
@@ -397,6 +476,7 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
                 )
             if self.input_coordinator:
                 self.input_coordinator.restore_queues(self.waiting)
+        self._validate_minicpmo_sliding_recompute_schedule(scheduler_output)
         try:
             # Late import to avoid circulars in some launch modes
             from .output import OmniNewRequestData
@@ -994,6 +1074,9 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         request_id = request.request_id
         self.finished_req_ids.add(request_id)
         self._new_prompt_len_snapshot.pop(request_id, None)
+        pending_resets = getattr(self, "_minicpmo_sliding_recompute_pending", None)
+        if pending_resets is not None:
+            pending_resets.pop(request_id, None)
         if self.finished_req_ids_dict is not None:
             self.finished_req_ids_dict[request.client_index].add(request_id)
 

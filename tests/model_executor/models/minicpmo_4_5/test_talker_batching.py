@@ -101,6 +101,7 @@ def test_sliding_recompute_prefill_uses_full_previous_audio_context() -> None:
     previous_condition = torch.tensor([[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]])
     current_condition = torch.tensor([[4.0, 4.0], [5.0, 5.0]])
     previous_codes = list(range(20))
+    prompt_len = previous_condition.shape[0] + len(previous_codes) + current_condition.shape[0]
     state = {
         "mode": "streaming",
         "condition_chunks": [previous_condition, current_condition],
@@ -110,13 +111,13 @@ def test_sliding_recompute_prefill_uses_full_previous_audio_context() -> None:
         "conditioning": False,
         "finished": False,
         "sliding_recompute_pending": True,
+        "sliding_recompute_prompt_len": prompt_len,
         "sliding_recompute_audio_tokens": len(previous_codes),
         "completed_condition_audio": [
             {"condition_index": 0, "codes": previous_codes},
         ],
     }
     talker._request_audio_states["req-recompute"] = state
-    prompt_len = previous_condition.shape[0] + len(previous_codes) + current_condition.shape[0]
 
     _, embeds, update = talker.preprocess(
         torch.zeros(prompt_len, dtype=torch.long),
@@ -137,6 +138,52 @@ def test_sliding_recompute_prefill_uses_full_previous_audio_context() -> None:
     assert update["audio_state"]["condition_step"] == 0
 
 
+@pytest.mark.parametrize(
+    ("expected_prompt_len", "runner_prompt_len", "is_prefill", "error"),
+    [
+        (6, 5, True, "runner prompt"),
+        (7, 7, True, "does not match its rebuilt condition"),
+        (6, 6, False, "prefill boundary"),
+    ],
+)
+def test_sliding_recompute_rejects_invalid_session_boundary(
+    expected_prompt_len: int,
+    runner_prompt_len: int,
+    is_prefill: bool,
+    error: str,
+) -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = True
+    talker._sliding_window_size = 2
+    talker._sliding_recomputed_chunks = 1
+    talker.emb_text = nn.Embedding(1, 2)
+    talker.emb_code = nn.ModuleList([nn.Embedding(64, 2)])
+    state = {
+        "mode": "streaming",
+        "condition_chunks": [torch.ones(2, 2), torch.ones(3, 2)],
+        "condition_chunk_index": 1,
+        "condition_cursor": 0,
+        "condition_step": 0,
+        "conditioning": False,
+        "finished": False,
+        "sliding_recompute_pending": True,
+        "sliding_recompute_prompt_len": expected_prompt_len,
+        "completed_condition_audio": [{"condition_index": 0, "codes": [1]}],
+    }
+    talker._request_audio_states["req-invalid-boundary"] = state
+
+    with pytest.raises(ValueError, match=error):
+        talker.preprocess(
+            torch.zeros(1, dtype=torch.long),
+            None,
+            _omni_is_prefill=is_prefill,
+            _omni_num_computed_tokens=0,
+            _omni_prompt_len=runner_prompt_len,
+            request_id="req-invalid-boundary",
+            audio_state=state,
+        )
+
+
 def test_sliding_recompute_normalizes_transport_condition_device() -> None:
     talker = _make_talker()
     talker._sliding_recompute_enabled = True
@@ -152,6 +199,7 @@ def test_sliding_recompute_normalizes_transport_condition_device() -> None:
         "conditioning": False,
         "finished": False,
         "sliding_recompute_pending": True,
+        "sliding_recompute_prompt_len": 4,
         "completed_condition_audio": [{"condition_index": 0, "codes": [1, 2]}],
         "condition_chunks": [torch.ones(1, 2), torch.zeros(1, 2)],
     }
