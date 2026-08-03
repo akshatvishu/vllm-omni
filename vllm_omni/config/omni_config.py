@@ -68,6 +68,9 @@ class _ModelEngineOverrides(TypedDict, total=False):
     enable_multithread_weight_load: bool
     num_weight_load_threads: int
     disable_autocast: bool
+    minicpmo_sliding_recompute: bool
+    minicpmo_sliding_window_size: int
+    minicpmo_sliding_recomputed_chunks: int
 
 
 class _LoadEngineOverrides(TypedDict, total=False):
@@ -270,6 +273,9 @@ class OmniStageModelConfig:
     enable_multithread_weight_load: bool = True
     num_weight_load_threads: int = Field(default=4, ge=1)
     disable_autocast: bool = False
+    minicpmo_sliding_recompute: bool = False
+    minicpmo_sliding_window_size: int = Field(default=2, ge=1)
+    minicpmo_sliding_recomputed_chunks: int = Field(default=1, ge=0)
     # Per-stage checkpoint/tokenizer subdirectories under the model root
     # (e.g. Audex stage 0 → checkpoint_folder_audiogen). Mirrors
     # StagePipelineConfig.model_subdir/tokenizer_subdir on the legacy path.

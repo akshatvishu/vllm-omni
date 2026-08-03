@@ -78,6 +78,109 @@ def test_audio_token_limit_matches_official_per_condition_limit() -> None:
     assert _MAX_AUDIO_TOKENS_PER_CONDITION == 500
 
 
+def test_sliding_recompute_matches_official_condition_cadence() -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = True
+    talker._sliding_window_size = 4
+    talker._sliding_recomputed_chunks = 1
+
+    assert not talker._should_recompute_condition(3)
+    assert talker._should_recompute_condition(4)
+    assert not talker._should_recompute_condition(5)
+    assert not talker._should_recompute_condition(6)
+    assert talker._should_recompute_condition(7)
+
+
+def test_sliding_recompute_prefill_uses_full_previous_audio_context() -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = True
+    talker._sliding_window_size = 2
+    talker._sliding_recomputed_chunks = 1
+    talker.emb_text = nn.Embedding(1, 2)
+    talker.emb_code = nn.ModuleList([nn.Embedding(64, 2)])
+    previous_condition = torch.tensor([[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]])
+    current_condition = torch.tensor([[4.0, 4.0], [5.0, 5.0]])
+    previous_codes = list(range(20))
+    state = {
+        "mode": "streaming",
+        "condition_chunks": [previous_condition, current_condition],
+        "condition_chunk_index": 1,
+        "condition_cursor": 0,
+        "condition_step": 0,
+        "conditioning": False,
+        "finished": False,
+        "sliding_recompute_pending": True,
+        "sliding_recompute_audio_tokens": len(previous_codes),
+        "completed_condition_audio": [
+            {"condition_index": 0, "codes": previous_codes},
+        ],
+    }
+    talker._request_audio_states["req-recompute"] = state
+    prompt_len = previous_condition.shape[0] + len(previous_codes) + current_condition.shape[0]
+
+    _, embeds, update = talker.preprocess(
+        torch.zeros(prompt_len, dtype=torch.long),
+        None,
+        _omni_is_prefill=True,
+        _omni_num_computed_tokens=0,
+        _omni_prompt_len=prompt_len,
+        request_id="req-recompute",
+        audio_state=state,
+    )
+
+    expected = torch.cat(
+        [previous_condition, talker.emb_code[0](torch.tensor(previous_codes)), current_condition],
+        dim=0,
+    )
+    assert torch.equal(embeds, expected)
+    assert update["audio_state"]["sliding_recompute_pending"] is False
+    assert update["audio_state"]["condition_step"] == 0
+
+
+def test_sliding_recompute_emits_prompt_replacement_at_condition_boundary(mocker) -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = True
+    talker._sliding_window_size = 2
+    talker._sliding_recomputed_chunks = 1
+    mocker.patch.object(talker, "_sample_audio_code", return_value=torch.tensor(3))
+    chunks = [torch.zeros(2, 2), torch.ones(3, 2), torch.full((4, 2), 2.0)]
+    state = {
+        "mode": "streaming",
+        "step": 10,
+        "condition_step": _MAX_AUDIO_TOKENS_PER_CONDITION - 1,
+        "finished": False,
+        "condition_chunks": chunks,
+        "condition_chunk_index": 1,
+        "condition_cursor": 0,
+        "conditioning": False,
+        "condition_audio_codes": [],
+        "completed_condition_audio": [{"condition_index": 0, "codes": [1, 2]}],
+    }
+    talker._request_audio_states["req-recompute-boundary"] = state
+    info = {
+        "request_id": "req-recompute-boundary",
+        "audio_state": state,
+        "audio_codes": {"accumulated": torch.empty(0, dtype=torch.long)},
+    }
+
+    output = talker.make_omni_output(
+        torch.ones(1, 2),
+        model_intermediate_buffer=[info],
+        request_token_spans=[(0, 1)],
+    )
+
+    meta = output.multimodal_outputs["meta"]
+    assert meta["replace_streaming_prompt"][0].item() is True
+    assert meta["next_stage_prompt_len"][0].item() == chunks[1].shape[0] + 1 + chunks[2].shape[0]
+    routed = _routed(output, 0)
+    assert routed["meta"]["replace_streaming_prompt"].item() is True
+    assert routed["meta"]["next_stage_prompt_len"].item() == meta["next_stage_prompt_len"][0].item()
+    assert state["condition_chunk_index"] == 2
+    assert state["condition_step"] == 0
+    assert state["sliding_recompute_pending"] is True
+    assert state["completed_condition_audio"][-1] == {"condition_index": 1, "codes": [3]}
+
+
 def test_condition_chunks_match_official_streaming_boundaries() -> None:
     talker = _make_talker()
     talker.emb_text = nn.Embedding(32, 4)

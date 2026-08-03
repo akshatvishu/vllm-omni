@@ -175,6 +175,11 @@ class OmniEngineArgs(EngineArgs):
     omni: bool = False
     # Diffusion request-mode batch admission (forwarded to OmniDiffusionConfig).
     request_batch_max_wait_ms: float = 0.0
+    # MiniCPM-o Talker fallback. These fields are copied to the model's HF
+    # config by stage initialization and are disabled unless explicitly set.
+    minicpmo_sliding_recompute: bool = False
+    minicpmo_sliding_window_size: int = 2
+    minicpmo_sliding_recomputed_chunks: int = 1
 
     @classmethod
     def _add_omni_specific_args(cls, parser: argparse.ArgumentParser) -> argparse.ArgumentParser:

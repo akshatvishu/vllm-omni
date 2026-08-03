@@ -1,0 +1,8 @@
+# Opt-in MiniCPM-o 4.5 sliding-recompute fallback.
+base_config: minicpmo_4_5.yaml
+
+stages:
+  - stage_id: 1
+    minicpmo_sliding_recompute: true
+    minicpmo_sliding_window_size: 2
+    minicpmo_sliding_recomputed_chunks: 1

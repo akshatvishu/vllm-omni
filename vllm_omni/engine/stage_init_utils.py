@@ -39,6 +39,12 @@ from vllm_omni.quantization.inc_config import OmniINCConfig
 
 logger = init_logger(__name__)
 
+_MINICPMO_SLIDING_CONFIG_FIELDS = (
+    "minicpmo_sliding_recompute",
+    "minicpmo_sliding_window_size",
+    "minicpmo_sliding_recomputed_chunks",
+)
+
 
 @dataclass
 class ReplicaInitPlan:
@@ -917,6 +923,12 @@ def build_vllm_config(
     custom_voice_dir = engine_args_dict.get("custom_voice_dir")
     if custom_voice_dir:
         setattr(vllm_config.model_config.hf_config, "custom_voice_dir", custom_voice_dir)
+
+    # Keep the fallback opt-in and model-owned while making the same resolved
+    # values visible to the Talker and its scheduler in every worker process.
+    for name in _MINICPMO_SLIDING_CONFIG_FIELDS:
+        if name in engine_args_dict:
+            setattr(vllm_config.model_config.hf_config, name, engine_args_dict[name])
 
     return vllm_config, executor_class
 

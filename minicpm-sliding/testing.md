@@ -28,7 +28,7 @@ python -c 'import vllm_omni; print(vllm_omni.__file__)'
 
 Stop any old vLLM server before starting the test.
 
-The sliding deployment overlay must exist before running the command below; replace `<sliding-deploy-config>` with its verified path.
+The command below uses the opt-in overlay `vllm_omni/deploy/minicpmo_4_5_sliding.yaml` relative to the repository root. The overlay inherits the base config and enables MiniCPM sliding recompute only on Stage 1.
 
 ## Start the server
 
@@ -43,7 +43,7 @@ vllm-omni serve openbmb/MiniCPM-o-4_5 \
   --omni \
   --port 28889 \
   --trust-remote-code \
-  --deploy-config <sliding-deploy-config> \
+  --deploy-config vllm_omni/deploy/minicpmo_4_5_sliding.yaml \
   --interleave-mm-strings \
   2>&1 | tee minicpm-sliding-server.log
 ```
@@ -110,4 +110,4 @@ If testing disproves a statement in [`history.md`](history.md), strike through t
 
 ## Current status
 
-**Unproven:** The sliding recompute runtime and its E2E behavior are not proven by this document.
+**Implemented but unproven:** The opt-in runtime is implemented, but this document does not count as proof until the GPU E2E pass criteria above are met.

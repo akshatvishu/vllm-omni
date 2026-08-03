@@ -419,6 +419,12 @@ class StageDeployConfig:
     max_generated_image_size: int | None = None
     tts_max_instructions_length: int | None = None
 
+    # MiniCPM-o Talker sliding-recompute fallback. The default deploy path
+    # leaves these unset so the Talker keeps native vLLM KV caching.
+    minicpmo_sliding_recompute: bool | None = None
+    minicpmo_sliding_window_size: int | None = None
+    minicpmo_sliding_recomputed_chunks: int | None = None
+
     # === Pass-through stage engine fields ===
     # Pass-through stage engine args that are not represented above.
     engine_extras: dict[str, Any] = field(default_factory=dict)

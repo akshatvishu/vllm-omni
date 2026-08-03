@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+import torch
 
 # Imports must run in this order: vllm_omni applies patches to vllm.v1.request before
 # Request / StreamingUpdate are bound in this module. Ruff isort would reorder them.
@@ -55,6 +56,71 @@ def _make_update(prompt_token_ids: list[int] | None = None) -> StreamingUpdate:
         arrival_time=200.0,
         sampling_params=SamplingParams(max_tokens=16),
     )
+
+
+def test_minicpmo_sliding_recompute_replaces_prompt_and_requeues_request() -> None:
+    sched = _make_scheduler(stage_id=1)
+    sched.vllm_config.model_config.hf_config = SimpleNamespace(minicpmo_sliding_recompute=True)
+    sched.waiting = []
+    sched.skipped_waiting = []
+    sched._enqueue_waiting_request = lambda request: sched.waiting.append(request)
+    request = _make_request()
+    sched.chunk_transfer_adapter = SimpleNamespace(
+        requests_num_chunks_sent={request.external_req_id: 5},
+        segment_finished_requests=set(),
+    )
+    request.status = RequestStatus.RUNNING
+    request.num_computed_tokens = 6
+    request.spec_token_ids = [8]
+    request.additional_information = {
+        "tts_token_ids": [1],
+        "codes": {"ref": [4, 5]},
+        "meta": {"ref_audio_sr": 24000},
+    }
+    request.model_intermediate_buffer = {"audio_state": {"step": 7}}
+
+    sched._apply_minicpmo_sliding_recompute(request, prompt_len=19)
+
+    assert request.prompt_token_ids == [0] * 19
+    assert request.num_prompt_tokens == 19
+    assert request.num_computed_tokens == 0
+    assert request.spec_token_ids == []
+    assert request.status == RequestStatus.WAITING
+    assert request in sched.waiting
+    assert request.additional_information == {
+        "codes": {"ref": [4, 5]},
+        "meta": {"ref_audio_sr": 24000},
+    }
+    assert request.model_intermediate_buffer is None
+    assert sched.chunk_transfer_adapter.requests_num_chunks_sent == {}
+
+
+def test_minicpmo_sliding_recompute_reads_flat_payload_metadata() -> None:
+    sched = _make_scheduler(stage_id=1)
+    sched.vllm_config.model_config.hf_config = SimpleNamespace(minicpmo_sliding_recompute=True)
+    request = _make_request()
+
+    prompt_len = sched._minicpmo_sliding_recompute_prompt_len(
+        request,
+        {
+            "meta.replace_streaming_prompt": torch.tensor(True),
+            "meta.next_stage_prompt_len": torch.tensor(27),
+        },
+    )
+
+    assert prompt_len == 27
+
+
+def test_minicpmo_sliding_recompute_rejects_missing_prompt_length() -> None:
+    sched = _make_scheduler(stage_id=1)
+    sched.vllm_config.model_config.hf_config = SimpleNamespace(minicpmo_sliding_recompute=True)
+    request = _make_request()
+
+    with pytest.raises(RuntimeError, match="missing a valid prompt length"):
+        sched._minicpmo_sliding_recompute_prompt_len(
+            request,
+            {"meta.replace_streaming_prompt": torch.tensor(True)},
+        )
 
 
 def _run_resumable_segment_stop(

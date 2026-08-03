@@ -68,6 +68,10 @@ class OmniSchedulerMixin:
             "model_intermediate_buffer",
             None,
         )
+        # Prompt replacement starts a new logical token sequence. Clear old
+        # prefix hashes before recomputing them so replacement cannot retain a
+        # hash from the discarded prompt.
+        session.block_hashes.clear()
         session.update_block_hashes()
         session.num_prompt_tokens = len(new_prompt)
         session.arrival_time = update.arrival_time

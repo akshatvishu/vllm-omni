@@ -45,7 +45,11 @@ Evidence: [`utils.py`](../issue_5259_backup/MiniCPM-o-4_5/utils.py) and [`modeli
 
 **Proposed:** Do not move Thinker-to-Talker conditions onto a new async connector for this feature because only the Talker knows the exact number of previous audio codes needed to size the recompute prompt.
 
-**Unproven:** The control event, scheduler requeue, Code2Wav segment handling, and long-request output budget still require implementation and E2E validation.
+**~~Unproven:~~** ~~The control event, scheduler requeue, Code2Wav segment handling, and long-request output budget still require implementation and E2E validation.~~
+
+**Changed:** The Talker now emits a replacement prompt event at the official `sliding_recompute` cadence, and the scheduler requeues the same request through its existing prompt-replacement boundary.
+
+**Unproven:** Code2Wav continuity, long-request quality, and the full output budget still require GPU E2E validation.
 
 ### Logging instrumentation
 
@@ -53,11 +57,27 @@ Evidence: [`utils.py`](../issue_5259_backup/MiniCPM-o-4_5/utils.py) and [`modeli
 
 **Changed:** The logs include request ID, stage boundary, condition index, condition length, prompt length, computed-token offset, codec count, cache epoch, chunk sequence, segment flags, and terminal flags where available.
 
-**Observed:** The current ordinary condition log reports `kv_action=append_native_kv`; no sliding recompute reset event exists until the runtime control path is implemented.
+**Observed:** The default base deployment still reports `kv_action=append_native_kv`, while the opt-in overlay can report `sliding_recompute_prompt_replace` followed by a scheduler reset event.
 
 **Unproven:** The current async bridge must be tested to verify that a condition boundary cannot be mistaken for a final Code2Wav chunk.
 
 **Unproven:** Logging shows the control-flow evidence but does not prove audio correctness, cache correctness, or long-form continuity.
+
+### 2026-08-03 runtime implementation
+
+**Changed:** Added `vllm_omni/deploy/minicpmo_4_5_sliding.yaml` as a thin opt-in overlay with the reference two-condition window and one recomputed prior condition.
+
+**Changed:** The Talker retains bounded full audio history, rebuilds prior condition plus audio embeddings plus the current condition, and leaves native KV caching unchanged when the overlay is not enabled.
+
+**Changed:** The scheduler saves the current codec output before resetting prompt bookkeeping, KV ownership, output budget, and chunk-send watermark for the next bounded session.
+
+**Tested:** The focused implementation suite passed with 60 tests passed and 14 warnings; this is unit evidence only.
+
+**Unproven:** No GPU serving request has yet proved long-form continuity, audio quality, or multi-request isolation.
+
+**Changed:** The reset now avoids replaying the stale scheduler handoff into the runner and preserves only reference-audio fields needed by a queued codec payload.
+
+**Tested:** The final focused and bridge regression suite passed with 122 tests passed, 1 skipped, and 14 warnings; this remains unit evidence only.
 
 ### Validation after instrumentation
 

@@ -216,6 +216,12 @@ def tts2code2wav_async_chunk(
     internal_id = str(internal_id if internal_id is not None else request_id)
     output_meta = multimodal_output.get("meta") if isinstance(multimodal_output, Mapping) else None
     output_meta = output_meta if isinstance(output_meta, Mapping) else {}
+    if bool(_coerce_int(output_meta.get("replace_streaming_prompt"))):
+        logger.info(
+            "[MiniCPM-o][Stage1->Stage2][sliding-recompute-boundary] request_id=%s prompt_len=%s reset_offset=0",
+            request_id,
+            _coerce_int(output_meta.get("next_stage_prompt_len")),
+        )
     native_duplex = bool(_coerce_int(output_meta.get("native_duplex")))
     duplex_epoch = _coerce_int(output_meta.get("duplex_epoch"))
     duplex_turn_id = _coerce_int(output_meta.get("duplex_turn_id"))

@@ -43,6 +43,11 @@ _CODEC_REPETITION_PENALTY = 1.05
 _TEXT_CHUNK_SIZE = 10
 _MAX_AUDIO_TOKENS_PER_CONDITION = 500
 _DUPLEX_CODEC_TOKENS_PER_CHUNK = 26
+_MINICPMO_SLIDING_RECOMPUTE = "minicpmo_sliding_recompute"
+_MINICPMO_SLIDING_WINDOW_SIZE = "minicpmo_sliding_window_size"
+_MINICPMO_SLIDING_RECOMPUTED_CHUNKS = "minicpmo_sliding_recomputed_chunks"
+_DEFAULT_SLIDING_WINDOW_SIZE = 2
+_DEFAULT_SLIDING_RECOMPUTED_CHUNKS = 1
 
 
 def _restore_weight_norm_weight(weight_g: torch.Tensor, weight_v: torch.Tensor) -> torch.Tensor:
@@ -140,6 +145,15 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         else:
             self._tts_config = None
 
+        self._sliding_recompute_enabled = bool(getattr(config, _MINICPMO_SLIDING_RECOMPUTE, False))
+        window_size = getattr(config, _MINICPMO_SLIDING_WINDOW_SIZE, _DEFAULT_SLIDING_WINDOW_SIZE)
+        recomputed_chunks = getattr(config, _MINICPMO_SLIDING_RECOMPUTED_CHUNKS, _DEFAULT_SLIDING_RECOMPUTED_CHUNKS)
+        self._sliding_window_size = int(window_size if window_size is not None else _DEFAULT_SLIDING_WINDOW_SIZE)
+        self._sliding_recomputed_chunks = int(
+            recomputed_chunks if recomputed_chunks is not None else _DEFAULT_SLIDING_RECOMPUTED_CHUNKS
+        )
+        self._sliding_recompute_settings()
+
         self.has_preprocess = True
         self.has_postprocess = False
         self.gpu_resident_buffer_keys: set[tuple[str, str]] = {
@@ -202,6 +216,105 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         )
         return self.emb_text(token_id)
 
+    def _sliding_recompute_settings(self) -> tuple[bool, int, int]:
+        """Return and validate the MiniCPM sliding-recompute settings."""
+        enabled = bool(getattr(self, "_sliding_recompute_enabled", False))
+        window_size = int(getattr(self, "_sliding_window_size", _DEFAULT_SLIDING_WINDOW_SIZE))
+        recomputed_chunks = int(getattr(self, "_sliding_recomputed_chunks", _DEFAULT_SLIDING_RECOMPUTED_CHUNKS))
+        if enabled and (window_size <= 0 or recomputed_chunks < 0 or window_size <= recomputed_chunks):
+            raise ValueError(
+                "MiniCPM-o sliding recompute requires window_size > recomputed_chunks >= 0; "
+                f"received window_size={window_size}, recomputed_chunks={recomputed_chunks}"
+            )
+        return enabled, window_size, recomputed_chunks
+
+    def _should_recompute_condition(self, condition_index: int) -> bool:
+        """Match MiniCPM-o's official sliding_recompute cadence."""
+        enabled, window_size, recomputed_chunks = self._sliding_recompute_settings()
+        if not enabled:
+            return False
+        return (
+            condition_index >= window_size
+            and (condition_index - recomputed_chunks) % (window_size - recomputed_chunks) == 0
+        )
+
+    def _record_completed_condition(self, state: dict[str, Any], condition_index: int) -> None:
+        """Retain only the bounded audio history needed by the next recompute."""
+        _, _, recomputed_chunks = self._sliding_recompute_settings()
+        completed = state.setdefault("completed_condition_audio", [])
+        if not isinstance(completed, list):
+            completed = []
+        condition_codes = state.get("condition_audio_codes", [])
+        if not isinstance(condition_codes, list):
+            condition_codes = []
+        completed.append(
+            {
+                "condition_index": int(condition_index),
+                "codes": [int(code) for code in condition_codes],
+            }
+        )
+        state["completed_condition_audio"] = completed[-recomputed_chunks:] if recomputed_chunks else []
+        state["condition_audio_codes"] = []
+
+    def _sliding_recompute_prompt_stats(self, state: dict[str, Any], condition_index: int) -> tuple[int, int]:
+        """Return replacement-prompt length and retained audio-token count."""
+        _, _, recomputed_chunks = self._sliding_recompute_settings()
+        chunks = state.get("condition_chunks")
+        completed = state.get("completed_condition_audio")
+        if not isinstance(chunks, list) or not isinstance(completed, list):
+            raise RuntimeError("MiniCPM-o sliding recompute is missing condition or audio history")
+        completed_by_index = {
+            int(item["condition_index"]): item
+            for item in completed
+            if isinstance(item, dict) and "condition_index" in item
+        }
+        prompt_len = 0
+        audio_tokens = 0
+        for previous_index in range(condition_index - recomputed_chunks, condition_index):
+            item = completed_by_index.get(previous_index)
+            if item is None:
+                raise RuntimeError(
+                    "MiniCPM-o sliding recompute is missing completed audio for "
+                    f"condition_index={previous_index}; available={sorted(completed_by_index)}"
+                )
+            codes = item.get("codes", [])
+            prompt_len += int(chunks[previous_index].shape[0]) + len(codes)
+            audio_tokens += len(codes)
+        prompt_len += int(chunks[condition_index].shape[0])
+        return prompt_len, audio_tokens
+
+    def _build_sliding_recompute_condition(self, state: dict[str, Any], condition_index: int) -> torch.Tensor:
+        """Build previous condition/audio embeddings plus the active condition."""
+        _, _, recomputed_chunks = self._sliding_recompute_settings()
+        chunks = state.get("condition_chunks")
+        completed = state.get("completed_condition_audio")
+        if not isinstance(chunks, list) or not isinstance(completed, list):
+            raise RuntimeError("MiniCPM-o sliding recompute is missing condition or audio history")
+        completed_by_index = {
+            int(item["condition_index"]): item
+            for item in completed
+            if isinstance(item, dict) and "condition_index" in item
+        }
+        embeddings: list[torch.Tensor] = []
+        for previous_index in range(condition_index - recomputed_chunks, condition_index):
+            item = completed_by_index.get(previous_index)
+            if item is None:
+                raise RuntimeError(
+                    "MiniCPM-o sliding recompute cannot rebuild condition "
+                    f"{condition_index}: missing previous condition {previous_index}"
+                )
+            embeddings.append(chunks[previous_index])
+            codes = item.get("codes", [])
+            if codes:
+                code_ids = torch.as_tensor(
+                    codes,
+                    device=self.emb_code[0].weight.device,
+                    dtype=torch.long,
+                )
+                embeddings.append(self.emb_code[0](code_ids))
+        embeddings.append(chunks[condition_index])
+        return torch.cat(embeddings, dim=0)
+
     def _build_condition_chunks(
         self,
         tts_token_ids: torch.Tensor,
@@ -243,8 +356,70 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         del input_embeds
         span_len = int(input_ids.shape[0])
         is_prefill = bool(info_dict.get("_omni_is_prefill", False))
+        request_id = str(info_dict.get("request_id", "0"))
         state = info_dict.get("audio_state")
+        local_state = getattr(self, "_request_audio_states", {}).get(request_id)
+        if isinstance(local_state, dict):
+            state = local_state
         first_call = not isinstance(state, dict)
+
+        if isinstance(state, dict) and state.get("sliding_recompute_pending"):
+            condition_index = int(state.get("condition_chunk_index", 0))
+            recompute_embeds = self._build_sliding_recompute_condition(state, condition_index)
+            prompt_len = info_dict.get("_omni_prompt_len")
+            target_len = int(prompt_len) if prompt_len is not None else int(recompute_embeds.shape[0])
+            if target_len < recompute_embeds.shape[0]:
+                raise ValueError(
+                    "MiniCPM-o sliding recompute prompt is shorter than its rebuilt condition: "
+                    f"request_id={request_id} prompt_len={target_len} rebuilt_len={recompute_embeds.shape[0]}"
+                )
+            prefix_len = target_len - recompute_embeds.shape[0]
+            if prefix_len > 0:
+                placeholder_ids = torch.zeros(
+                    prefix_len,
+                    dtype=torch.long,
+                    device=self.emb_text.weight.device,
+                )
+                recompute_embeds = torch.cat(
+                    [self.emb_text(placeholder_ids), recompute_embeds],
+                    dim=0,
+                )
+            offset = int(info_dict.get("_omni_num_computed_tokens", 0))
+            embeds = recompute_embeds[offset : offset + span_len]
+            if embeds.shape[0] != span_len:
+                raise ValueError(
+                    "MiniCPM-o sliding recompute prefill span exceeds rebuilt condition: "
+                    f"request_id={request_id} condition_index={condition_index} offset={offset} "
+                    f"span={span_len} prompt_len={target_len} rebuilt_len={recompute_embeds.shape[0]}"
+                )
+            if offset + span_len >= target_len:
+                state["sliding_recompute_pending"] = False
+                state["conditioning"] = False
+                state["condition_sample_ready"] = False
+                state["condition_step"] = 0
+                logger.info(
+                    "[MiniCPM-o][Stage1][sliding-recompute-prefill] request_id=%s "
+                    "condition_index=%s prompt_len=%s computed_offset=%s span=%s "
+                    "previous_audio_tokens=%s reset_offset=0",
+                    request_id,
+                    condition_index,
+                    target_len,
+                    offset,
+                    span_len,
+                    state.get("sliding_recompute_audio_tokens", 0),
+                )
+            empty_codes = torch.empty(0, dtype=torch.long, device=embeds.device)
+            return (
+                input_ids,
+                embeds,
+                {
+                    "audio_state": state,
+                    "audio_codes": {
+                        "current": empty_codes,
+                        "accumulated": empty_codes,
+                    },
+                },
+            )
 
         if is_prefill or first_call:
             token_ids, hidden_states = get_tts_handoff(info_dict)
@@ -303,7 +478,6 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     f"tts_ids={token_ids.shape[0]} tts_hidden={hidden_states.shape[0]} "
                     f"prompt_len={info_dict.get('_omni_prompt_len')}"
                 )
-            request_id = str(info_dict.get("request_id", "0"))
             if native_duplex:
                 meta = info_dict.get("meta")
                 # Native duplex keeps the older one-segment Talker contract.
@@ -328,6 +502,13 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     "condition_cursor": 0,
                     "conditioning": False,
                 }
+                if self._sliding_recompute_settings()[0]:
+                    state.update(
+                        {
+                            "condition_audio_codes": [],
+                            "completed_condition_audio": [],
+                        }
+                    )
             request_states = getattr(self, "_request_audio_states", None)
             if request_states is None:
                 request_states = {}
@@ -361,10 +542,6 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 },
             )
 
-        request_id = str(info_dict.get("request_id", "0"))
-        local_state = getattr(self, "_request_audio_states", {}).get(request_id)
-        if isinstance(local_state, dict):
-            state = local_state
         if state.get("conditioning"):
             chunks = state.get("condition_chunks")
             chunk_index = int(state.get("condition_chunk_index", 0))
@@ -475,10 +652,13 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 f"MiniCPM-o continuous Talker received {len(sample_eligible)} sampling flags for {len(infos)} requests"
             )
         emit_duplex_metadata = any(isinstance(info, dict) and info.get("native_duplex") is True for info in infos)
+        sliding_recompute_enabled = self._sliding_recompute_settings()[0]
 
         stop_rows: list[torch.Tensor] = []
         codec_deltas: list[torch.Tensor] = []
         terminal_flags: list[torch.Tensor] = []
+        sliding_recompute_flags: list[torch.Tensor] = []
+        sliding_recompute_prompt_lengths: list[torch.Tensor] = []
         native_duplex_flags: list[torch.Tensor] = []
         duplex_epochs: list[torch.Tensor] = []
         duplex_turn_ids: list[torch.Tensor] = []
@@ -533,6 +713,9 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 stop_rows.append(hidden.new_tensor([0.0, float("-inf")]))
                 codec_deltas.append(empty_delta)
                 terminal_flags.append(torch.tensor(False, dtype=torch.bool))
+                if sliding_recompute_enabled:
+                    sliding_recompute_flags.append(torch.tensor(False, dtype=torch.bool))
+                    sliding_recompute_prompt_lengths.append(torch.tensor(0, dtype=torch.long))
                 continue
             start, end = spans[index]
             end = min(int(end), int(hidden.shape[0]))
@@ -540,6 +723,9 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 stop_rows.append(hidden.new_tensor([0.0, float("-inf")]))
                 codec_deltas.append(empty_delta)
                 terminal_flags.append(torch.tensor(False, dtype=torch.bool))
+                if sliding_recompute_enabled:
+                    sliding_recompute_flags.append(torch.tensor(False, dtype=torch.bool))
+                    sliding_recompute_prompt_lengths.append(torch.tensor(0, dtype=torch.long))
                 continue
             request_id = str(info.get("request_id", index))
             request_states = getattr(self, "_request_audio_states", None)
@@ -554,6 +740,9 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 stop_rows.append(hidden.new_tensor([float("-inf"), 0.0]))
                 codec_deltas.append(empty_delta)
                 terminal_flags.append(torch.tensor(False, dtype=torch.bool))
+                if sliding_recompute_enabled:
+                    sliding_recompute_flags.append(torch.tensor(False, dtype=torch.bool))
+                    sliding_recompute_prompt_lengths.append(torch.tensor(0, dtype=torch.long))
                 continue
             if not sample_eligible[index]:
                 # vLLM computes a logit row for incomplete chunked prefills but
@@ -562,6 +751,9 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 stop_rows.append(hidden.new_tensor([0.0, float("-inf")]))
                 codec_deltas.append(empty_delta)
                 terminal_flags.append(torch.tensor(False, dtype=torch.bool))
+                if sliding_recompute_enabled:
+                    sliding_recompute_flags.append(torch.tensor(False, dtype=torch.bool))
+                    sliding_recompute_prompt_lengths.append(torch.tensor(0, dtype=torch.long))
                 continue
             if state.get("conditioning"):
                 if not state.pop("condition_sample_ready", False):
@@ -569,6 +761,9 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     stop_rows.append(hidden.new_tensor([0.0, float("-inf")]))
                     codec_deltas.append(empty_delta)
                     terminal_flags.append(torch.tensor(False, dtype=torch.bool))
+                    if sliding_recompute_enabled:
+                        sliding_recompute_flags.append(torch.tensor(False, dtype=torch.bool))
+                        sliding_recompute_prompt_lengths.append(torch.tensor(0, dtype=torch.long))
                     continue
                 state["conditioning"] = False
             codes = state.get("codes")
@@ -582,6 +777,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             sampled = self._sample_audio_code(hidden[end - 1 : end], codes, request_id, step)
             is_eos = int(sampled.item()) == self._num_audio_tokens - 1
             state["step"] = step + 1
+            recompute_prompt_len = 0
             if state.get("mode") == "native_duplex":
                 reached_limit = int(state["step"]) >= int(state.get("max_tokens", _DUPLEX_CODEC_TOKENS_PER_CHUNK))
                 finished = is_eos or reached_limit
@@ -610,6 +806,46 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 has_more_conditions = isinstance(chunks, list) and chunk_index + 1 < len(chunks)
                 condition_finished = is_eos or reached_limit
                 finished = condition_finished and not has_more_conditions
+                recompute_prompt_len = 0
+                recompute_audio_tokens = 0
+                kv_action = "append_native_kv"
+                if sliding_recompute_enabled and not is_eos:
+                    state.setdefault("condition_audio_codes", []).append(int(sampled.item()))
+                if condition_finished and has_more_conditions:
+                    # Normal chat follows streaming_generate: audio EOS or the
+                    # 500-step budget advances to the next text condition.
+                    state["condition_chunk_index"] = chunk_index + 1
+                    state["condition_cursor"] = 0
+                    state["condition_sample_ready"] = False
+                    state["condition_step"] = 0
+                    if sliding_recompute_enabled:
+                        self._record_completed_condition(state, chunk_index)
+                        next_condition_index = chunk_index + 1
+                        if self._should_recompute_condition(next_condition_index):
+                            recompute_prompt_len, recompute_audio_tokens = self._sliding_recompute_prompt_stats(
+                                state,
+                                next_condition_index,
+                            )
+                            state["sliding_recompute_pending"] = True
+                            state["sliding_recompute_prompt_len"] = recompute_prompt_len
+                            state["sliding_recompute_audio_tokens"] = recompute_audio_tokens
+                            state["conditioning"] = False
+                            kv_action = "sliding_recompute_prompt_replace"
+                            logger.info(
+                                "[MiniCPM-o][Stage1][sliding-recompute-schedule] request_id=%s "
+                                "previous_condition_index=%s next_condition_index=%s "
+                                "recomputed_chunks=%s previous_audio_tokens=%s prompt_len=%s reset_offset=0",
+                                request_id,
+                                chunk_index,
+                                next_condition_index,
+                                self._sliding_recompute_settings()[2],
+                                recompute_audio_tokens,
+                                recompute_prompt_len,
+                            )
+                        else:
+                            state["conditioning"] = True
+                    else:
+                        state["conditioning"] = True
                 if condition_finished:
                     logger.info(
                         "[MiniCPM-o][Stage1][condition-boundary] request_id=%s "
@@ -623,16 +859,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                         condition_step - int(is_eos),
                         has_more_conditions,
                         chunk_index + 1 if has_more_conditions else None,
-                        "append_native_kv",
+                        kv_action,
                     )
-                if condition_finished and has_more_conditions:
-                    # Normal chat follows streaming_generate: audio EOS or the
-                    # 500-step budget advances to the next text condition.
-                    state["condition_chunk_index"] = chunk_index + 1
-                    state["condition_cursor"] = 0
-                    state["condition_sample_ready"] = False
-                    state["conditioning"] = True
-                    state["condition_step"] = 0
                 state["finished"] = finished
                 if not is_eos:
                     codes = torch.cat([codes[-(_REPETITION_WINDOW - 1) :], sampled.reshape(1)])
@@ -647,12 +875,22 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             }
             codec_deltas.append(delta)
             terminal_flags.append(torch.tensor(finished, dtype=torch.bool))
+            if sliding_recompute_enabled:
+                sliding_recompute_flags.append(torch.tensor(recompute_prompt_len > 0, dtype=torch.bool))
+                sliding_recompute_prompt_lengths.append(torch.tensor(recompute_prompt_len, dtype=torch.long))
             stop_rows.append(hidden.new_tensor([float("-inf"), 0.0] if finished else [0.0, float("-inf")]))
 
         self._batch_stop_logits = torch.stack(stop_rows, dim=0) if stop_rows else hidden.new_empty((0, 2))
         # Lists are deliberate: the runner routes element i to request i,
         # preserving compaction alignment while emitting only this step's code.
         meta_outputs = {"finished": terminal_flags}
+        if sliding_recompute_enabled and any(flag.item() for flag in sliding_recompute_flags):
+            meta_outputs.update(
+                {
+                    "replace_streaming_prompt": sliding_recompute_flags,
+                    "next_stage_prompt_len": sliding_recompute_prompt_lengths,
+                }
+            )
         if emit_duplex_metadata:
             meta_outputs.update(
                 {

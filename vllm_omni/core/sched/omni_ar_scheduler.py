@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from time import time
 from typing import Any
 
@@ -132,6 +132,122 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         """num_computed_tokens minus async placeholders (KV actually on GPU)."""
         # Output placeholders are zero when async scheduling isn't used
         return request.num_computed_tokens - request.num_output_placeholders
+
+    def _minicpmo_sliding_recompute_enabled(self) -> bool:
+        model_config = self.vllm_config.model_config
+        hf_config = getattr(model_config, "hf_config", None)
+        return bool(
+            getattr(
+                hf_config,
+                "minicpmo_sliding_recompute",
+                getattr(model_config, "minicpmo_sliding_recompute", False),
+            )
+        )
+
+    @staticmethod
+    def _payload_scalar(value: Any) -> Any:
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return None
+            value = value[0]
+        item = getattr(value, "item", None)
+        if callable(item):
+            value = item()
+        return value
+
+    @classmethod
+    def _payload_meta_value(cls, payload: Mapping[str, Any], key: str) -> Any:
+        value = payload.get(f"meta.{key}")
+        if value is not None:
+            return cls._payload_scalar(value)
+        meta = payload.get("meta")
+        if isinstance(meta, Mapping):
+            return cls._payload_scalar(meta.get(key))
+        return None
+
+    def _minicpmo_sliding_recompute_prompt_len(
+        self,
+        request: Request,
+        inter_stage_output: Any,
+    ) -> int | None:
+        """Read a Talker prompt-replacement event from the inter-stage payload."""
+        if not self._minicpmo_sliding_recompute_enabled() or not isinstance(inter_stage_output, Mapping):
+            return None
+        replace_prompt = self._payload_meta_value(inter_stage_output, "replace_streaming_prompt")
+        if replace_prompt is not True:
+            return None
+        raw_prompt_len = self._payload_meta_value(inter_stage_output, "next_stage_prompt_len")
+        try:
+            prompt_len = int(raw_prompt_len)
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "[MiniCPM-o][Stage1][sliding-recompute-error] request_id=%s "
+                "replacement event has invalid next_stage_prompt_len=%r",
+                request.request_id,
+                raw_prompt_len,
+            )
+            raise RuntimeError("MiniCPM-o sliding recompute event is missing a valid prompt length") from exc
+        if prompt_len <= 0:
+            logger.error(
+                "[MiniCPM-o][Stage1][sliding-recompute-error] request_id=%s "
+                "replacement event has non-positive next_stage_prompt_len=%s",
+                request.request_id,
+                prompt_len,
+            )
+            raise RuntimeError("MiniCPM-o sliding recompute prompt length must be positive")
+        return prompt_len
+
+    @staticmethod
+    def _minicpmo_sliding_recompute_bridge_info(request: Request) -> dict[str, Any] | None:
+        """Keep only reference-audio fields needed by a queued codec payload."""
+        info = deserialize_additional_information(getattr(request, "additional_information", None))
+        preserved: dict[str, Any] = {}
+        codes = info.get("codes")
+        if isinstance(codes, Mapping) and codes.get("ref") is not None:
+            preserved["codes"] = {"ref": codes["ref"]}
+        meta = info.get("meta")
+        if isinstance(meta, Mapping) and meta.get("ref_audio_sr") is not None:
+            preserved["meta"] = {"ref_audio_sr": meta["ref_audio_sr"]}
+        return preserved or None
+
+    def _apply_minicpmo_sliding_recompute(self, request: Request, prompt_len: int) -> None:
+        """Reset one Talker session through the normal vLLM prompt boundary."""
+        computed_before = request.num_computed_tokens
+        placeholders = getattr(request, "num_output_placeholders", 0)
+        if placeholders > 0:
+            request.async_tokens_to_discard = placeholders
+            request.num_computed_tokens = max(0, request.num_computed_tokens - placeholders)
+            request.num_output_placeholders = 0
+        request.spec_token_ids = []
+
+        update = StreamingUpdate(
+            mm_features=getattr(request, "mm_features", None),
+            prompt_token_ids=[0] * prompt_len,
+            max_tokens=request.max_tokens,
+            arrival_time=request.arrival_time,
+            sampling_params=request.sampling_params,
+            # The live Talker state belongs to the model runner. Do not resend
+            # the scheduler-side initial handoff on re-admission, because it
+            # would overwrite the runner's updated buffer.
+            additional_information=self._minicpmo_sliding_recompute_bridge_info(request),
+            model_intermediate_buffer=None,
+        )
+        adapter = getattr(self, "chunk_transfer_adapter", None)
+        if adapter is not None:
+            adapter.requests_num_chunks_sent.pop(request.external_req_id, None)
+        self._replace_streaming_session(request, update)
+        waiting = getattr(self, "waiting", ())
+        skipped_waiting = getattr(self, "skipped_waiting", ())
+        if request not in waiting and request not in skipped_waiting:
+            self._enqueue_waiting_request(request)
+        logger.info(
+            "[MiniCPM-o][Stage1][sliding-recompute-reset] request_id=%s "
+            "old_computed_tokens=%s prompt_len=%s reset_offset=0 status=%s",
+            request.request_id,
+            computed_before,
+            prompt_len,
+            request.status,
+        )
 
     def _get_kv_transfer_criteria(self) -> dict | None:
         # Note: vllm_config is available in Scheduler after super().__init__
@@ -386,6 +502,7 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         # to avoid expensive operations inside the loop.
         stopped_running_reqs: set[Request] = set()
         stopped_preempted_reqs: set[Request] = set()
+        sliding_recompute_running_reqs: set[Request] = set()
         for req_id, num_tokens_scheduled in num_scheduled_tokens.items():
             assert num_tokens_scheduled > 0
             request = self.requests.get(req_id)
@@ -465,6 +582,10 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
             pooler_output = pooler_outputs[req_index] if pooler_outputs else None
             mm_output = mm_outputs[req_index] if mm_outputs else None
             inter_stage_output = inter_stage_outputs[req_index] if inter_stage_outputs else None
+            sliding_recompute_prompt_len = self._minicpmo_sliding_recompute_prompt_len(
+                request,
+                inter_stage_output,
+            )
             kv_transfer_params = None
             finish_reason = None
             routed_experts = None
@@ -473,6 +594,23 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
             if new_token_ids:
                 num_sampled_tokens = len(new_token_ids)
                 new_token_ids, stopped = self._update_request_with_output(request, new_token_ids)
+                if (
+                    sliding_recompute_prompt_len is not None
+                    and stopped
+                    and request.status == RequestStatus.FINISHED_LENGTH_CAPPED
+                ):
+                    # The Talker emits the replacement event on the same step
+                    # that an old max_tokens budget may be reached. The event
+                    # starts a fresh bounded session, so the old cap must not
+                    # terminate this logical response.
+                    request.status = status_before_stop
+                    request.stop_reason = None
+                    stopped = False
+                    logger.info(
+                        "[MiniCPM-o][Stage1][sliding-recompute-length-reset] request_id=%s old_output_budget=%s",
+                        request.request_id,
+                        request.max_tokens,
+                    )
                 if new_logprobs is not None and len(new_token_ids) < num_sampled_tokens:
                     # A mid-step stop (e.g. spec-decode tokens sampled past
                     # EOS) trims new_token_ids after the validation slice
@@ -544,17 +682,20 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
                 else:
                     stopped_preempted_reqs.add(request)
 
+            sliding_recompute_applied = sliding_recompute_prompt_len is not None and not stopped and not finished
+
             if num_nans_in_logits is not None and req_id in num_nans_in_logits:
                 request.num_nans_in_logits = num_nans_in_logits[req_id]
 
             # Get prompt logprobs for this request.
             prompt_logprobs_tensors = prompt_logprobs_dict.get(req_id)
-            if new_token_ids or mm_output is not None or pooler_output is not None or kv_transfer_params or stopped:
+            emitted_token_ids = [] if sliding_recompute_applied else new_token_ids
+            if emitted_token_ids or mm_output is not None or pooler_output is not None or kv_transfer_params or stopped:
                 # Add EngineCoreOutput for this Request.
                 outputs[request.client_index].append(
                     OmniEngineCoreOutput(
                         request_id=req_id,
-                        new_token_ids=new_token_ids,
+                        new_token_ids=emitted_token_ids,
                         finish_reason=finish_reason,
                         new_logprobs=new_logprobs,
                         new_prompt_logprobs_tensors=prompt_logprobs_tensors,
@@ -584,9 +725,15 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
                     is_segment_finished,
                 )
 
+            if sliding_recompute_applied:
+                assert sliding_recompute_prompt_len is not None
+                self._apply_minicpmo_sliding_recompute(request, sliding_recompute_prompt_len)
+                sliding_recompute_running_reqs.add(request)
+
         # Remove the stopped requests from the running and waiting queues.
-        if stopped_running_reqs:
-            self.running = remove_all(self.running, stopped_running_reqs)
+        requests_to_remove_from_running = stopped_running_reqs | sliding_recompute_running_reqs
+        if requests_to_remove_from_running:
+            self.running = remove_all(self.running, requests_to_remove_from_running)
         if stopped_preempted_reqs:
             # This is a rare case and unlikely to impact performance.
             self.waiting.remove_requests(stopped_preempted_reqs)
