@@ -1795,6 +1795,14 @@ class OmniGPUModelRunner(GPUModelRunner):
                 req_infos["_omni_prompt_len"] = prompt_len
                 req_infos["_omni_num_computed_tokens"] = num_computed_tokens
                 req_infos["_omni_is_prefill"] = is_prefill
+                if getattr(self.model, "requires_request_position_invariants", False) and is_prefill:
+                    if positions.ndim != 1:
+                        raise RuntimeError(
+                            "MiniCPM-o Talker requires one-dimensional linear runner positions, "
+                            f"got shape={tuple(positions.shape)}"
+                        )
+                    req_infos["_omni_position_start"] = int(positions[s].item())
+                    req_infos["_omni_position_end"] = int(positions[e - 1].item())
                 if callable(batch_decode_preprocess) and self.has_talker_mtp and span_len == 1 and not is_prefill:
                     decode_batch_items.append((req_id, s, req_infos))
                     continue

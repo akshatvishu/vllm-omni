@@ -200,6 +200,38 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
             raise RuntimeError("MiniCPM-o sliding recompute prompt length must be positive")
         return prompt_len
 
+    def _minicpmo_sliding_recompute_epoch(
+        self,
+        request: Request,
+        inter_stage_output: Any,
+    ) -> int | None:
+        """Read the Talker's logical KV-cache epoch for a replacement event."""
+        if not self._minicpmo_sliding_recompute_enabled() or not isinstance(inter_stage_output, Mapping):
+            return None
+        replace_prompt = self._payload_meta_value(inter_stage_output, "replace_streaming_prompt")
+        if replace_prompt is not True:
+            return None
+        raw_epoch = self._payload_meta_value(inter_stage_output, "kv_cache_epoch")
+        if raw_epoch is None:
+            logger.error(
+                "[MiniCPM-o][Stage1][sliding-recompute-error] request_id=%s replacement event has no kv_cache_epoch",
+                request.request_id,
+            )
+            raise RuntimeError("MiniCPM-o sliding recompute event is missing its KV-cache epoch")
+        try:
+            epoch = int(raw_epoch)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "MiniCPM-o sliding recompute event has an invalid KV-cache epoch: "
+                f"request_id={request.request_id} value={raw_epoch!r}"
+            ) from exc
+        if epoch <= 0:
+            raise RuntimeError(
+                "MiniCPM-o sliding recompute event must start a positive KV-cache epoch: "
+                f"request_id={request.request_id} epoch={epoch}"
+            )
+        return epoch
+
     @staticmethod
     def _minicpmo_sliding_recompute_bridge_info(request: Request) -> dict[str, Any] | None:
         """Keep only reference-audio fields needed by a queued codec payload."""
@@ -265,7 +297,12 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         for request_id in admitted:
             pending.pop(request_id, None)
 
-    def _apply_minicpmo_sliding_recompute(self, request: Request, prompt_len: int) -> None:
+    def _apply_minicpmo_sliding_recompute(
+        self,
+        request: Request,
+        prompt_len: int,
+        kv_cache_epoch: int | None = None,
+    ) -> None:
         """Reset one Talker session through a fresh synchronous vLLM prompt."""
         scheduler_config = getattr(self, "scheduler_config", None)
         if getattr(scheduler_config, "async_scheduling", False):
@@ -287,11 +324,12 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         logger.info(
             "[MiniCPM-o][Stage1][sliding-recompute-reset-start] request_id=%s "
             "old_prompt_len=%s old_computed_tokens=%s new_prompt_len=%s "
-            "kv_action=preempt_and_free",
+            "kv_cache_epoch=%s kv_action=preempt_and_free",
             request.request_id,
             old_prompt_len,
             old_computed_tokens,
             prompt_len,
+            kv_cache_epoch,
         )
 
         request.spec_token_ids = []
@@ -326,13 +364,15 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
         logger.info(
             "[MiniCPM-o][Stage1][sliding-recompute-reset] request_id=%s "
             "old_prompt_len=%s old_computed_tokens=%s prompt_len=%s "
-            "num_computed_tokens=%s reset_offset=0 status=%s kv_action=fresh_session_prefill",
+            "num_computed_tokens=%s reset_offset=0 status=%s kv_cache_epoch=%s "
+            "kv_action=fresh_session_prefill",
             request.request_id,
             old_prompt_len,
             old_computed_tokens,
             prompt_len,
             request.num_computed_tokens,
             request.status,
+            kv_cache_epoch,
         )
 
     def _get_kv_transfer_criteria(self) -> dict | None:
@@ -673,6 +713,10 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
                 request,
                 inter_stage_output,
             )
+            sliding_recompute_epoch = self._minicpmo_sliding_recompute_epoch(
+                request,
+                inter_stage_output,
+            )
             kv_transfer_params = None
             finish_reason = None
             routed_experts = None
@@ -814,7 +858,11 @@ class OmniARScheduler(OmniSchedulerMixin, VLLMScheduler):
 
             if sliding_recompute_applied:
                 assert sliding_recompute_prompt_len is not None
-                self._apply_minicpmo_sliding_recompute(request, sliding_recompute_prompt_len)
+                self._apply_minicpmo_sliding_recompute(
+                    request,
+                    sliding_recompute_prompt_len,
+                    sliding_recompute_epoch,
+                )
                 sliding_recompute_running_reqs.add(request)
 
         # Remove the stopped requests from the running and waiting queues.

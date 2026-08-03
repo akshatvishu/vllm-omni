@@ -64,7 +64,7 @@ python examples/online_serving/minicpmo/openai_chat_completion_client_for_multim
   --model openbmb/MiniCPM-o-4_5 \
   --query-type text \
   --port 28889 \
-  --prompt "Write an original English story of at least 1,200 words. Use clear spoken language, maintain a consistent setting and character names, do not repeat sentences, do not ask follow up questions, and end the story naturally." \
+  --prompt "Write an original English story of at least 900 words. Use clear spoken language, maintain a consistent setting and character names, do not repeat sentences, do not ask follow up questions, and end the story naturally." \
   2>&1 | tee minicpm-sliding-client.log
 ```
 
@@ -79,7 +79,7 @@ python t.py <sliding-audio-file> --model large \
 
 ## Check the diagnostic logging
 
-The new Talker diagnostics log codec sampling at condition steps 1, 25, 100, and 500, plus every recompute boundary. They include the prefill source, recompute epoch, hidden-state checksums, EOS probabilities before and after filtering, EOS filtering flags, sampled ID, and repetition-history tail.
+The new Talker diagnostics log codec sampling at condition steps 1, 25, 100, and 500, plus every recompute boundary. They include the prefill source, KV-cache epoch, scheduler positions, hidden-state checksums, EOS probabilities before and after filtering, EOS filtering flags, sampled ID, and repetition-history tail.
 
 Run these commands after the request completes:
 
@@ -87,15 +87,20 @@ Run these commands after the request completes:
 cd /scratch/workspace/vllm-omni
 
 rg "\[MiniCPM-o\]\[Stage1\]\[codec-sampling\]" minicpm-sliding-server.log
-rg "\[MiniCPM-o\]\[Stage1\]\[(condition-boundary|sliding-recompute-schedule|sliding-recompute-prefill-input|sliding-recompute-prefill)\]" minicpm-sliding-server.log
+rg "\[MiniCPM-o\]\[Stage1\]\[(condition-boundary|kv-session-boundary|kv-invariant|sliding-recompute-schedule|sliding-recompute-prefill-input|sliding-recompute-prefill)\]" minicpm-sliding-server.log
+rg "\[MiniCPM-o\]\[Stage1->Stage2\]\[sliding-recompute-boundary\]|\[MiniCPM-o\]\[Stage1\]\[sliding-recompute-reset" minicpm-sliding-server.log
 rg "\[MiniCPM-o\]\[Stage1\]\[codec-sampling\].*condition_index=(13|14|15)" minicpm-sliding-server.log
+if rg -n "\[MiniCPM-o\]\[Stage1\]\[kv-invariant-failure\]|KV-cache epoch|position is not contiguous|position zero" minicpm-sliding-server.log; then
+  echo "KV or position invariant failure found"
+  exit 1
+fi
 if rg -n "Traceback|EngineDeadError|500 Internal Server Error|ValueError: MiniCPM-o" minicpm-sliding-server.log; then
   echo "runtime failure found"
   exit 1
 fi
 ```
 
-For every `sliding_recompute` sample, verify `prefill_source=sliding_recompute`, an increased `recompute_epoch`, a bounded `condition_step`, and a matching preceding `sliding-recompute-prefill` line. Compare `raw_eos_logit`, `pre_filter_eos_prob`, `post_filter_eos_prob`, `eos_filtered`, `eos_removed_by_warper`, `hidden_checksum`, and `sampled_id` around the first capped condition.
+For every `sliding_recompute` sample, verify `prefill_source=sliding_recompute`, an increased `recompute_epoch` and `kv_cache_epoch`, a fresh `position_start=0`, a contiguous `next_position`, a bounded `condition_step`, and a matching preceding `sliding-recompute-prefill` line. Compare `raw_eos_logit`, `pre_filter_eos_prob`, `post_filter_eos_prob`, `eos_filtered`, `eos_removed_by_warper`, `hidden_checksum`, and `sampled_id` around the first capped condition.
 
 ## Native-cache A/B run
 
@@ -138,6 +143,8 @@ Confirm that every request ID has a Thinker-to-Talker handoff before Talker pref
 Confirm that Talker ordinary condition boundaries identify either `audio_eos` or `audio_limit_500`, and that condition indices increase without skips.
 
 Confirm that every sliding recompute boundary reports the previous condition, previous audio-code count, current condition, exact replacement prompt length, and a reset of the computed-token offset to zero.
+
+Confirm that the Talker epoch increases once per replacement, the first replacement prefill starts at position zero, and later prefill spans continue from the previous `next_position` without gaps.
 
 Confirm that the replacement prompt length stays within the configured Talker position limit and does not grow with the total request length.
 

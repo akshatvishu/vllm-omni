@@ -141,6 +141,7 @@ class MiniCPMO45OmniForConditionalGeneration(nn.Module, SupportsMultiModal, Supp
         # tts_token_ids/tts_hidden_states handoff into its conditioning
         # embeddings and initializes request-local codec generation state.
         self.has_preprocess = self.model_stage in {"llm", "tts"}
+        self.requires_request_position_invariants = self.model_stage == "tts"
 
     @cached_property
     def sampler(self):

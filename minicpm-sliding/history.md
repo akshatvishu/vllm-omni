@@ -1,112 +1,2303 @@
-# MiniCPM sliding recompute history
+## 2026-08-03 codec diagnostics
 
-This file records the evidence, changes, corrections, and open risks for MiniCPM-o 4.5 sliding recompute in vLLM-Omni.
+**Changed:** Added bounded Talker sampling logs for recompute source, hidden-state checksums, EOS filtering, sampled IDs, and selected codec steps.
 
-## History rules
+**Changed:** Added a synchronous native-cache diagnostic overlay and an A/B procedure; GPU long-form audio remains unproven.
 
-1. Every entry is marked `Observed`, `Proposed`, `Tested`, or `Unproven`.
-2. Do not delete an entry when testing disproves it.
-3. Strike through the disproved text with `~~...~~`, then add the correction and its evidence below it.
-4. A unit test, log trace, or code inspection is not an end-to-end proof; only a recorded E2E pass proves the serving behavior.
+DEBUG 08-03 15:21:40 [plugins/__init__.py:44] No plugins for group vllm.platform_plugins found.
+DEBUG 08-03 15:21:40 [platforms/__init__.py:36] Checking if TPU platform is available.
+DEBUG 08-03 15:21:40 [platforms/__init__.py:55] TPU platform is not available because: No module named 'libtpu'
+DEBUG 08-03 15:21:40 [platforms/__init__.py:61] Checking if CUDA platform is available.
+DEBUG 08-03 15:21:40 [platforms/__init__.py:88] Exception happens when checking CUDA platform: NVML Shared Library Not Found
+DEBUG 08-03 15:21:40 [platforms/__init__.py:105] CUDA platform is not available because: NVML Shared Library Not Found
+DEBUG 08-03 15:21:40 [platforms/__init__.py:112] Checking if ROCm platform is available.
+DEBUG 08-03 15:21:40 [platforms/__init__.py:120] Confirmed ROCm platform is available.
+DEBUG 08-03 15:21:40 [platforms/__init__.py:133] Checking if XPU platform is available.
+DEBUG 08-03 15:21:40 [platforms/__init__.py:164] Checking if CPU platform is available.
+DEBUG 08-03 15:21:40 [platforms/__init__.py:112] Checking if ROCm platform is available.
+DEBUG 08-03 15:21:40 [platforms/__init__.py:120] Confirmed ROCm platform is available.
+DEBUG 08-03 15:21:40 [platforms/__init__.py:245] Automatically detected platform rocm.
+/app/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.1.dev2387+g9d1ba0e69.rocm
+ --> vLLM version 0.26.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+DEBUG 08-03 15:21:45 [utils/flashinfer.py:53] FlashInfer unavailable since package was not found
+DEBUG 08-03 15:21:45 [__init__.py:31] No plugins for group vllm_omni.platform_plugins found.
+DEBUG 08-03 15:21:45 [__init__.py:23] Checking if CUDA OmniPlatform is available.
+DEBUG 08-03 15:21:45 [__init__.py:38] CUDA OmniPlatform is not available because: NVML Shared Library Not Found
+DEBUG 08-03 15:21:45 [__init__.py:46] Checking if ROCm OmniPlatform is available.
+DEBUG 08-03 15:21:45 [__init__.py:54] Confirmed ROCm OmniPlatform is available.
+DEBUG 08-03 15:21:45 [__init__.py:68] Checking if NPU OmniPlatform is available.
+DEBUG 08-03 15:21:45 [__init__.py:84] Checking if XPU OmniPlatform is available.
+DEBUG 08-03 15:21:45 [__init__.py:102] XPU omni platform is not available because: No module named 'oneccl_bindings_for_pytorch'
+DEBUG 08-03 15:21:45 [__init__.py:110] Checking if MUSA OmniPlatform is available.
+DEBUG 08-03 15:21:45 [__init__.py:118] MUSA OmniPlatform is not available because: No module named 'torchada'
+DEBUG 08-03 15:21:45 [__init__.py:46] Checking if ROCm OmniPlatform is available.
+DEBUG 08-03 15:21:45 [__init__.py:54] Confirmed ROCm OmniPlatform is available.
+DEBUG 08-03 15:21:45 [__init__.py:159] Automatically detected OmniPlatform rocm.
+DEBUG 08-03 15:21:46 [utils/import_utils.py:67] Loading module triton_kernels from /usr/local/lib/python3.12/dist-packages/triton_kernels/__init__.py.
+[aiter] import [module_aiter_core] under /usr/local/lib/python3.12/dist-packages/aiter/jit/module_aiter_core.so
+DEBUG 08-03 15:21:50 [__init__.py:31] No plugins for group vllm_omni.platform_plugins found.
+DEBUG 08-03 15:21:50 [__init__.py:23] Checking if CUDA OmniPlatform is available.
+DEBUG 08-03 15:21:50 [__init__.py:38] CUDA OmniPlatform is not available because: NVML Shared Library Not Found
+DEBUG 08-03 15:21:50 [__init__.py:46] Checking if ROCm OmniPlatform is available.
+DEBUG 08-03 15:21:50 [__init__.py:54] Confirmed ROCm OmniPlatform is available.
+DEBUG 08-03 15:21:50 [__init__.py:68] Checking if NPU OmniPlatform is available.
+DEBUG 08-03 15:21:50 [__init__.py:84] Checking if XPU OmniPlatform is available.
+DEBUG 08-03 15:21:50 [__init__.py:102] XPU omni platform is not available because: No module named 'oneccl_bindings_for_pytorch'
+DEBUG 08-03 15:21:50 [__init__.py:110] Checking if MUSA OmniPlatform is available.
+DEBUG 08-03 15:21:50 [__init__.py:118] MUSA OmniPlatform is not available because: No module named 'torchada'
+DEBUG 08-03 15:21:50 [__init__.py:46] Checking if ROCm OmniPlatform is available.
+DEBUG 08-03 15:21:50 [__init__.py:54] Confirmed ROCm OmniPlatform is available.
+DEBUG 08-03 15:21:50 [__init__.py:159] Automatically detected OmniPlatform rocm.
+WARNING 08-03 15:21:50 [utils/import_utils.py:408] Module humming was found but failed to import
+WARNING 08-03 15:21:50 [utils/import_utils.py:408] Traceback (most recent call last):
+WARNING 08-03 15:21:50 [utils/import_utils.py:408]   File "/usr/local/lib/python3.12/dist-packages/vllm/utils/import_utils.py", line 404, in _has_module
+WARNING 08-03 15:21:50 [utils/import_utils.py:408]     if importlib.util.find_spec(module_name) is None:
+WARNING 08-03 15:21:50 [utils/import_utils.py:408]        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+WARNING 08-03 15:21:50 [utils/import_utils.py:408]   File "<frozen importlib.util>", line 111, in find_spec
+WARNING 08-03 15:21:50 [utils/import_utils.py:408] ValueError: humming.__spec__ is None
+INFO 08-03 15:21:50 [patch.py:252] NVFP4 W4A4 weight_scale NaN-clamp: installed.
+INFO 08-03 15:21:50 [patch.py:481] [cumem-cuda] CuMemAllocator._python_free_callback patched: asleep guard extended to all platforms.
+DEBUG 08-03 15:21:50 [factory.py:35] Registered connector: MooncakeStoreConnector
+DEBUG 08-03 15:21:50 [factory.py:35] Registered connector: MooncakeTransferEngineConnector
+DEBUG 08-03 15:21:50 [factory.py:35] Registered connector: SharedMemoryConnector
+DEBUG 08-03 15:21:50 [factory.py:35] Registered connector: YuanrongConnector
+DEBUG 08-03 15:21:50 [factory.py:35] Registered connector: YuanrongTransferEngineConnector
+DEBUG 08-03 15:21:50 [factory.py:35] Registered connector: MoriTransferEngineConnector
+DEBUG 08-03 15:21:50 [factory.py:35] Registered connector: MooncakeConnector
+DEBUG 08-03 15:21:51 [plugins/__init__.py:52] Available plugins for group vllm.general_plugins:
+DEBUG 08-03 15:21:51 [plugins/__init__.py:54] - vllm_omni_register_models -> vllm_omni.engine.arg_utils:register_omni_models_to_vllm
+DEBUG 08-03 15:21:51 [plugins/__init__.py:54] - quark_online_quant -> quark.online_quantization.vllm.plugin:register
+DEBUG 08-03 15:21:51 [plugins/__init__.py:54] - lora_filesystem_resolver -> vllm.plugins.lora_resolvers.filesystem_resolver:register_filesystem_resolver
+DEBUG 08-03 15:21:51 [plugins/__init__.py:54] - lora_hf_hub_resolver -> vllm.plugins.lora_resolvers.hf_hub_resolver:register_hf_hub_resolver
+DEBUG 08-03 15:21:51 [plugins/__init__.py:57] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+/usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+DEBUG 08-03 15:21:51 [hf_utils.py:99] Failed to load diffusers config via DiffusionPipeline: openbmb/MiniCPM-o-4_5 does not appear to have a file named model_index.json.
+INFO 08-03 15:21:51 [logo.py:52]        [97m█     █     █▄   ▄█[0m    [34m   ▄▀▀[38;5;208m▀▀▄ [0m[97m█▄   ▄█ █▄    █ ▀█▀ [0m
+INFO 08-03 15:21:51 [logo.py:52]  [38;5;208m▄▄[0m [34m▄█[0m [97m█     █     █ ▀▄▀ █[0m[97m  ▄▄▄ [0m[34m █    [38;5;208m█ [0m[97m█ ▀▄▀ █ █ ▀▄  █  █  [0m
+INFO 08-03 15:21:51 [logo.py:52]   [38;5;208m█[0m[34m▄█▀[0m [97m█     █     █     █[0m[97m      [0m[34m █    [38;5;208m█ [0m[97m█     █ █   ▀▄█  █  [0m
+INFO 08-03 15:21:51 [logo.py:52]    [34m▀▀[0m  [97m▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀[0m      [35m  ▀▀▀▀  [0m[97m▀     ▀ ▀     ▀ ▀▀▀ [0m
+INFO 08-03 15:21:51 [logo.py:52]
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:21:51 [entrypoints/.../utils/api_utils.py:345] vLLM server version 0.26.0, serving model openbmb/MiniCPM-o-4_5
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:21:51 [entrypoints/.../utils/api_utils.py:273] non-default args: {'model_tag': 'openbmb/MiniCPM-o-4_5', 'port': 28889, 'model': 'openbmb/MiniCPM-o-4_5', 'trust_remote_code': True, 'interleave_mm_strings': True}
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:21:51 [weight_utils.py:50] Using model weights format ['*']
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:21:51 [omni_base.py:172] [AsyncOmni] Initializing with model openbmb/MiniCPM-o-4_5
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:21:51 [async_omni_engine.py:175] [AsyncOmniEngine] Initializing with model openbmb/MiniCPM-o-4_5
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:21:51 [utils.py:652] stage_configs: [{'stage_id': 0, 'stage_type': 'llm', 'session_mode': 'turn', 'engine_args': {'model_arch': 'MiniCPMO45OmniForConditionalGeneration', 'retains_state_across_chunks': False, 'engine_output_type': 'latent', 'trust_remote_code': True, 'enable_prefix_caching': False, 'active_stream_window': 0, 'tensor_parallel_size': 1, 'gpu_memory_utilization': 0.55, 'max_num_seqs': 4, 'max_num_batched_tokens': 16384, 'enforce_eager': False, 'limit_mm_per_prompt': {'video': {'count': 1, 'num_frames': 32}}, 'async_chunk': True, 'async_scheduling': True, 'model_stage': 'llm', 'worker_type': 'ar', 'scheduler_cls': 'vllm_omni.core.sched.omni_ar_scheduler.OmniARAsyncScheduler', 'subparser': 'serve', 'model_tag': 'openbmb/MiniCPM-o-4_5', 'port': 28889, 'interleave_mm_strings': True, 'omni': True}, 'runtime': {'process': True, 'devices': '0', 'num_replicas': 1, 'requires_multimodal_data': True}, 'engine_input_source': [], 'final_output': True, 'final_output_type': 'text', 'is_comprehension': True, 'default_sampling_params': {'temperature': 0.7, 'top_p': 0.8, 'top_k': 100, 'max_tokens': 2048, 'seed': 42, 'detokenize': True, 'repetition_penalty': 1.02}}, {'stage_id': 1, 'stage_type': 'llm', 'session_mode': 'turn', 'engine_args': {'model_arch': 'MiniCPMO45OmniForConditionalGeneration', 'retains_state_across_chunks': False, 'engine_output_type': 'latent', 'custom_process_next_stage_input_func': 'vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.tts2code2wav_async_chunk', 'trust_remote_code': True, 'enable_prefix_caching': False, 'active_stream_window': 0, 'gpu_memory_utilization': 0.22, 'max_num_seqs': 4, 'max_num_batched_tokens': 8192, 'enforce_eager': False, 'minicpmo_sliding_recompute': True, 'minicpmo_sliding_window_size': 2, 'minicpmo_sliding_recomputed_chunks': 1, 'async_chunk': True, 'skip_mm_profiling': True, 'async_scheduling': True, 'model_stage': 'tts', 'worker_type': 'ar', 'scheduler_cls': 'vllm_omni.core.sched.omni_ar_scheduler.OmniARAsyncScheduler', 'hf_config_name': 'tts_config', 'subparser': 'serve', 'model_tag': 'openbmb/MiniCPM-o-4_5', 'port': 28889, 'interleave_mm_strings': True, 'omni': True}, 'runtime': {'process': True, 'devices': '0', 'num_replicas': 1, 'requires_multimodal_data': False}, 'engine_input_source': [0], 'final_output': False, 'final_output_type': None, 'is_comprehension': False, 'custom_process_input_func': 'vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.llm2tts', 'default_sampling_params': {'temperature': 0.0, 'top_p': 1.0, 'top_k': -1, 'max_tokens': 4096, 'stop_token_ids': [1], 'seed': 42, 'detokenize': False}, 'output_connectors': {'to_stage_2': 'connector_of_shared_memory'}}, {'stage_id': 2, 'stage_type': 'llm', 'session_mode': 'turn', 'engine_args': {'model_arch': 'MiniCPMO45Code2Wav', 'retains_state_across_chunks': False, 'engine_output_type': 'audio', 'trust_remote_code': True, 'enable_prefix_caching': False, 'active_stream_window': 0, 'gpu_memory_utilization': 0.22, 'max_num_seqs': 4, 'max_num_batched_tokens': 65536, 'max_model_len': 65536, 'enforce_eager': True, 'enable_chunked_prefill': False, 'async_chunk': True, 'skip_mm_profiling': True, 'model_stage': 'code2wav', 'worker_type': 'generation', 'scheduler_cls': 'vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler', 'subparser': 'serve', 'model_tag': 'openbmb/MiniCPM-o-4_5', 'port': 28889, 'interleave_mm_strings': True, 'omni': True}, 'runtime': {'process': True, 'devices': '0', 'num_replicas': 1, 'requires_multimodal_data': False}, 'engine_input_source': [1], 'final_output': True, 'final_output_type': 'audio', 'is_comprehension': False, 'default_sampling_params': {'temperature': 0.0, 'top_p': 1.0, 'top_k': -1, 'max_tokens': 65536, 'detokenize': True}, 'input_connectors': {'from_stage_1': 'connector_of_shared_memory'}}]
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:21:51 [async_omni_engine.py:268] [AsyncOmniEngine] Launching Orchestrator thread with 3 stages
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:21:51 [__init__.py:31] No plugins for group vllm_omni.general_plugins found.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:21:51 [initialization.py:356] Loaded OmniTransferConfig with 1 connector configurations
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:21:51 [envs.py:2096] Unknown vLLM environment variable detected: VLLM_OMNI_TARGET_DEVICE
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:21:52 [transformers_utils/config.py:795] Overriding HF config with {'architectures': ['MiniCPMO45OmniForConditionalGeneration']}
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:21:52 [model_executor/models/registry.py:909] Cached model info file for class vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni.MiniCPMO45OmniForConditionalGeneration is stale
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:21:52 [model_executor/models/registry.py:971] Cache model info for class vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni.MiniCPMO45OmniForConditionalGeneration miss. Loading model instead.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:04 [model_executor/models/registry.py:981] Loaded model info for class vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni.MiniCPMO45OmniForConditionalGeneration
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:04 [logging_utils/log_time.py:29] Registry inspect model class: Elapsed time 12.4117704 secs
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:04 [config/model.py:623] Resolved architecture: MiniCPMO45OmniForConditionalGeneration
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:04 [config/model.py:1788] Using max model len 40960
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:04 [config/model.py:1853] Generative models support chunked prefill.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:04 [config/model.py:1908] Generative models support prefix caching.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:04 [engine/arg_utils.py:2527] Enabling chunked prefill by default
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:04 [config/scheduler.py:252] Chunked prefill is enabled with max_num_batched_tokens=16384.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:04 [config/vllm.py:1109] Asynchronous scheduling is enabled.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:04 [config/kernel.py:277] Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), user-defined: IrOpPriorityConfig(rms_norm=[], fused_add_rms_norm=[])
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:04 [config/kernel.py:295] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:22:04 [envs.py:2096] Unknown vLLM environment variable detected: VLLM_OMNI_TARGET_DEVICE
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [transformers_utils/config.py:795] Overriding HF config with {'architectures': ['MiniCPMO45OmniForConditionalGeneration']}
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/model.py:623] Resolved architecture: MiniCPMO45OmniForConditionalGeneration
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/model.py:1788] Using max model len 40960
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/model.py:1788] Using max model len 4096
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [config/model.py:1853] Generative models support chunked prefill.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [config/model.py:1908] Generative models support prefix caching.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [engine/arg_utils.py:2527] Enabling chunked prefill by default
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/scheduler.py:252] Chunked prefill is enabled with max_num_batched_tokens=8192.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [config/kernel.py:277] Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), user-defined: IrOpPriorityConfig(rms_norm=[], fused_add_rms_norm=[])
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/kernel.py:295] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [stage_init_utils.py:906] Auto-set VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 for stage 2 (max_model_len=65536).
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:22:05 [envs.py:2096] Unknown vLLM environment variable detected: VLLM_OMNI_TARGET_DEVICE
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [transformers_utils/config.py:795] Overriding HF config with {'architectures': ['MiniCPMO45Code2Wav']}
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [model_executor/models/registry.py:964] Loaded model info for class vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_code2wav.MiniCPMO45Code2Wav from cache
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [logging_utils/log_time.py:29] Registry inspect model class: Elapsed time 0.0004220 secs
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/model.py:623] Resolved architecture: MiniCPMO45Code2Wav
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:22:05 [config/model.py:2283] User-specified max_model_len (65536) is greater than the derived max_model_len (max_position_embeddings=40960.0 or model_max_length=None in model's config.json). VLLM_ALLOW_LONG_MAX_MODEL_LEN must be used with extreme caution. If the model uses relative position encoding (RoPE), positions exceeding derived_max_model_len lead to nan. If the model uses absolute position encoding, positions exceeding derived_max_model_len will cause a CUDA array out-of-bounds error.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/model.py:1788] Using max model len 65536
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [config/model.py:1853] Generative models support chunked prefill.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [config/model.py:1908] Generative models support prefix caching.
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:22:05 [engine/arg_utils.py:2536] This model does not officially support disabling chunked prefill. Disabling this manually may cause the engine to crash or produce incorrect outputs.
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:22:05 [config/vllm.py:1163] Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:22:05 [config/vllm.py:1213] Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [config/kernel.py:277] Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native']), user-defined: IrOpPriorityConfig(rms_norm=[], fused_add_rms_norm=[])
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/kernel.py:295] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native'])
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/vllm.py:1392] Cudagraph is disabled under eager mode
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [config/compilation.py:329] Enabled custom fusions: norm_quant, act_quant
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:05 [stage_runtime.py:553] [stage_init] Stage-0 set runtime devices: 0
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [stage_init_utils.py:1075] Parallel config: TP=1, PP=1, DP=1, PCP=1, SP=1, CFG=1; will lock 1 devices: [0]
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:05 [stage_init_utils.py:1104] Acquired exclusive lock for device 0
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:22:05 [platforms/rocm.py:123] Using CUDA_VISIBLE_DEVICES on ROCm is deprecated and support will be removed in vLLM v0.26.0. Please use HIP_VISIBLE_DEVICES instead.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[plugins/__init__.py:44][0m No plugins for group vllm.platform_plugins found.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:36][0m Checking if TPU platform is available.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:55][0m TPU platform is not available because: No module named 'libtpu'
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:61][0m Checking if CUDA platform is available.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:88][0m Exception happens when checking CUDA platform: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:105][0m CUDA platform is not available because: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:112][0m Checking if ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:120][0m Confirmed ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:133][0m Checking if XPU platform is available.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:164][0m Checking if CPU platform is available.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:112][0m Checking if ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:120][0m Confirmed ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:22:06[0m [90m[platforms/__init__.py:245][0m Automatically detected platform rocm.
+[33mWARNING[0m [90m08-03 15:22:06[0m [90m[platforms/rocm.py:123][0m Using CUDA_VISIBLE_DEVICES on ROCm is deprecated and support will be removed in vLLM v0.26.0. Please use HIP_VISIBLE_DEVICES instead.
+/app/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.1.dev2387+g9d1ba0e69.rocm
+ --> vLLM version 0.26.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+[37mDEBUG[0m [90m08-03 15:22:10[0m [90m[utils/flashinfer.py:53][0m FlashInfer unavailable since package was not found
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:31][0m No plugins for group vllm_omni.platform_plugins found.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:23][0m Checking if CUDA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:38][0m CUDA OmniPlatform is not available because: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:68][0m Checking if NPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:84][0m Checking if XPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:102][0m XPU omni platform is not available because: No module named 'oneccl_bindings_for_pytorch'
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:110][0m Checking if MUSA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:118][0m MUSA OmniPlatform is not available because: No module named 'torchada'
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[__init__.py:159][0m Automatically detected OmniPlatform rocm.
+[37mDEBUG[0m [90m08-03 15:22:11[0m [90m[utils/import_utils.py:67][0m Loading module triton_kernels from /usr/local/lib/python3.12/dist-packages/triton_kernels/__init__.py.
+[aiter] import [module_aiter_core] under /usr/local/lib/python3.12/dist-packages/aiter/jit/module_aiter_core.so
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:15 [v1/engine/utils.py:1257] Waiting for 1 local, 0 remote core engine proc(s) to connect.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:31][0m No plugins for group vllm_omni.platform_plugins found.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:23][0m Checking if CUDA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:38][0m CUDA OmniPlatform is not available because: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:68][0m Checking if NPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:84][0m Checking if XPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:102][0m XPU omni platform is not available because: No module named 'oneccl_bindings_for_pytorch'
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:110][0m Checking if MUSA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:118][0m MUSA OmniPlatform is not available because: No module named 'torchada'
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:15[0m [90m[__init__.py:159][0m Automatically detected OmniPlatform rocm.
+[33mWARNING[0m [90m08-03 15:22:15[0m [90m[utils/import_utils.py:408][0m Module humming was found but failed to import
+[33mWARNING[0m [90m08-03 15:22:15[0m [90m[utils/import_utils.py:408][0m Traceback (most recent call last):
+[33mWARNING[0m [90m08-03 15:22:15[0m [90m[utils/import_utils.py:408][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/utils/import_utils.py", line 404, in _has_module
+[33mWARNING[0m [90m08-03 15:22:15[0m [90m[utils/import_utils.py:408][0m     if importlib.util.find_spec(module_name) is None:
+[33mWARNING[0m [90m08-03 15:22:15[0m [90m[utils/import_utils.py:408][0m        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[33mWARNING[0m [90m08-03 15:22:15[0m [90m[utils/import_utils.py:408][0m   File "<frozen importlib.util>", line 111, in find_spec
+[33mWARNING[0m [90m08-03 15:22:15[0m [90m[utils/import_utils.py:408][0m ValueError: humming.__spec__ is None
+[32mINFO[0m [90m08-03 15:22:15[0m [90m[patch.py:252][0m NVFP4 W4A4 weight_scale NaN-clamp: installed.
+[32mINFO[0m [90m08-03 15:22:15[0m [90m[patch.py:481][0m [cumem-cuda] CuMemAllocator._python_free_callback patched: asleep guard extended to all platforms.
+[37mDEBUG[0m [90m08-03 15:22:16[0m [90m[factory.py:35][0m Registered connector: MooncakeStoreConnector
+[37mDEBUG[0m [90m08-03 15:22:16[0m [90m[factory.py:35][0m Registered connector: MooncakeTransferEngineConnector
+[37mDEBUG[0m [90m08-03 15:22:16[0m [90m[factory.py:35][0m Registered connector: SharedMemoryConnector
+[37mDEBUG[0m [90m08-03 15:22:16[0m [90m[factory.py:35][0m Registered connector: YuanrongConnector
+[37mDEBUG[0m [90m08-03 15:22:16[0m [90m[factory.py:35][0m Registered connector: YuanrongTransferEngineConnector
+[37mDEBUG[0m [90m08-03 15:22:16[0m [90m[factory.py:35][0m Registered connector: MoriTransferEngineConnector
+[37mDEBUG[0m [90m08-03 15:22:16[0m [90m[factory.py:35][0m Registered connector: MooncakeConnector
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[stage_engine_core_proc.py:132][0m [StageEngineCoreProc] Patched EngineCoreRequest -> OmniEngineCoreRequest: <class 'vllm_omni.engine.OmniEngineCoreRequest'>
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[v1/engine/core.py:1233][0m Waiting for init message from front-end.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:17 [v1/engine/utils.py:1360] HELLO from local core engine process 0.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[v1/engine/core.py:1244][0m Received init message: EngineHandshakeMetadata(addresses=EngineZmqAddresses(inputs=['ipc:///tmp/13aa3452-1532-442f-9851-e4178ceeee34'], outputs=['ipc:///tmp/2ac6bc61-480b-44dc-9684-404715fac769'], coordinator_input=None, coordinator_output=None, frontend_stats_publish_address=None), parallel_config={})
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[v1/engine/core.py:1043][0m Has DP Coordinator: False, stats publish address: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[plugins/__init__.py:52][0m Available plugins for group vllm.general_plugins:
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[plugins/__init__.py:54][0m - vllm_omni_register_models -> vllm_omni.engine.arg_utils:register_omni_models_to_vllm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[plugins/__init__.py:54][0m - quark_online_quant -> quark.online_quantization.vllm.plugin:register
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[plugins/__init__.py:54][0m - lora_filesystem_resolver -> vllm.plugins.lora_resolvers.filesystem_resolver:register_filesystem_resolver
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[plugins/__init__.py:54][0m - lora_hf_hub_resolver -> vllm.plugins.lora_resolvers.hf_hub_resolver:register_hf_hub_resolver
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[plugins/__init__.py:57][0m All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:17[0m [90m[v1/engine/core.py:116][0m Initializing a V1 LLM engine (v0.26.0) with config: model='openbmb/MiniCPM-o-4_5', speculative_config=None, tokenizer='openbmb/MiniCPM-o-4_5', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=40960, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=None, quantization_config=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False, jit_monitor_mode='warn', jit_monitor_verbose=False), seed=0, served_model_name=openbmb/MiniCPM-o-4_5, enable_prefix_caching=False, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['+sparse_attn_indexer', 'none'], 'ir_enable_torch_wrap': True, 'splitting_ops': ['vllm::unified_attention_with_output', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::qwen_gdn_attention_core', 'vllm::gdn_attention_core_xpu', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::kda_attention', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::deepseek_v4_attention', 'vllm::hpc_rope_norm_forward', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update'], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': [], 'compile_ranges_endpoints': [16384], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': True, 'alignment_asserts': True, 'scalar_asserts': True, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': False, 'fuse_act_quant': False, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False, 'enable_qk_norm_rope_fusion': False, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False, 'fuse_mla_dual_rms_norm': False, 'fuse_rope_kvcache': False, 'fuse_qk_norm_rope_kvcache': False}, 'max_cudagraph_capture_size': 8, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_bf16x3_router_gemm=False, moe_backend='auto', linear_backend='auto')
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.deepseek_v2.DeepseekV2Model'>: ['input_ids', 'positions', 'intermediate_tensors', 'inputs_embeds']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.deepseek_eagle3.DeepseekV2Eagle3Model'>: ['input_ids', 'positions', 'hidden_states', 'input_embeds']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.laguna.LagunaModel'>: ['input_ids', 'positions', 'intermediate_tensors', 'inputs_embeds']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.qwen3_dflash.DFlashQwen3Model'>: ['input_ids', 'positions', 'input_embeds']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.laguna_dflash.DFlashLagunaModel'>: ['input_ids', 'positions', 'input_embeds']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.v1.spec_decode.ngram_proposer_gpu.NgramGPUKernel'>: ['num_tokens_no_spec', 'token_ids_gpu', 'combined_mask']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:17[0m [90m[tokenizers/registry.py:78][0m Loading CachedHfTokenizer for tokenizer_mode='hf'
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[config/kernel.py:85][0m Setting IR op priority for rms_norm to ['native']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[ir/op.py:422][0m Priority for vllm.ir.rms_norm set to ['native']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[config/kernel.py:85][0m Setting IR op priority for fused_add_rms_norm to ['native']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[ir/op.py:422][0m Priority for vllm.ir.fused_add_rms_norm set to ['native']
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[__init__.py:31][0m No plugins for group vllm_omni.general_plugins found.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[distributed/parallel_state.py:1571][0m world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://129.212.183.58:40575 backend=nccl
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:18[0m [90m[distributed/parallel_state.py:1615][0m world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://129.212.183.58:40575 backend=nccl
+[rank0]:[W803 15:22:18.681534929 ProcessGroupGloo.cpp:524] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[distributed/parallel_state.py:1697][0m Detected 1 nodes in the distributed environment
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:18[0m [90m[distributed/parallel_state.py:1946][0m rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[gpu_ar_worker.py:105][0m worker init memory snapshot: torch_peak=0.0GiB, free_memory=191.36GiB, total_memory=191.69GiB, rocm_memory=0.33GiB, torch_memory=0.0GiB, non_torch_memory=0.33GiB, timestamp=1785770538.9013624, auto_measure=True
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[gpu_ar_worker.py:106][0m worker requested memory: 105.43GiB
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [33mWARNING[0m [90m08-03 15:22:18[0m [90m[gpu_ar_worker.py:116][0m OMNI GPUARWorker forces v1 model runner for omni hooks.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[v1/sample/logits_processor/__init__.py:63][0m No logitsprocs plugins installed (group vllm.logits_processors).
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:18[0m [90m[utils/torch_utils.py:167][0m OMP_NUM_THREADS is not set; defaulting Torch threads to 1.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [transformers] `MiniCPMOProcessor` defines `image_processor_class = 'AutoImageProcessor'`, which is deprecated. Register the correct mapping in `AutoImageProcessor` instead.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [transformers] Requested torchvision backend is not available. Falling back to pil backend.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [transformers] `MiniCPMOProcessor` defines `feature_extractor_class = 'WhisperFeatureExtractor'`, which is deprecated. Register the correct mapping in `AutoFeatureExtractor` instead.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [transformers] Image processor MiniCPMVImageProcessor: kwargs ['max_slice_nums'] were applied for backward compatibility. To avoid this warning, add them to valid_kwargs: create a custom TypedDict extending ImagesKwargs with these keys and set it as the `valid_kwargs` class attribute.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:27 [v1/engine/utils.py:1262] Waiting for 1 local, 0 remote core engine proc(s) to start.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:31[0m [90m[model_executor/offloader/base.py:121][0m Offloader set to NoopOffloader (no offloading).
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [33mWARNING[0m [90m08-03 15:22:31[0m [90m[base.py:188][0m [LLM Worker 0] Sleep Mode DISABLED.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [33mWARNING[0m [90m08-03 15:22:31[0m [90m[base.py:188][0m [LLM Worker 0] Sleep Mode DISABLED.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:31[0m [90m[v1/worker/gpu_model_runner.py:5250][0m Starting to load model openbmb/MiniCPM-o-4_5...
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:32[0m [90m[config/vllm.py:1109][0m Asynchronous scheduling is enabled.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/kernel.py:277][0m Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), user-defined: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:32[0m [90m[config/kernel.py:295][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/kernel.py:277][0m Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), user-defined: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:32[0m [90m[config/kernel.py:295][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/kernel.py:277][0m Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), user-defined: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:32[0m [90m[config/kernel.py:295][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:32[0m [90m[platforms/rocm.py:570][0m Using TRITON_ATTN backend (selected via --attention-backend).
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[compilation/backends.py:107][0m Using InductorStandaloneAdaptor
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[compilation/backends.py:107][0m Using InductorStandaloneAdaptor
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/model.py:1751][0m head dtype: torch.bfloat16
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/compilation.py:1312][0m enabled custom ops: Counter()
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/compilation.py:1313][0m disabled custom ops: Counter({'rms_norm': 145, 'silu_and_mul': 36, 'rotary_embedding': 1, 'apply_rotary_emb': 1})
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [33mWARNING[0m [90m08-03 15:22:32[0m [90m[config/compilation.py:1338][0m Op 'sparse_attn_indexer' not present in model, enabling with '+sparse_attn_indexer' has no effect
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/compilation.py:1312][0m enabled custom ops: Counter()
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/compilation.py:1313][0m disabled custom ops: Counter({'rms_norm': 145, 'silu_and_mul': 36, 'rotary_embedding': 1, 'apply_rotary_emb': 1})
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/compilation.py:1312][0m enabled custom ops: Counter()
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[config/compilation.py:1313][0m disabled custom ops: Counter({'rms_norm': 145, 'silu_and_mul': 36, 'rotary_embedding': 1, 'apply_rotary_emb': 1})
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[model_executor/model_loader/base_loader.py:63][0m Loading weights on cuda ...
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:32[0m [90m[model_executor/model_loader/weight_utils.py:506][0m Using model weights format [['model-00001-of-00004.safetensors', 'model-00004-of-00004.safetensors', 'model-00003-of-00004.safetensors', 'model-00002-of-00004.safetensors']]
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:32[0m [90m[model_executor/model_loader/weight_utils.py:869][0m Filesystem type for checkpoints: EXT4. Checkpoint size: 17.46 GiB. Available RAM: 226.89 GiB.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:32[0m [90m[model_executor/model_loader/weight_utils.py:892][0m Auto-prefetch is disabled because the filesystem (EXT4) is not a recognized network FS (NFS/Lustre). If you want to force prefetching, start vLLM with --safetensors-load-strategy=prefetch.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m
+Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:00<00:00, 238.03it/s]
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:33[0m [90m[model_executor/models/utils.py:283][0m Loaded weight lm_head.weight with shape torch.Size([151808, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight embed_tokens.weight with shape torch.Size([151808, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.0.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.0.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.0.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.0.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.0.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.1.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.1.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.1.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.1.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.1.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.10.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.10.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.10.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.10.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.10.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.11.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.11.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.11.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.11.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.11.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.12.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.12.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.12.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.12.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.12.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:34[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.13.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.13.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.13.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.13.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.13.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.14.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.14.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.14.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.14.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.14.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.15.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.15.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.15.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.15.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.15.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.16.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.16.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.16.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.16.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.16.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.17.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.17.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.17.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.17.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.17.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.18.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.18.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.18.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.18.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.18.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.19.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.19.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.19.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.19.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.19.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.2.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.2.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.2.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.2.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.2.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.20.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:35[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.20.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.20.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.20.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.20.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.20.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.20.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.20.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.20.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.20.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.20.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.21.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.21.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.21.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.21.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.21.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.21.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.21.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.21.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.21.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.21.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.21.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.22.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.22.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.22.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.22.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.22.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.22.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.22.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.22.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.22.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.22.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.22.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.23.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.23.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.23.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.23.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.23.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.23.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.23.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.23.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.23.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.23.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.23.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.24.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.24.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.24.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.24.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.24.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.24.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.24.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.24.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.24.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.24.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.24.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.25.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.25.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.25.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.25.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.25.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.25.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.25.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.25.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.25.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.25.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.25.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.26.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.26.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.26.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.26.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.26.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.26.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.26.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.26.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.26.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.26.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.26.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.27.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.27.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.27.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.27.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.27.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.27.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.27.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.27.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.27.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.27.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.27.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:36[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.28.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.28.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.28.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.28.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.28.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.28.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.28.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.28.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.28.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.28.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.28.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.29.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:37 [v1/engine/utils.py:1262] Waiting for 1 local, 0 remote core engine proc(s) to start.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.29.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.29.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.29.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.29.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.29.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.29.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.29.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.29.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.29.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.29.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.3.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.3.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.3.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.3.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.3.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.30.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.30.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.30.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.30.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.30.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.30.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.30.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.30.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.30.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.30.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.30.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.31.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.31.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.31.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.31.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.31.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.31.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.31.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.31.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.31.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.31.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.31.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.32.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.32.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.32.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.32.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.32.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.32.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.32.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.32.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.32.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.32.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.32.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.33.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.33.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.33.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.33.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.33.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.33.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.33.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.33.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.33.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.33.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.33.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.34.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.34.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.34.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.34.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.34.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.34.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.34.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.34.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:37[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.34.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.34.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.34.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.35.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.35.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.35.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.35.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.35.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.35.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.35.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.35.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.35.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.35.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.35.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.4.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.4.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.4.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.4.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.4.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.5.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.5.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.5.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.5.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.5.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.6.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.6.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.6.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.6.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.6.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.7.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.7.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.7.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.7.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.7.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.8.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.8.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.8.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.8.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.8.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.input_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.mlp.down_proj.weight with shape torch.Size([4096, 12288])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.9.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([12288, 4096]) into thinker.llm.model.layers.9.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.post_attention_layernorm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.self_attn.k_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.9.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.self_attn.o_proj.weight with shape torch.Size([4096, 4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.self_attn.q_norm.weight with shape torch.Size([128])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([4096, 4096]) into thinker.llm.model.layers.9.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([1024, 4096]) into thinker.llm.model.layers.9.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:38[0m [90m[model_executor/models/utils.py:283][0m Loaded weight norm.weight with shape torch.Size([4096])
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:39[0m [90m[model_executor/model_loader/default_loader.py:430][0m Loading weights took 6.72 seconds
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:39[0m [90m[model_executor/model_loader/base_loader.py:70][0m Peak GPU memory after loading weights: 17.48 GiB
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:40[0m [90m[v1/worker/gpu_model_runner.py:5347][0m Model loading took 16.83 GiB memory and 7.624561 seconds
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:40[0m [90m[v1/worker/gpu_model_runner.py:6396][0m Encoder cache will be initialized with a budget of 16384 tokens, and profiled with 4 video items of the maximum feature size.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [transformers] `use_return_dict` is deprecated! Use `return_dict` instead!
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:43[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m Traced files (to be considered for compilation cache):
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/rotary_embedding/base.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/qwen3.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/linear.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/utils/torch_utils.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/attention/attention.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/activation.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/qwen2.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/distributed/parallel_state.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/interfaces.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/torch/_dynamo/polyfills/itertools.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/custom_op.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/parameter.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/torch/nn/modules/container.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/ir/op.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/torch/_dynamo/polyfills/builtins.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/layernorm.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/platforms/interface.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/utils.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/rotary_embedding/common.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:107][0m Using InductorStandaloneAdaptor
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m Traced files (to be considered for compilation cache):
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/torch/_dynamo/polyfills/builtins.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/torch/_dynamo/polyfills/itertools.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/torch/nn/modules/container.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/distributed/parallel_state.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/ir/op.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/custom_op.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/activation.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/attention/attention.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/layernorm.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/linear.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/rotary_embedding/base.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/rotary_embedding/common.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/utils.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/interfaces.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/qwen2.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/qwen3.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/parameter.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/platforms/interface.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/utils/torch_utils.py
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1094][0m Using cache directory: /root/.cache/vllm/torch_compile_cache/098d564cd0/rank_0_0/backbone for vLLM's torch.compile
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1105][0m torch.compile cache factors: env=09f2c2d8909b17b24142c546bf7e2238af33b507f0a23929f3abfd3a9aa2e884 cfg=7ba0a02792 comp=7e2b8735ed code=e438328e26a702b1899392d4ebd7ec808491f71ecf9894d950b373061b66ec0e dir=/root/.cache/vllm/torch_compile_cache/098d564cd0/rank_0_0/backbone
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m Compile env factors (raw):
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m {'CMAKE_BUILD_TYPE': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'CUDA_HOME': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'K_SCALE_CONSTANT': 200,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'MOONCAKE_PREFERRED_SEGMENT': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'MOONCAKE_REQUESTER_LOCAL_HOSTNAME': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'NVCC_THREADS': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'Q_SCALE_CONSTANT': 200,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_HABANA_VISIBLE_MODULES': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_NEURON_RT_VISIBLE_CORES': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_ONEAPI_DEVICE_SELECTOR': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_RBLN_RT_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_TPU_VISIBLE_CHIPS': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VERBOSE': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLOW_CHUNKED_LOCAL_ATTN_WITH_HYBRID_KV_CACHE': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLOW_INSECURE_SERIALIZATION': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLOW_LONG_MAX_MODEL_LEN': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLOW_RUNTIME_LORA_UPDATING': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLREDUCE_USE_FLASHINFER': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLREDUCE_USE_SYMM_MEM': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_API_KEY': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_BATCH_INVARIANT': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_BLOCKSCALE_FP8_GEMM_FLASHINFER': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_BUILD_COMMIT': 'unknown',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_BUILD_PIPELINE': 'local',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_BUILD_URL': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_COMPILE_CACHE_SAVE_FORMAT': 'binary',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_COMPUTE_NANS_IN_LOGITS': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_CONFIGURE_LOGGING': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_CONFIG_ROOT': '/root/.config/vllm',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_ATTN_SPLIT_KV': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_INT4_W4A8': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_NUM_OF_RESERVED_CPU': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_OMP_THREADS_BIND': 'auto',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_SGL_KERNEL': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_CUDART_SO_PATH': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_CUSTOM_SCOPES_FOR_PROFILING': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DBO_COMM_SMS': 64,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEBUG_MFU_METRICS': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEBUG_WORKSPACE': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEPLL_NVFP4_DISPATCH': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_BUFFER_SIZE_MB': 1024,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_V2_ALLOW_HYBRID_MODE': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_V2_ALLOW_MULTIPLE_REDUCTION': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_V2_PREFER_OVERLAP': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEP_GEMM_WARMUP': 'relax',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLED_KERNELS': (),
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_COMPILE_CACHE': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_LOG_LOGO': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_PYNCCL': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_REQUEST_ID_RANDOMIZATION': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_SHARED_EXPERTS_STREAM': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISTRIBUTED_USE_SPLIT_GROUP': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DOCKER_BUILD_CONTEXT': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DP_RANK': 0,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DP_RANK_LOCAL': 0,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_DP_SIZE': 1,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_EC_SIDE_CHANNEL_HOST': 'localhost',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_EC_SIDE_CHANNEL_PORT': 5601,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ELASTIC_EP_DRAIN_REQUESTS': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ELASTIC_EP_SCALE_UP_LAUNCH': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_CUDAGRAPH_GC': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_INDUCTOR_COORDINATE_DESCENT_TUNING': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_INDUCTOR_MAX_AUTOTUNE': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_PREGRAD_PASSES': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_RESPONSES_API_STORE': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENFORCE_STRICT_TOOL_CALLING': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENGINE_READY_TIMEOUT_S': 600,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_FASTSAFETENSORS_QUEUE_SIZE': 0,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_FLASHINFER_ALLREDUCE_BACKEND': 'auto',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_FLASHINFER_WORKSPACE_BUFFER_SIZE': 413138944,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_FLOAT32_MATMUL_PRECISION': 'highest',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_GC_DEBUG': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_GPT_OSS_HARMONY_SYSTEM_INSTRUCTIONS': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_GPT_OSS_SYSTEM_TOOL_MCP_LABELS': (),
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_GPU_NIC_PCIE_MAPPING': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_GPU_SYNC_CHECK': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_HAS_FLASHINFER_CUBIN': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_HUMMING_INPUT_QUANT_CONFIG': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_HUMMING_MOE_GEMM_TYPE': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_HUMMING_ONLINE_QUANT_CONFIG': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_HUMMING_USE_F16_ACCUM': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_IMAGE_TAG': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_KV_CACHE_LAYOUT': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_LOG_BATCHSIZE_INTERVAL': -1.0,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_LOG_MODEL_INSPECTION': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_LOOPBACK_IP': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_LORA_DISABLE_PDL': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_LORA_ENABLE_DUAL_STREAM': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_LORA_RESOLVER_CACHE_DIR': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_LORA_RESOLVER_HF_REPO_LIST': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MAIN_CUDA_VERSION': '13.0',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MARLIN_INPUT_DTYPE': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MARLIN_USE_ATOMIC_ADD': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MAX_COMPLETION_PROMPTS': 1024,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MAX_N_SEQUENCES': 16384,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE': 163840,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MLA_DISABLE': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MM_HASHER_ALGORITHM': 'blake3',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOE_ROUTING_SIMULATION_STRATEGY': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOE_SKIP_PADDING': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOE_USE_DEEP_GEMM': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT': 480,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_BOOTSTRAP_PORT': 8998,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_DISK_STAGING_USABLE_RATIO': 0.9,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_LOAD_RECV_THREADS': 1,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_STORE_TIER_LOG': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MQ_MAX_CHUNK_BYTES_MB': 16,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MSGPACK_ZERO_COPY_THRESHOLD': 256,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD': 1024,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_MXFP8_EMULATION_DEQUANT_AT_LOAD': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_NCCL_INCLUDE_PATH': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_NCCL_SO_PATH': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_NIC_SELECTION_VARS': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_NIXL_EP_MAX_NUM_RANKS': 32,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_NIXL_SIDE_CHANNEL_PORT': 5600,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_NVTX_SCOPES_FOR_PROFILING': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_P2P_SIDE_CHANNEL_HOST': 'localhost',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_P2P_SIDE_CHANNEL_PORT': 5710,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_PATTERN_MATCH_DEBUG': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_PLUGINS': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_PP_LAYER_PARTITION': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_PREFIX_CACHE_RETENTION_INTERVAL': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_PROCESS_NAME_PREFIX': 'VLLM',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_BUNDLE_INDICES': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_DP_PACK_STRATEGY': 'strict',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_DP_PLACEMENT_NODE_IPS': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_EXTRA_ENV_VARS_TO_COPY': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_EXTRA_ENV_VAR_PREFIXES_TO_COPY': '',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_PER_WORKER_GPUS': 1.0,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_REGEX_COMPILATION_TIMEOUT_S': 5,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_AITER_MOE_DISPATCH_POLICY': 0,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_FP8_MFMA_PAGE_ATTN': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_FP8_PADDING': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_MOE_PADDING': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_CAST_BF16_TO_FP16': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_MIN_SIZE_BYTES_MB': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION': 'NONE',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_MIN_SIZE_KB': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE': 256,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_CUSTOM_AR': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_FP4BMM': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_FP4_ASM_GEMM': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_FP8BMM': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_LINEAR': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_LINEAR_HIPBMM': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_MHA': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_MLA': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_MOE': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_RMSNORM': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_TRITON_GEMM': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_TRITON_ROPE': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_SKINNY_GEMM': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_RUST_FRONTEND_PATH': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD': 256,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_SKIP_P2P_CHECK': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_SKIP_PRECOMPILED_VERSION_SUFFIX': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_SPARSE_INDEXER_MAX_LOGITS_MB': 512,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_SSM_CONV_STATE_LAYOUT': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_SYSTEM_START_DATE': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_TARGET_DEVICE': 'cuda',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_TEST_FORCE_FP8_MARLIN': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_TOOL_JSON_ERROR_AUTOMATIC_RETRY': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_TOOL_PARSE_REGEX_TIMEOUT_SECONDS': 1,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_TPU_USING_PATHWAYS': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_TRACE_FUNCTION': 0,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_TRITON_ATTN_USE_TD': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_TRITON_FORCE_FIRST_CONFIG': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_TRITON_USE_TD': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USAGE_SOURCE': 'production',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_AOT_COMPILE': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_BREAKABLE_CUDAGRAPH': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_BYTECODE_HOOK': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_DEEP_GEMM': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_DEEP_GEMM_E8M0': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_DEEP_GEMM_TMA_ALIGNED_SCALES': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_EXPERIMENTAL_PARSER_CONTEXT': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_FASTOKENS': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_FLASHINFER_MOE_INT4': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_FLASHINFER_SAMPLER': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_FUSED_MOE_GROUPED_TOPK': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_LAYERNAME': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_MEGA_AOT_ARTIFACT': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_NCCL_SYMM_MEM': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_OINK_OPS': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_PRECOMPILED': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_PRECOMPILED_RUST': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RAY_COMPILED_DAG_CHANNEL_TYPE': 'auto',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RAY_COMPILED_DAG_OVERLAP_COMM': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RAY_V2_EXECUTOR_BACKEND': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RAY_WRAPPED_PP_COMM': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RUST_FRONTEND': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_SIMPLE_KV_OFFLOAD': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_SPINLOOP_EXT': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_STANDALONE_COMPILE': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_TRITON_AWQ': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_V2_MODEL_RUNNER': None,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_V1_USE_OUTLINES_CACHE': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_WEIGHT_OFFLOADING_DISABLE_PIN_MEMORY': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_WEIGHT_OFFLOADING_DISABLE_UVA': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_WSL2_ENABLE_PIN_MEMORY': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_XGRAMMAR_CACHE_MB': 512,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_XLA_CACHE_PATH': '/root/.cache/vllm/xla_cache',
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_XLA_CHECK_RECOMPILATION': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_XLA_USE_SPMD': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_XPU_ENABLE_XPU_GRAPH': False,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'VLLM_XPU_USE_SAMPLER_KERNEL': True,
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m  'V_SCALE_CONSTANT': 100}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1116][0m Vllm config hash: 7ba0a02792
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:1155][0m Dynamo bytecode transform time: 1.94 s
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/piecewise_backend.py:152][0m PiecewiseBackend: compile_ranges: [(1, 16384)]
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/piecewise_backend.py:156][0m PiecewiseBackend: compile_sizes: []
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:254][0m Directly load the 0-th graph for compile range (1, 16384)from inductor_standalone via handle ('artifact_compile_range_1_16384_subgraph_0', '/root/.cache/vllm/torch_compile_cache/098d564cd0/rank_0_0/backbone/artifact_compile_range_1_16384_subgraph_0')
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:254][0m Directly load the 1-th graph for compile range (1, 16384)from inductor_standalone via handle ('artifact_compile_range_1_16384_subgraph_1', '/root/.cache/vllm/torch_compile_cache/098d564cd0/rank_0_0/backbone/artifact_compile_range_1_16384_subgraph_1')
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/backends.py:254][0m Directly load the 2-th graph for compile range (1, 16384)from inductor_standalone via handle ('artifact_compile_range_1_16384_subgraph_2', '/root/.cache/vllm/torch_compile_cache/098d564cd0/rank_0_0/backbone/artifact_compile_range_1_16384_subgraph_2')
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:45[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:46[0m [90m[compilation/backends.py:254][0m Directly load the 36-th graph for compile range (1, 16384)from inductor_standalone via handle ('artifact_compile_range_1_16384_subgraph_36', '/root/.cache/vllm/torch_compile_cache/098d564cd0/rank_0_0/backbone/artifact_compile_range_1_16384_subgraph_36')
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:46[0m [90m[compilation/backends.py:292][0m Directly load the compiled graph(s) for compile range (1, 16384) from the cache, took 0.892 s
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:46[0m [90m[compilation/decorators.py:311][0m Directly load AOT compilation from path /root/.cache/vllm/torch_compile_cache/torch_aot_compile/c7f1abfac3dd1427308fed648e3ca7b401187abfd51185b58059d5e4dc0eb741/rank_0_0/model
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:46[0m [90m[compilation/monitor.py:53][0m torch.compile took 3.03 s in total
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:46[0m [90m[compilation/monitor.py:81][0m Initial profiling/warmup run took 0.02 s
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:47 [v1/engine/utils.py:1262] Waiting for 1 local, 0 remote core engine proc(s) to start.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:47[0m [90m[base.py:155][0m Profiling fallback (PID 1614, GPU 0): requested=105.43, profiled=24.7, available=80.72
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:47[0m [90m[base.py:163][0m Available KV cache memory: 80.72 GiB (profiling fallback)
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:47[0m [90m[v1/core/kv_cache_utils.py:2177][0m GPU KV cache size: 587,808 tokens
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:47[0m [90m[v1/core/kv_cache_utils.py:2178][0m Maximum concurrency for 40,960 tokens per request: 14.35x
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [33mWARNING[0m [90m08-03 15:22:47[0m [90m[base.py:188][0m [LLM Worker 0] Sleep Mode DISABLED.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:48[0m [90m[model_executor/.../cute_dsl/ll_bf16.py:30][0m cuteDSL (CUTLASS Python) not available, ll_bf16_gemm disabled
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:48[0m [90m[model_executor/warmup/cutedsl_warmup.py:96][0m Skipping CuTeDSL warmup on non-CUDA platform.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:48[0m [90m[v1/worker/gpu_model_runner.py:6798][0m Rank 0: Torch profiler disabled for CUDA graph capture
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   0%|          | 0/4 [00:00<?, ?it/s][0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (PIECEWISE,BatchDescriptor(num_tokens=8, num_reqs=None, uniform=False, has_lora=False, num_active_loras=0))
 
-## 2026-08-03 baseline
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  25%|██▌       | 1/4 [00:00<00:00,  3.01it/s][0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (PIECEWISE,BatchDescriptor(num_tokens=4, num_reqs=None, uniform=False, has_lora=False, num_active_loras=0))
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (PIECEWISE,BatchDescriptor(num_tokens=2, num_reqs=None, uniform=False, has_lora=False, num_active_loras=0))
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (PIECEWISE,BatchDescriptor(num_tokens=1, num_reqs=None, uniform=False, has_lora=False, num_active_loras=0))
 
-### Pipeline boundary map
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 4/4 [00:00<00:00, 10.35it/s]
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 4/4 [00:00<00:00,  8.75it/s]
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m
+Capturing CUDA graphs (decode, FULL):   0%|          | 0/3 [00:00<?, ?it/s][0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:48[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:49[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:49[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (FULL,BatchDescriptor(num_tokens=4, num_reqs=4, uniform=True, has_lora=False, num_active_loras=0))
 
-| Stage | Current boundary | Evidence status |
-| --- | --- | --- |
-| 0 Thinker | Generates text and hidden states, then `llm2tts` extracts the TTS region for Stage 1. | Observed in [`pipeline.py`](../vllm_omni/model_executor/models/minicpmo_4_5/pipeline.py) and [`llm2tts`](../vllm_omni/model_executor/stage_input_processors/minicpmo_4_5_omni.py). |
-| 1 Talker prefill | Builds text plus projected Thinker hidden-state embeddings and starts one condition chunk. | Observed in [`preprocess`](../vllm_omni/model_executor/models/minicpmo_4_5/minicpmo_4_5_omni_tts.py). |
-| 1 Talker decode | Samples codec IDs until audio EOS or 500 codec steps for ordinary streaming, or 26 codec steps for native duplex. | Observed in [`make_omni_output`](../vllm_omni/model_executor/models/minicpmo_4_5/minicpmo_4_5_omni_tts.py). |
-| 1 to 2 bridge | Accumulates codec deltas into 25-frame windows and adds three frames of left context. | Observed in [`tts2code2wav_async_chunk`](../vllm_omni/model_executor/stage_input_processors/minicpmo_4_5_omni.py). |
-| 2 Code2Wav | Validates request, epoch, sequence, prompt, and codec shape before decoding waveform. | Observed in [`MiniCPMO45Code2Wav`](../vllm_omni/model_executor/models/minicpmo_4_5/minicpmo_4_5_code2wav.py). |
+Capturing CUDA graphs (decode, FULL):  33%|███▎      | 1/3 [00:00<00:01,  1.51it/s][0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:49[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:49[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:49[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (FULL,BatchDescriptor(num_tokens=2, num_reqs=2, uniform=True, has_lora=False, num_active_loras=0))
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:49[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:49[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:49[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (FULL,BatchDescriptor(num_tokens=1, num_reqs=1, uniform=True, has_lora=False, num_active_loras=0))
 
-### Current cache behavior
+Capturing CUDA graphs (decode, FULL): 100%|██████████| 3/3 [00:01<00:00,  2.74it/s]
+Capturing CUDA graphs (decode, FULL): 100%|██████████| 3/3 [00:01<00:00,  2.53it/s]
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:50[0m [90m[v1/worker/gpu_model_runner.py:6844][0m Graph capturing finished in 2 secs, took 0.39 GiB
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:50[0m [90m[v1/worker/gpu_worker.py:857][0m Free memory on device (191.36/191.69 GiB) on startup. Desired GPU memory utilization is (0.55, 105.43 GiB). Actual usage is 16.83 GiB for weight, 7.2 GiB for peak activation, 0.67 GiB for non-torch memory, and 0.39 GiB for CUDAGraph memory. Replace gpu_memory_utilization config with `--kv-cache-memory=86104797799` (80.19 GiB) to fit into requested memory, or `--kv-cache-memory=178374872064` (166.12 GiB) to fully utilize gpu memory. Current kv cache memory in use is 80.72 GiB.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:50[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:50[0m [90m[utils/jit_monitor.py:299][0m CuTeDSL is not available; skipping CuTeDSL JIT monitor.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:50[0m [90m[utils/jit_monitor.py:79][0m Kernel JIT monitor activated; monitored JIT compilations during inference will use mode=warn.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:50[0m [90m[utils/gc_utils.py:40][0m GC Debug Config. enabled:False,top_objects:-1
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:50[0m [90m[v1/engine/core.py:340][0m init engine (profile, create kv cache, warmup model) took 10.59 s (compilation: 3.03 s)
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [33mWARNING[0m [90m08-03 15:22:50[0m [90m[config/scheduler.py:192][0m Using custom scheduler class vllm_omni.core.sched.omni_ar_scheduler.OmniARAsyncScheduler. This scheduler interface is not public and compatibility may not be maintained. If you have subclassed Scheduler instead of AsyncScheduler, you will see degraded performance due to async scheduling being disabled.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:51[0m [90m[factory.py:46][0m Created connector: SharedMemoryConnector
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:51[0m [90m[v1/engine/core.py:204][0m Batch queue is enabled with size 2
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:51[0m [90m[utils/gc_utils.py:40][0m GC Debug Config. enabled:False,top_objects:-1
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:51[0m [90m[config/kernel.py:277][0m Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), user-defined: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:51 [v1/engine/utils.py:1360] READY from local core engine process 0.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [32mINFO[0m [90m08-03 15:22:51[0m [90m[config/kernel.py:295][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:51 [stage_runtime.py:589] [StageRuntime] Stage 0 engine startup completed
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:51 [stage_engine_core_client.py:157] [StageEngineCoreClient] stage-0 [rep-0] initializing EngineCore
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:51 [stage_engine_core_client.py:173] [StageEngineCoreClient] Patched EngineCoreOutputs -> <class 'vllm_omni.engine.OmniEngineCoreOutputs'>
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:22:51[0m [90m[v1/engine/core.py:1380][0m EngineCore waiting for work.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:51 [stage_engine_core_client.py:213] [StageEngineCoreClient] stage-0 [rep-0] EngineCore running
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:51 [stage_runtime.py:603] [StageRuntime] Stage 0 initialized
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:51 [stage_init_utils.py:1147] Released initialization lock (fd=21)
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:22:51 [stage_runtime.py:553] [stage_init] Stage-1 set runtime devices: 0
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:51 [stage_init_utils.py:1075] Parallel config: TP=1, PP=1, DP=1, PCP=1, SP=1, CFG=1; will lock 1 devices: [0]
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:22:51 [stage_init_utils.py:1104] Acquired exclusive lock for device 0
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[plugins/__init__.py:44][0m No plugins for group vllm.platform_plugins found.
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:36][0m Checking if TPU platform is available.
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:55][0m TPU platform is not available because: No module named 'libtpu'
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:61][0m Checking if CUDA platform is available.
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:88][0m Exception happens when checking CUDA platform: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:105][0m CUDA platform is not available because: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:112][0m Checking if ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:120][0m Confirmed ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:133][0m Checking if XPU platform is available.
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:164][0m Checking if CPU platform is available.
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:112][0m Checking if ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:120][0m Confirmed ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:22:52[0m [90m[platforms/__init__.py:245][0m Automatically detected platform rocm.
+[33mWARNING[0m [90m08-03 15:22:52[0m [90m[platforms/rocm.py:123][0m Using CUDA_VISIBLE_DEVICES on ROCm is deprecated and support will be removed in vLLM v0.26.0. Please use HIP_VISIBLE_DEVICES instead.
+/app/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.1.dev2387+g9d1ba0e69.rocm
+ --> vLLM version 0.26.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+[37mDEBUG[0m [90m08-03 15:22:56[0m [90m[utils/flashinfer.py:53][0m FlashInfer unavailable since package was not found
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:31][0m No plugins for group vllm_omni.platform_plugins found.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:23][0m Checking if CUDA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:38][0m CUDA OmniPlatform is not available because: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:68][0m Checking if NPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:84][0m Checking if XPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:102][0m XPU omni platform is not available because: No module named 'oneccl_bindings_for_pytorch'
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:110][0m Checking if MUSA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:118][0m MUSA OmniPlatform is not available because: No module named 'torchada'
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[__init__.py:159][0m Automatically detected OmniPlatform rocm.
+[37mDEBUG[0m [90m08-03 15:22:57[0m [90m[utils/import_utils.py:67][0m Loading module triton_kernels from /usr/local/lib/python3.12/dist-packages/triton_kernels/__init__.py.
+[aiter] import [module_aiter_core] under /usr/local/lib/python3.12/dist-packages/aiter/jit/module_aiter_core.so
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:01 [v1/engine/utils.py:1257] Waiting for 1 local, 0 remote core engine proc(s) to connect.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:31][0m No plugins for group vllm_omni.platform_plugins found.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:23][0m Checking if CUDA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:38][0m CUDA OmniPlatform is not available because: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:68][0m Checking if NPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:84][0m Checking if XPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:102][0m XPU omni platform is not available because: No module named 'oneccl_bindings_for_pytorch'
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:110][0m Checking if MUSA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:118][0m MUSA OmniPlatform is not available because: No module named 'torchada'
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:01[0m [90m[__init__.py:159][0m Automatically detected OmniPlatform rocm.
+[33mWARNING[0m [90m08-03 15:23:01[0m [90m[utils/import_utils.py:408][0m Module humming was found but failed to import
+[33mWARNING[0m [90m08-03 15:23:01[0m [90m[utils/import_utils.py:408][0m Traceback (most recent call last):
+[33mWARNING[0m [90m08-03 15:23:01[0m [90m[utils/import_utils.py:408][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/utils/import_utils.py", line 404, in _has_module
+[33mWARNING[0m [90m08-03 15:23:01[0m [90m[utils/import_utils.py:408][0m     if importlib.util.find_spec(module_name) is None:
+[33mWARNING[0m [90m08-03 15:23:01[0m [90m[utils/import_utils.py:408][0m        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[33mWARNING[0m [90m08-03 15:23:01[0m [90m[utils/import_utils.py:408][0m   File "<frozen importlib.util>", line 111, in find_spec
+[33mWARNING[0m [90m08-03 15:23:01[0m [90m[utils/import_utils.py:408][0m ValueError: humming.__spec__ is None
+[32mINFO[0m [90m08-03 15:23:01[0m [90m[patch.py:252][0m NVFP4 W4A4 weight_scale NaN-clamp: installed.
+[32mINFO[0m [90m08-03 15:23:01[0m [90m[patch.py:481][0m [cumem-cuda] CuMemAllocator._python_free_callback patched: asleep guard extended to all platforms.
+[37mDEBUG[0m [90m08-03 15:23:02[0m [90m[factory.py:35][0m Registered connector: MooncakeStoreConnector
+[37mDEBUG[0m [90m08-03 15:23:02[0m [90m[factory.py:35][0m Registered connector: MooncakeTransferEngineConnector
+[37mDEBUG[0m [90m08-03 15:23:02[0m [90m[factory.py:35][0m Registered connector: SharedMemoryConnector
+[37mDEBUG[0m [90m08-03 15:23:02[0m [90m[factory.py:35][0m Registered connector: YuanrongConnector
+[37mDEBUG[0m [90m08-03 15:23:02[0m [90m[factory.py:35][0m Registered connector: YuanrongTransferEngineConnector
+[37mDEBUG[0m [90m08-03 15:23:02[0m [90m[factory.py:35][0m Registered connector: MoriTransferEngineConnector
+[37mDEBUG[0m [90m08-03 15:23:02[0m [90m[factory.py:35][0m Registered connector: MooncakeConnector
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[stage_engine_core_proc.py:132][0m [StageEngineCoreProc] Patched EngineCoreRequest -> OmniEngineCoreRequest: <class 'vllm_omni.engine.OmniEngineCoreRequest'>
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[v1/engine/core.py:1233][0m Waiting for init message from front-end.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:02 [v1/engine/utils.py:1360] HELLO from local core engine process 0.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[v1/engine/core.py:1244][0m Received init message: EngineHandshakeMetadata(addresses=EngineZmqAddresses(inputs=['ipc:///tmp/bba72870-61c9-4961-8a34-34917e5e581c'], outputs=['ipc:///tmp/a6b72294-9e60-40a0-bfa8-bd91417d7191'], coordinator_input=None, coordinator_output=None, frontend_stats_publish_address=None), parallel_config={})
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[v1/engine/core.py:1043][0m Has DP Coordinator: False, stats publish address: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[plugins/__init__.py:52][0m Available plugins for group vllm.general_plugins:
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[plugins/__init__.py:54][0m - vllm_omni_register_models -> vllm_omni.engine.arg_utils:register_omni_models_to_vllm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[plugins/__init__.py:54][0m - quark_online_quant -> quark.online_quantization.vllm.plugin:register
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[plugins/__init__.py:54][0m - lora_filesystem_resolver -> vllm.plugins.lora_resolvers.filesystem_resolver:register_filesystem_resolver
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[plugins/__init__.py:54][0m - lora_hf_hub_resolver -> vllm.plugins.lora_resolvers.hf_hub_resolver:register_hf_hub_resolver
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:02[0m [90m[plugins/__init__.py:57][0m All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:03[0m [90m[v1/engine/core.py:116][0m Initializing a V1 LLM engine (v0.26.0) with config: model='openbmb/MiniCPM-o-4_5', speculative_config=None, tokenizer='openbmb/MiniCPM-o-4_5', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=4096, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=None, quantization_config=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False, jit_monitor_mode='warn', jit_monitor_verbose=False), seed=0, served_model_name=openbmb/MiniCPM-o-4_5, enable_prefix_caching=False, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['+sparse_attn_indexer', 'none'], 'ir_enable_torch_wrap': True, 'splitting_ops': ['vllm::unified_attention_with_output', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::qwen_gdn_attention_core', 'vllm::gdn_attention_core_xpu', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::kda_attention', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::deepseek_v4_attention', 'vllm::hpc_rope_norm_forward', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update'], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': [], 'compile_ranges_endpoints': [8192], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': True, 'alignment_asserts': True, 'scalar_asserts': True, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': False, 'fuse_act_quant': False, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False, 'enable_qk_norm_rope_fusion': False, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False, 'fuse_mla_dual_rms_norm': False, 'fuse_rope_kvcache': False, 'fuse_qk_norm_rope_kvcache': False}, 'max_cudagraph_capture_size': 8, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_bf16x3_router_gemm=False, moe_backend='auto', linear_backend='auto')
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:03[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.deepseek_v2.DeepseekV2Model'>: ['input_ids', 'positions', 'intermediate_tensors', 'inputs_embeds']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:03[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.deepseek_eagle3.DeepseekV2Eagle3Model'>: ['input_ids', 'positions', 'hidden_states', 'input_embeds']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:03[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.laguna.LagunaModel'>: ['input_ids', 'positions', 'intermediate_tensors', 'inputs_embeds']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:03[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.qwen3_dflash.DFlashQwen3Model'>: ['input_ids', 'positions', 'input_embeds']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:03[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.laguna_dflash.DFlashLagunaModel'>: ['input_ids', 'positions', 'input_embeds']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:03[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.v1.spec_decode.ngram_proposer_gpu.NgramGPUKernel'>: ['num_tokens_no_spec', 'token_ids_gpu', 'combined_mask']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:03[0m [90m[tokenizers/registry.py:78][0m Loading CachedHfTokenizer for tokenizer_mode='hf'
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[config/kernel.py:85][0m Setting IR op priority for rms_norm to ['native']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[ir/op.py:422][0m Priority for vllm.ir.rms_norm set to ['native']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[config/kernel.py:85][0m Setting IR op priority for fused_add_rms_norm to ['native']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[ir/op.py:422][0m Priority for vllm.ir.fused_add_rms_norm set to ['native']
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[__init__.py:31][0m No plugins for group vllm_omni.general_plugins found.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[distributed/parallel_state.py:1571][0m world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://129.212.183.58:47487 backend=nccl
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:04[0m [90m[distributed/parallel_state.py:1615][0m world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://129.212.183.58:47487 backend=nccl
+[rank0]:[W803 15:23:04.530524420 ProcessGroupGloo.cpp:524] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[distributed/parallel_state.py:1697][0m Detected 1 nodes in the distributed environment
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:04[0m [90m[distributed/parallel_state.py:1946][0m rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[gpu_ar_worker.py:105][0m worker init memory snapshot: torch_peak=0.0GiB, free_memory=91.91GiB, total_memory=191.69GiB, rocm_memory=99.78GiB, torch_memory=0.0GiB, non_torch_memory=99.78GiB, timestamp=1785770584.7526693, auto_measure=True
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[gpu_ar_worker.py:106][0m worker requested memory: 42.17GiB
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [33mWARNING[0m [90m08-03 15:23:04[0m [90m[gpu_ar_worker.py:116][0m OMNI GPUARWorker forces v1 model runner for omni hooks.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[v1/sample/logits_processor/__init__.py:63][0m No logitsprocs plugins installed (group vllm.logits_processors).
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:04[0m [90m[utils/torch_utils.py:167][0m OMP_NUM_THREADS is not set; defaulting Torch threads to 1.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [transformers] `MiniCPMOProcessor` defines `image_processor_class = 'AutoImageProcessor'`, which is deprecated. Register the correct mapping in `AutoImageProcessor` instead.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [transformers] Requested torchvision backend is not available. Falling back to pil backend.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [transformers] `MiniCPMOProcessor` defines `feature_extractor_class = 'WhisperFeatureExtractor'`, which is deprecated. Register the correct mapping in `AutoFeatureExtractor` instead.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [transformers] Image processor MiniCPMVImageProcessor: kwargs ['max_slice_nums'] were applied for backward compatibility. To avoid this warning, add them to valid_kwargs: create a custom TypedDict extending ImagesKwargs with these keys and set it as the `valid_kwargs` class attribute.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:12 [v1/engine/utils.py:1262] Waiting for 1 local, 0 remote core engine proc(s) to start.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:17[0m [90m[model_executor/offloader/base.py:121][0m Offloader set to NoopOffloader (no offloading).
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:17[0m [90m[factory.py:46][0m Created connector: SharedMemoryConnector
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:17[0m [90m[omni_connector_model_runner_mixin.py:2134][0m Skipping incompatible connector payload hook vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.tts2code2wav_async_chunk; signature=(transfer_manager: Any, multimodal_output: Any, request: Any, is_finished: bool = False) -> vllm_omni.data_entry_keys.OmniPayloadStruct | None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:17[0m [90m[omni_connector_model_runner_mixin.py:111][0m [Stage-1] init_omni_connectors: async_chunk=True, custom_process_func=None, connector=SharedMemoryConnector, func_path=None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [33mWARNING[0m [90m08-03 15:23:17[0m [90m[base.py:188][0m [LLM Worker 0] Sleep Mode DISABLED.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [33mWARNING[0m [90m08-03 15:23:17[0m [90m[base.py:188][0m [LLM Worker 0] Sleep Mode DISABLED.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:17[0m [90m[v1/worker/gpu_model_runner.py:5250][0m Starting to load model openbmb/MiniCPM-o-4_5...
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:17[0m [90m[config/vllm.py:1109][0m Asynchronous scheduling is enabled.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:17[0m [90m[config/kernel.py:277][0m Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), user-defined: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:17[0m [90m[config/kernel.py:295][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:17[0m [90m[config/kernel.py:277][0m Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), user-defined: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:17[0m [90m[config/kernel.py:295][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:17[0m [90m[platforms/rocm.py:570][0m Using TRITON_ATTN backend (selected via --attention-backend).
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[compilation/backends.py:107][0m Using InductorStandaloneAdaptor
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[config/compilation.py:1312][0m enabled custom ops: Counter()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[config/compilation.py:1313][0m disabled custom ops: Counter({'rms_norm': 41, 'silu_and_mul': 20, 'rotary_embedding': 1, 'apply_rotary_emb': 1})
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [33mWARNING[0m [90m08-03 15:23:18[0m [90m[config/compilation.py:1338][0m Op 'sparse_attn_indexer' not present in model, enabling with '+sparse_attn_indexer' has no effect
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[config/compilation.py:1312][0m enabled custom ops: Counter()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[config/compilation.py:1313][0m disabled custom ops: Counter({'rms_norm': 41, 'silu_and_mul': 20, 'rotary_embedding': 1, 'apply_rotary_emb': 1})
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/model_loader/base_loader.py:63][0m Loading weights on cuda ...
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/model_loader/weight_utils.py:506][0m Using model weights format [['model-00002-of-00004.safetensors', 'model-00001-of-00004.safetensors', 'model-00003-of-00004.safetensors', 'model-00004-of-00004.safetensors']]
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:18[0m [90m[model_executor/model_loader/weight_utils.py:869][0m Filesystem type for checkpoints: EXT4. Checkpoint size: 17.46 GiB. Available RAM: 224.53 GiB.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:18[0m [90m[model_executor/model_loader/weight_utils.py:892][0m Auto-prefetch is disabled because the filesystem (EXT4) is not a recognized network FS (NFS/Lustre). If you want to force prefetching, start vLLM with --safetensors-load-strategy=prefetch.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m
+Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:00<00:00, 247.18it/s]
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight embed_tokens.weight with shape torch.Size([32000, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.0.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.0.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.0.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.0.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.0.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.0.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.1.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.1.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.1.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.1.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.1.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.1.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.10.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.10.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.10.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.10.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.10.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.10.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.11.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.11.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.11.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.11.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.11.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.11.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.12.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.12.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.12.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.12.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.12.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.12.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.13.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.13.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.13.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.13.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.13.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.13.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.14.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.14.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.14.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.14.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.14.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.14.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.15.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.15.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.15.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.15.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.15.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.15.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.16.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.16.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.16.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.16.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.16.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.16.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.17.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.17.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.17.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.17.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.17.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.17.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.18.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.18.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.18.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.18.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.18.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.18.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.19.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.19.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.19.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.19.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.19.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.19.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.2.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.2.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.2.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.2.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.2.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.2.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.3.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.3.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.3.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.3.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.3.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.3.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.4.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.4.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.4.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.4.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.4.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.4.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.5.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.5.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.5.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.5.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.5.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.5.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.6.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.6.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.6.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.6.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.6.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.6.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.7.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.7.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.7.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.7.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.7.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.7.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.8.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.8.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.8.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.8.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.8.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.8.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.input_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.mlp.down_proj.weight with shape torch.Size([768, 3072])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 0 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.9.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:940][0m Loaded shard 1 with shape torch.Size([3072, 768]) into talker.tts_obj.model.layers.9.mlp.gate_up_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.post_attention_layernorm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard k with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.9.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight layers.9.self_attn.o_proj.weight with shape torch.Size([768, 768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard q with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.9.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/layers/linear.py:1346][0m Loaded shard v with shape torch.Size([768, 768]) into talker.tts_obj.model.layers.9.self_attn.qkv_proj.weight
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/models/utils.py:283][0m Loaded weight norm.weight with shape torch.Size([768])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:18[0m [90m[model_executor/model_loader/default_loader.py:430][0m Loading weights took 0.35 seconds
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:18[0m [90m[model_executor/model_loader/base_loader.py:70][0m Peak GPU memory after loading weights: 0.88 GiB
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:19[0m [90m[v1/worker/gpu_model_runner.py:5347][0m Model loading took 0.65 GiB memory and 0.874532 seconds
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:19[0m [90m[v1/worker/gpu_model_runner.py:6369][0m Skipping memory profiling for multimodal encoder and encoder cache.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:19[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m Traced files (to be considered for compilation cache):
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/attention/attention.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/torch/_dynamo/polyfills/itertools.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/distributed/parallel_state.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/llama.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/utils/torch_utils.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/parameter.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/ir/op.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/rotary_embedding/base.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/linear.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/custom_op.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/activation.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/rotary_embedding/common.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/layernorm.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/interfaces.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/platforms/interface.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/torch/nn/modules/container.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/torch/_dynamo/polyfills/builtins.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/caching.py:601][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/utils.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:107][0m Using InductorStandaloneAdaptor
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m Traced files (to be considered for compilation cache):
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/torch/_dynamo/polyfills/builtins.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/torch/_dynamo/polyfills/itertools.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/torch/nn/modules/container.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/distributed/parallel_state.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/ir/op.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/custom_op.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/activation.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/attention/attention.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/layernorm.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/linear.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/rotary_embedding/base.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/rotary_embedding/common.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/utils.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/interfaces.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/llama.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/model_executor/parameter.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/platforms/interface.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1038][0m /usr/local/lib/python3.12/dist-packages/vllm/utils/torch_utils.py
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1094][0m Using cache directory: /root/.cache/vllm/torch_compile_cache/a95f514dd9/rank_0_0/backbone for vLLM's torch.compile
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1105][0m torch.compile cache factors: env=09f2c2d8909b17b24142c546bf7e2238af33b507f0a23929f3abfd3a9aa2e884 cfg=d7e36d993d comp=7e2b8735ed code=b6341a54404b69ae72120998712526e6817014caff4900e5f3de3697ed4ceb48 dir=/root/.cache/vllm/torch_compile_cache/a95f514dd9/rank_0_0/backbone
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m Compile env factors (raw):
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m {'CMAKE_BUILD_TYPE': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'CUDA_HOME': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'K_SCALE_CONSTANT': 200,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'MOONCAKE_PREFERRED_SEGMENT': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'MOONCAKE_REQUESTER_LOCAL_HOSTNAME': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'NVCC_THREADS': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'Q_SCALE_CONSTANT': 200,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_HABANA_VISIBLE_MODULES': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_NEURON_RT_VISIBLE_CORES': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_ONEAPI_DEVICE_SELECTOR': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_RBLN_RT_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_ROCR_VISIBLE_DEVICES': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'RAY_EXPERIMENTAL_NOSET_TPU_VISIBLE_CHIPS': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VERBOSE': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLOW_CHUNKED_LOCAL_ATTN_WITH_HYBRID_KV_CACHE': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLOW_INSECURE_SERIALIZATION': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLOW_LONG_MAX_MODEL_LEN': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLOW_RUNTIME_LORA_UPDATING': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLREDUCE_USE_FLASHINFER': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ALLREDUCE_USE_SYMM_MEM': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_API_KEY': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_BATCH_INVARIANT': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_BLOCKSCALE_FP8_GEMM_FLASHINFER': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_BUILD_COMMIT': 'unknown',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_BUILD_PIPELINE': 'local',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_BUILD_URL': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_COMPILE_CACHE_SAVE_FORMAT': 'binary',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_COMPUTE_NANS_IN_LOGITS': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_CONFIGURE_LOGGING': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_CONFIG_ROOT': '/root/.config/vllm',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_ATTN_SPLIT_KV': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_INT4_W4A8': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_NUM_OF_RESERVED_CPU': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_OMP_THREADS_BIND': 'auto',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_CPU_SGL_KERNEL': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_CUDART_SO_PATH': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_CUSTOM_SCOPES_FOR_PROFILING': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DBO_COMM_SMS': 64,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEBUG_MFU_METRICS': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEBUG_WORKSPACE': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEPLL_NVFP4_DISPATCH': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_BUFFER_SIZE_MB': 1024,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_V2_ALLOW_HYBRID_MODE': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_V2_ALLOW_MULTIPLE_REDUCTION': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEPEP_V2_PREFER_OVERLAP': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DEEP_GEMM_WARMUP': 'relax',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLED_KERNELS': (),
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_COMPILE_CACHE': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_LOG_LOGO': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_PYNCCL': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_REQUEST_ID_RANDOMIZATION': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISABLE_SHARED_EXPERTS_STREAM': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DISTRIBUTED_USE_SPLIT_GROUP': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DOCKER_BUILD_CONTEXT': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DP_RANK': 0,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DP_RANK_LOCAL': 0,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_DP_SIZE': 1,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_EC_SIDE_CHANNEL_HOST': 'localhost',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_EC_SIDE_CHANNEL_PORT': 5601,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ELASTIC_EP_DRAIN_REQUESTS': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ELASTIC_EP_SCALE_UP_LAUNCH': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_CUDAGRAPH_GC': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_FLA_PACKED_RECURRENT_DECODE': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_INDUCTOR_COORDINATE_DESCENT_TUNING': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_INDUCTOR_MAX_AUTOTUNE': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_PREGRAD_PASSES': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENABLE_RESPONSES_API_STORE': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENFORCE_STRICT_TOOL_CALLING': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ENGINE_READY_TIMEOUT_S': 600,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_FASTSAFETENSORS_QUEUE_SIZE': 0,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_FLASHINFER_ALLREDUCE_BACKEND': 'auto',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_FLASHINFER_WORKSPACE_BUFFER_SIZE': 413138944,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_FLOAT32_MATMUL_PRECISION': 'highest',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_GC_DEBUG': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_GPT_OSS_HARMONY_SYSTEM_INSTRUCTIONS': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_GPT_OSS_SYSTEM_TOOL_MCP_LABELS': (),
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_GPU_NIC_PCIE_MAPPING': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_GPU_SYNC_CHECK': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_HAS_FLASHINFER_CUBIN': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_HUMMING_INPUT_QUANT_CONFIG': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_HUMMING_MOE_GEMM_TYPE': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_HUMMING_ONLINE_QUANT_CONFIG': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_HUMMING_USE_F16_ACCUM': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_IMAGE_TAG': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_KV_CACHE_LAYOUT': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_LOG_BATCHSIZE_INTERVAL': -1.0,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_LOG_MODEL_INSPECTION': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_LOOPBACK_IP': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_LORA_DISABLE_PDL': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_LORA_ENABLE_DUAL_STREAM': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_LORA_RESOLVER_CACHE_DIR': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_LORA_RESOLVER_HF_REPO_LIST': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MAIN_CUDA_VERSION': '13.0',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MARLIN_INPUT_DTYPE': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MARLIN_USE_ATOMIC_ADD': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MAX_COMPLETION_PROMPTS': 1024,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MAX_N_SEQUENCES': 16384,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MAX_TOKENS_PER_EXPERT_FP4_MOE': 163840,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MLA_DISABLE': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MM_HASHER_ALGORITHM': 'blake3',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOE_ROUTING_SIMULATION_STRATEGY': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOE_SKIP_PADDING': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOE_USE_DEEP_GEMM': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT': 480,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_BOOTSTRAP_PORT': 8998,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_DISK_STAGING_USABLE_RATIO': 0.9,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_LOAD_RECV_THREADS': 1,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MOONCAKE_STORE_TIER_LOG': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MQ_MAX_CHUNK_BYTES_MB': 16,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MSGPACK_ZERO_COPY_THRESHOLD': 256,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD': 1024,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_MXFP8_EMULATION_DEQUANT_AT_LOAD': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_NCCL_INCLUDE_PATH': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_NCCL_SO_PATH': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_NIC_SELECTION_VARS': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_NIXL_EP_MAX_NUM_RANKS': 32,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_NIXL_SIDE_CHANNEL_PORT': 5600,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_NVTX_SCOPES_FOR_PROFILING': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_P2P_SIDE_CHANNEL_HOST': 'localhost',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_P2P_SIDE_CHANNEL_PORT': 5710,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_PATTERN_MATCH_DEBUG': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_PLUGINS': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_PP_LAYER_PARTITION': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_PREFIX_CACHE_RETENTION_INTERVAL': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_PROCESS_NAME_PREFIX': 'VLLM',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_BUNDLE_INDICES': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_DP_PACK_STRATEGY': 'strict',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_DP_PLACEMENT_NODE_IPS': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_EXTRA_ENV_VARS_TO_COPY': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_EXTRA_ENV_VAR_PREFIXES_TO_COPY': '',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_RAY_PER_WORKER_GPUS': 1.0,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_REGEX_COMPILATION_TIMEOUT_S': 5,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_AITER_MOE_DISPATCH_POLICY': 0,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_FP8_MFMA_PAGE_ATTN': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_FP8_PADDING': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_MOE_PADDING': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_CAST_BF16_TO_FP16': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_MIN_SIZE_BYTES_MB': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION': 'NONE',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_QUICK_REDUCE_QUANTIZATION_MIN_SIZE_KB': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_SLEEP_MEM_CHUNK_SIZE': 256,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_CUSTOM_AR': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_FP4BMM': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_FP4_ASM_GEMM': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_FP8BMM': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_LINEAR': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_LINEAR_HIPBMM': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_MHA': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_MLA': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_MOE': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_RMSNORM': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_TRITON_GEMM': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_TRITON_ROPE': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_ROCM_USE_SKINNY_GEMM': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_RUST_FRONTEND_PATH': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD': 256,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_SKIP_P2P_CHECK': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_SKIP_PRECOMPILED_VERSION_SUFFIX': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_SPARSE_INDEXER_MAX_LOGITS_MB': 512,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_SSM_CONV_STATE_LAYOUT': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_SYSTEM_START_DATE': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_TARGET_DEVICE': 'cuda',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_TEST_FORCE_FP8_MARLIN': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_TOOL_JSON_ERROR_AUTOMATIC_RETRY': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_TOOL_PARSE_REGEX_TIMEOUT_SECONDS': 1,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_TPU_USING_PATHWAYS': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_TRACE_FUNCTION': 0,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_TRITON_ATTN_USE_TD': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_TRITON_FORCE_FIRST_CONFIG': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_TRITON_USE_TD': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USAGE_SOURCE': 'production',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_AOT_COMPILE': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_BREAKABLE_CUDAGRAPH': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_BYTECODE_HOOK': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_DEEP_GEMM': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_DEEP_GEMM_E8M0': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_DEEP_GEMM_TMA_ALIGNED_SCALES': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_EXPERIMENTAL_PARSER_CONTEXT': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_FASTOKENS': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_FLASHINFER_MOE_INT4': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_FLASHINFER_SAMPLER': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_FUSED_MOE_GROUPED_TOPK': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_LAYERNAME': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_MEGA_AOT_ARTIFACT': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_NCCL_SYMM_MEM': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_OINK_OPS': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_PRECOMPILED': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_PRECOMPILED_RUST': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RAY_COMPILED_DAG_CHANNEL_TYPE': 'auto',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RAY_COMPILED_DAG_OVERLAP_COMM': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RAY_V2_EXECUTOR_BACKEND': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RAY_WRAPPED_PP_COMM': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_RUST_FRONTEND': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_SIMPLE_KV_OFFLOAD': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_SPINLOOP_EXT': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_STANDALONE_COMPILE': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_TRITON_AWQ': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_USE_V2_MODEL_RUNNER': None,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_V1_USE_OUTLINES_CACHE': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_WEIGHT_OFFLOADING_DISABLE_PIN_MEMORY': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_WEIGHT_OFFLOADING_DISABLE_UVA': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_WSL2_ENABLE_PIN_MEMORY': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_XGRAMMAR_CACHE_MB': 512,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_XLA_CACHE_PATH': '/root/.cache/vllm/xla_cache',
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_XLA_CHECK_RECOMPILATION': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_XLA_USE_SPMD': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_XPU_ENABLE_XPU_GRAPH': False,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'VLLM_XPU_USE_SAMPLER_KERNEL': True,
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m  'V_SCALE_CONSTANT': 100}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1116][0m Vllm config hash: d7e36d993d
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:1155][0m Dynamo bytecode transform time: 1.31 s
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/piecewise_backend.py:152][0m PiecewiseBackend: compile_ranges: [(1, 8192)]
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/piecewise_backend.py:156][0m PiecewiseBackend: compile_sizes: []
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:254][0m Directly load the 0-th graph for compile range (1, 8192)from inductor_standalone via handle ('artifact_compile_range_1_8192_subgraph_0', '/root/.cache/vllm/torch_compile_cache/a95f514dd9/rank_0_0/backbone/artifact_compile_range_1_8192_subgraph_0')
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:254][0m Directly load the 1-th graph for compile range (1, 8192)from inductor_standalone via handle ('artifact_compile_range_1_8192_subgraph_1', '/root/.cache/vllm/torch_compile_cache/a95f514dd9/rank_0_0/backbone/artifact_compile_range_1_8192_subgraph_1')
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/backends.py:254][0m Directly load the 2-th graph for compile range (1, 8192)from inductor_standalone via handle ('artifact_compile_range_1_8192_subgraph_2', '/root/.cache/vllm/torch_compile_cache/a95f514dd9/rank_0_0/backbone/artifact_compile_range_1_8192_subgraph_2')
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.5 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:20[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.3 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:95][0m Donated input IDs: {4}
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/.../ir/inplace_functionalization.py:96][0m VllmIRInplaceFunctionalizationPass functionalized 2 vLLM IR nodes for op(s) fused_add_rms_norm
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/passes/vllm_inductor_pass.py:87][0m VllmIRInplaceFunctionalizationPass completed in 0.4 ms
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:21[0m [90m[compilation/backends.py:254][0m Directly load the 20-th graph for compile range (1, 8192)from inductor_standalone via handle ('artifact_compile_range_1_8192_subgraph_20', '/root/.cache/vllm/torch_compile_cache/a95f514dd9/rank_0_0/backbone/artifact_compile_range_1_8192_subgraph_20')
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:21[0m [90m[compilation/backends.py:292][0m Directly load the compiled graph(s) for compile range (1, 8192) from the cache, took 0.429 s
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:21[0m [90m[compilation/decorators.py:311][0m Directly load AOT compilation from path /root/.cache/vllm/torch_compile_cache/torch_aot_compile/c782045f7db286b9966729ba44514f86966ccf0684dd8a0e7790cc71cd5d3a2b/rank_0_0/model
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:21[0m [90m[compilation/monitor.py:53][0m torch.compile took 1.84 s in total
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:22[0m [90m[compilation/monitor.py:81][0m Initial profiling/warmup run took 0.87 s
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:22[0m [90m[base.py:155][0m Profiling fallback (PID 1812, GPU 0): requested=42.17, profiled=1.25, available=40.92
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:22[0m [90m[base.py:163][0m Available KV cache memory: 40.92 GiB (profiling fallback)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:22[0m [90m[v1/core/kv_cache_utils.py:2177][0m GPU KV cache size: 715,104 tokens
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:22[0m [90m[v1/core/kv_cache_utils.py:2178][0m Maximum concurrency for 4,096 tokens per request: 174.59x
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [33mWARNING[0m [90m08-03 15:23:22[0m [90m[base.py:188][0m [LLM Worker 0] Sleep Mode DISABLED.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:22[0m [90m[model_executor/.../cute_dsl/ll_bf16.py:30][0m cuteDSL (CUTLASS Python) not available, ll_bf16_gemm disabled
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:22[0m [90m[model_executor/warmup/cutedsl_warmup.py:96][0m Skipping CuTeDSL warmup on non-CUDA platform.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:22[0m [90m[v1/worker/gpu_model_runner.py:6798][0m Rank 0: Torch profiler disabled for CUDA graph capture
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:22 [v1/engine/utils.py:1262] Waiting for 1 local, 0 remote core engine proc(s) to start.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   0%|          | 0/4 [00:00<?, ?it/s][0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (PIECEWISE,BatchDescriptor(num_tokens=8, num_reqs=None, uniform=False, has_lora=False, num_active_loras=0))
 
-**Observed:** Stage 1 uses a native vLLM `LlamaModel`, and ordinary condition transitions are injected by `preprocess` without resetting the vLLM request session.
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  25%|██▌       | 1/4 [00:00<00:00,  5.13it/s][0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (PIECEWISE,BatchDescriptor(num_tokens=4, num_reqs=None, uniform=False, has_lora=False, num_active_loras=0))
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (PIECEWISE,BatchDescriptor(num_tokens=2, num_reqs=None, uniform=False, has_lora=False, num_active_loras=0))
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (PIECEWISE,BatchDescriptor(num_tokens=1, num_reqs=None, uniform=False, has_lora=False, num_active_loras=0))
 
-**Observed:** The current scheduler replacement path resets prompt bookkeeping and model intermediate data, so it cannot be reused for internal recomputation without a state-preservation option.
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 4/4 [00:00<00:00, 15.49it/s]
+Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 4/4 [00:00<00:00, 13.45it/s]
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m
+Capturing CUDA graphs (decode, FULL):   0%|          | 0/3 [00:00<?, ?it/s][0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (FULL,BatchDescriptor(num_tokens=4, num_reqs=4, uniform=True, has_lora=False, num_active_loras=0))
 
-**Observed:** The current 15-token Talker history is for repetition penalty and is not sufficient as the full previous audio context required by MiniCPM recomputation.
+Capturing CUDA graphs (decode, FULL):  33%|███▎      | 1/3 [00:00<00:00,  2.30it/s][0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (FULL,BatchDescriptor(num_tokens=2, num_reqs=2, uniform=True, has_lora=False, num_active_loras=0))
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:23[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:24[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:24[0m [90m[compilation/cuda_graph.py:271][0m Capturing a cudagraph on (FULL,BatchDescriptor(num_tokens=1, num_reqs=1, uniform=True, has_lora=False, num_active_loras=0))
 
-### Reference behavior
+Capturing CUDA graphs (decode, FULL): 100%|██████████| 3/3 [00:00<00:00,  4.08it/s]
+Capturing CUDA graphs (decode, FULL): 100%|██████████| 3/3 [00:00<00:00,  3.79it/s]
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:24[0m [90m[v1/worker/gpu_model_runner.py:6844][0m Graph capturing finished in 2 secs, took 0.27 GiB
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:24[0m [90m[v1/worker/gpu_worker.py:857][0m Free memory on device (91.91/191.69 GiB) on startup. Desired GPU memory utilization is (0.22, 42.17 GiB). Actual usage is 0.65 GiB for weight, 0.25 GiB for peak activation, 0.35 GiB for non-torch memory, and 0.27 GiB for CUDAGraph memory. Replace gpu_memory_utilization config with `--kv-cache-memory=43493656720` (40.51 GiB) to fit into requested memory, or `--kv-cache-memory=96902497792` (90.25 GiB) to fully utilize gpu memory. Current kv cache memory in use is 40.92 GiB.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:24[0m [90m[gpu_model_runner.py:1009][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:24[0m [90m[utils/jit_monitor.py:299][0m CuTeDSL is not available; skipping CuTeDSL JIT monitor.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:24[0m [90m[utils/jit_monitor.py:79][0m Kernel JIT monitor activated; monitored JIT compilations during inference will use mode=warn.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:25[0m [90m[utils/gc_utils.py:40][0m GC Debug Config. enabled:False,top_objects:-1
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:25[0m [90m[v1/engine/core.py:340][0m init engine (profile, create kv cache, warmup model) took 5.97 s (compilation: 1.84 s)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [33mWARNING[0m [90m08-03 15:23:25[0m [90m[config/scheduler.py:192][0m Using custom scheduler class vllm_omni.core.sched.omni_ar_scheduler.OmniARAsyncScheduler. This scheduler interface is not public and compatibility may not be maintained. If you have subclassed Scheduler instead of AsyncScheduler, you will see degraded performance due to async scheduling being disabled.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:25[0m [90m[factory.py:46][0m Created connector: SharedMemoryConnector
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:25[0m [90m[v1/engine/core.py:204][0m Batch queue is enabled with size 2
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:25[0m [90m[utils/gc_utils.py:40][0m GC Debug Config. enabled:False,top_objects:-1
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:25 [v1/engine/utils.py:1360] READY from local core engine process 0.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:23:25 [stage_runtime.py:589] [StageRuntime] Stage 1 engine startup completed
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:23:25 [stage_engine_core_client.py:157] [StageEngineCoreClient] stage-1 [rep-0] initializing EngineCore
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:25 [stage_engine_core_client.py:173] [StageEngineCoreClient] Patched EngineCoreOutputs -> <class 'vllm_omni.engine.OmniEngineCoreOutputs'>
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:25[0m [90m[config/kernel.py:277][0m Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), user-defined: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:23:25[0m [90m[config/kernel.py:295][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:23:25[0m [90m[v1/engine/core.py:1380][0m EngineCore waiting for work.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:23:25 [stage_engine_core_client.py:213] [StageEngineCoreClient] stage-1 [rep-0] EngineCore running
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:23:25 [stage_runtime.py:603] [StageRuntime] Stage 1 initialized
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:25 [stage_init_utils.py:1147] Released initialization lock (fd=21)
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:23:25 [stage_runtime.py:553] [stage_init] Stage-2 set runtime devices: 0
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:25 [stage_init_utils.py:1075] Parallel config: TP=1, PP=1, DP=1, PCP=1, SP=1, CFG=1; will lock 1 devices: [0]
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:25 [stage_init_utils.py:1104] Acquired exclusive lock for device 0
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[plugins/__init__.py:44][0m No plugins for group vllm.platform_plugins found.
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:36][0m Checking if TPU platform is available.
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:55][0m TPU platform is not available because: No module named 'libtpu'
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:61][0m Checking if CUDA platform is available.
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:88][0m Exception happens when checking CUDA platform: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:105][0m CUDA platform is not available because: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:112][0m Checking if ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:120][0m Confirmed ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:133][0m Checking if XPU platform is available.
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:164][0m Checking if CPU platform is available.
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:112][0m Checking if ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:120][0m Confirmed ROCm platform is available.
+[37mDEBUG[0m [90m08-03 15:23:26[0m [90m[platforms/__init__.py:245][0m Automatically detected platform rocm.
+[33mWARNING[0m [90m08-03 15:23:26[0m [90m[platforms/rocm.py:123][0m Using CUDA_VISIBLE_DEVICES on ROCm is deprecated and support will be removed in vLLM v0.26.0. Please use HIP_VISIBLE_DEVICES instead.
+/app/vllm-omni/vllm_omni/version.py:55: RuntimeWarning: vLLM and vLLM-Omni appear to have mismatched major/minor versions:
+ --> vLLM-Omni version 0.1.dev2387+g9d1ba0e69.rocm
+ --> vLLM version 0.26.0
+This will likely cause compatibility issues.
+  warn_if_misaligned_vllm_version()
+[37mDEBUG[0m [90m08-03 15:23:30[0m [90m[utils/flashinfer.py:53][0m FlashInfer unavailable since package was not found
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:31][0m No plugins for group vllm_omni.platform_plugins found.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:23][0m Checking if CUDA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:38][0m CUDA OmniPlatform is not available because: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:68][0m Checking if NPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:84][0m Checking if XPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:102][0m XPU omni platform is not available because: No module named 'oneccl_bindings_for_pytorch'
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:110][0m Checking if MUSA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:118][0m MUSA OmniPlatform is not available because: No module named 'torchada'
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[__init__.py:159][0m Automatically detected OmniPlatform rocm.
+[37mDEBUG[0m [90m08-03 15:23:31[0m [90m[utils/import_utils.py:67][0m Loading module triton_kernels from /usr/local/lib/python3.12/dist-packages/triton_kernels/__init__.py.
+[aiter] import [module_aiter_core] under /usr/local/lib/python3.12/dist-packages/aiter/jit/module_aiter_core.so
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:35 [v1/engine/utils.py:1257] Waiting for 1 local, 0 remote core engine proc(s) to connect.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:31][0m No plugins for group vllm_omni.platform_plugins found.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:23][0m Checking if CUDA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:38][0m CUDA OmniPlatform is not available because: NVML Shared Library Not Found
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:68][0m Checking if NPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:84][0m Checking if XPU OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:102][0m XPU omni platform is not available because: No module named 'oneccl_bindings_for_pytorch'
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:110][0m Checking if MUSA OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:118][0m MUSA OmniPlatform is not available because: No module named 'torchada'
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:46][0m Checking if ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:54][0m Confirmed ROCm OmniPlatform is available.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[__init__.py:159][0m Automatically detected OmniPlatform rocm.
+[33mWARNING[0m [90m08-03 15:23:36[0m [90m[utils/import_utils.py:408][0m Module humming was found but failed to import
+[33mWARNING[0m [90m08-03 15:23:36[0m [90m[utils/import_utils.py:408][0m Traceback (most recent call last):
+[33mWARNING[0m [90m08-03 15:23:36[0m [90m[utils/import_utils.py:408][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/utils/import_utils.py", line 404, in _has_module
+[33mWARNING[0m [90m08-03 15:23:36[0m [90m[utils/import_utils.py:408][0m     if importlib.util.find_spec(module_name) is None:
+[33mWARNING[0m [90m08-03 15:23:36[0m [90m[utils/import_utils.py:408][0m        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[33mWARNING[0m [90m08-03 15:23:36[0m [90m[utils/import_utils.py:408][0m   File "<frozen importlib.util>", line 111, in find_spec
+[33mWARNING[0m [90m08-03 15:23:36[0m [90m[utils/import_utils.py:408][0m ValueError: humming.__spec__ is None
+[32mINFO[0m [90m08-03 15:23:36[0m [90m[patch.py:252][0m NVFP4 W4A4 weight_scale NaN-clamp: installed.
+[32mINFO[0m [90m08-03 15:23:36[0m [90m[patch.py:481][0m [cumem-cuda] CuMemAllocator._python_free_callback patched: asleep guard extended to all platforms.
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[factory.py:35][0m Registered connector: MooncakeStoreConnector
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[factory.py:35][0m Registered connector: MooncakeTransferEngineConnector
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[factory.py:35][0m Registered connector: SharedMemoryConnector
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[factory.py:35][0m Registered connector: YuanrongConnector
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[factory.py:35][0m Registered connector: YuanrongTransferEngineConnector
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[factory.py:35][0m Registered connector: MoriTransferEngineConnector
+[37mDEBUG[0m [90m08-03 15:23:36[0m [90m[factory.py:35][0m Registered connector: MooncakeConnector
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[stage_engine_core_proc.py:132][0m [StageEngineCoreProc] Patched EngineCoreRequest -> OmniEngineCoreRequest: <class 'vllm_omni.engine.OmniEngineCoreRequest'>
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[v1/engine/core.py:1233][0m Waiting for init message from front-end.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:37 [v1/engine/utils.py:1360] HELLO from local core engine process 0.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[v1/engine/core.py:1244][0m Received init message: EngineHandshakeMetadata(addresses=EngineZmqAddresses(inputs=['ipc:///tmp/43537e41-f841-4eb1-9408-181e861f2383'], outputs=['ipc:///tmp/ecad7d2c-61d6-4040-b3dc-05f8dd9797ad'], coordinator_input=None, coordinator_output=None, frontend_stats_publish_address=None), parallel_config={})
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[v1/engine/core.py:1043][0m Has DP Coordinator: False, stats publish address: None
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[plugins/__init__.py:52][0m Available plugins for group vllm.general_plugins:
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[plugins/__init__.py:54][0m - vllm_omni_register_models -> vllm_omni.engine.arg_utils:register_omni_models_to_vllm
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[plugins/__init__.py:54][0m - quark_online_quant -> quark.online_quantization.vllm.plugin:register
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[plugins/__init__.py:54][0m - lora_filesystem_resolver -> vllm.plugins.lora_resolvers.filesystem_resolver:register_filesystem_resolver
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[plugins/__init__.py:54][0m - lora_hf_hub_resolver -> vllm.plugins.lora_resolvers.hf_hub_resolver:register_hf_hub_resolver
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[plugins/__init__.py:57][0m All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:37[0m [90m[v1/engine/core.py:116][0m Initializing a V1 LLM engine (v0.26.0) with config: model='openbmb/MiniCPM-o-4_5', speculative_config=None, tokenizer='openbmb/MiniCPM-o-4_5', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=65536, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=None, quantization_config=None, enforce_eager=True, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False, jit_monitor_mode='warn', jit_monitor_verbose=False), seed=0, served_model_name=openbmb/MiniCPM-o-4_5, enable_prefix_caching=False, enable_chunked_prefill=False, pooler_config=None, compilation_config={'mode': <CompilationMode.NONE: 0>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['+sparse_attn_indexer', 'all'], 'ir_enable_torch_wrap': False, 'splitting_ops': [], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': [], 'compile_ranges_endpoints': [65536], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': True, 'alignment_asserts': True, 'scalar_asserts': True, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.NONE: 0>, 'cudagraph_num_of_warmups': 0, 'cudagraph_capture_sizes': [], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False, 'enable_qk_norm_rope_fusion': False, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False, 'fuse_mla_dual_rms_norm': False, 'fuse_rope_kvcache': False, 'fuse_qk_norm_rope_kvcache': False}, 'max_cudagraph_capture_size': 0, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_bf16x3_router_gemm=False, moe_backend='auto', linear_backend='auto')
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.deepseek_v2.DeepseekV2Model'>: ['input_ids', 'positions', 'intermediate_tensors', 'inputs_embeds']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.deepseek_eagle3.DeepseekV2Eagle3Model'>: ['input_ids', 'positions', 'hidden_states', 'input_embeds']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.laguna.LagunaModel'>: ['input_ids', 'positions', 'intermediate_tensors', 'inputs_embeds']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.qwen3_dflash.DFlashQwen3Model'>: ['input_ids', 'positions', 'input_embeds']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.model_executor.models.laguna_dflash.DFlashLagunaModel'>: ['input_ids', 'positions', 'input_embeds']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[compilation/decorators.py:221][0m Inferred dynamic dimensions for forward method of <class 'vllm.v1.spec_decode.ngram_proposer_gpu.NgramGPUKernel'>: ['num_tokens_no_spec', 'token_ids_gpu', 'combined_mask']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[config/kernel.py:85][0m Setting IR op priority for rms_norm to ['vllm_c', 'native']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[ir/op.py:422][0m Priority for vllm.ir.rms_norm set to ['vllm_c', 'native']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[config/kernel.py:85][0m Setting IR op priority for fused_add_rms_norm to ['vllm_c', 'native']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[ir/op.py:422][0m Priority for vllm.ir.fused_add_rms_norm set to ['vllm_c', 'native']
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[__init__.py:31][0m No plugins for group vllm_omni.general_plugins found.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[distributed/parallel_state.py:1571][0m world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://129.212.183.58:46919 backend=nccl
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:37[0m [90m[distributed/parallel_state.py:1615][0m world_size=1 rank=0 local_rank=0 distributed_init_method=tcp://129.212.183.58:46919 backend=nccl
+[rank0]:[W803 15:23:37.532847988 ProcessGroupGloo.cpp:524] Warning: Unable to resolve hostname to a (local) address. Using the loopback address as fallback. Manually set the network interface to bind to with GLOO_SOCKET_IFNAME. (function operator())
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[distributed/parallel_state.py:1697][0m Detected 1 nodes in the distributed environment
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:37[0m [90m[distributed/parallel_state.py:1946][0m rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[gpu_generation_worker.py:88][0m worker init memory snapshot: torch_peak=0.0GiB, free_memory=49.56GiB, total_memory=191.69GiB, rocm_memory=142.13GiB, torch_memory=0.0GiB, non_torch_memory=142.13GiB, timestamp=1785770617.7569888, auto_measure=True
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[gpu_generation_worker.py:89][0m worker requested memory: 42.17GiB
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [33mWARNING[0m [90m08-03 15:23:37[0m [90m[gpu_generation_worker.py:99][0m OMNI GPUGenerationWorker forces v1 model runner for omni hooks.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[v1/sample/logits_processor/__init__.py:63][0m No logitsprocs plugins installed (group vllm.logits_processors).
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[model_executor/offloader/base.py:121][0m Offloader set to NoopOffloader (no offloading).
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:37[0m [90m[factory.py:46][0m Created connector: SharedMemoryConnector
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:37[0m [90m[omni_connector_model_runner_mixin.py:111][0m [Stage-2] init_omni_connectors: async_chunk=True, custom_process_func=None, connector=SharedMemoryConnector, func_path=None
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [33mWARNING[0m [90m08-03 15:23:37[0m [90m[base.py:188][0m [LLM Worker 0] Sleep Mode DISABLED.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [33mWARNING[0m [90m08-03 15:23:37[0m [90m[base.py:188][0m [LLM Worker 0] Sleep Mode DISABLED.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:37[0m [90m[v1/worker/gpu_model_runner.py:5250][0m Starting to load model openbmb/MiniCPM-o-4_5...
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:38[0m [90m[config/compilation.py:1309][0m No custom ops found in model.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:38[0m [90m[model_executor/model_loader/base_loader.py:63][0m Loading weights on cuda ...
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:38[0m [90m[model_executor/model_loader/weight_utils.py:506][0m Using model weights format [['model-00004-of-00004.safetensors', 'model-00003-of-00004.safetensors', 'model-00002-of-00004.safetensors', 'model-00001-of-00004.safetensors']]
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:38[0m [90m[model_executor/model_loader/weight_utils.py:869][0m Filesystem type for checkpoints: EXT4. Checkpoint size: 17.46 GiB. Available RAM: 222.73 GiB.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:38[0m [90m[model_executor/model_loader/weight_utils.py:892][0m Auto-prefetch is disabled because the filesystem (EXT4) is not a recognized network FS (NFS/Lustre). If you want to force prefetching, start vLLM with --safetensors-load-strategy=prefetch.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m
+Loading safetensors checkpoint shards:   0% Completed | 0/4 [00:00<?, ?it/s]
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m
+Loading safetensors checkpoint shards: 100% Completed | 4/4 [00:00<00:00, 216.09it/s]
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m
+[0;93m2026-08-03 15:23:38.458786348 [W:onnxruntime:Default, device_discovery.cc:285 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card5": device_discovery.cc:94 ReadFileContents Failed to open file: "/sys/class/drm/card5/device/vendor"[m
+[0;93m2026-08-03 15:23:38.458826524 [W:onnxruntime:Default, device_discovery.cc:285 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card3": device_discovery.cc:94 ReadFileContents Failed to open file: "/sys/class/drm/card3/device/vendor"[m
+[0;93m2026-08-03 15:23:38.458986191 [W:onnxruntime:Default, device_discovery.cc:285 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card8": device_discovery.cc:94 ReadFileContents Failed to open file: "/sys/class/drm/card8/device/vendor"[m
+[0;93m2026-08-03 15:23:38.458997761 [W:onnxruntime:Default, device_discovery.cc:285 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card6": device_discovery.cc:94 ReadFileContents Failed to open file: "/sys/class/drm/card6/device/vendor"[m
+[0;93m2026-08-03 15:23:38.459006538 [W:onnxruntime:Default, device_discovery.cc:285 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card4": device_discovery.cc:94 ReadFileContents Failed to open file: "/sys/class/drm/card4/device/vendor"[m
+[0;93m2026-08-03 15:23:38.459016051 [W:onnxruntime:Default, device_discovery.cc:285 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card2": device_discovery.cc:94 ReadFileContents Failed to open file: "/sys/class/drm/card2/device/vendor"[m
+[0;93m2026-08-03 15:23:38.459052008 [W:onnxruntime:Default, device_discovery.cc:285 GetGpuDevices] Failed to detect devices under "/sys/class/drm/card7": device_discovery.cc:94 ReadFileContents Failed to open file: "/sys/class/drm/card7/device/vendor"[m
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m
+Fetching 31 files:   0%|          | 0/31 [00:00<?, ?it/s]
+Fetching 31 files: 100%|██████████| 31/31 [00:00<00:00, 311060.82it/s]
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:42[0m [90m[model_executor/model_loader/default_loader.py:430][0m Loading weights took 3.97 seconds
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:42[0m [90m[model_executor/model_loader/base_loader.py:70][0m Peak GPU memory after loading weights: 3.73 GiB
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:42[0m [90m[v1/worker/gpu_model_runner.py:5347][0m Model loading took 3.23 GiB memory and 4.256099 seconds
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [33mWARNING[0m [90m08-03 15:23:43[0m [90m[base.py:188][0m [LLM Worker 0] Sleep Mode DISABLED.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:43[0m [90m[model_executor/.../cute_dsl/ll_bf16.py:30][0m cuteDSL (CUTLASS Python) not available, ll_bf16_gemm disabled
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:43[0m [90m[model_executor/warmup/cutedsl_warmup.py:96][0m Skipping CuTeDSL warmup on non-CUDA platform.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:43[0m [90m[gpu_generation_model_runner.py:708][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [33mWARNING[0m [90m08-03 15:23:43[0m [90m[gpu_generation_model_runner.py:562][0m Dummy sampler run is not implemented for generation model
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:43[0m [90m[utils/jit_monitor.py:299][0m CuTeDSL is not available; skipping CuTeDSL JIT monitor.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:43[0m [90m[utils/jit_monitor.py:79][0m Kernel JIT monitor activated; monitored JIT compilations during inference will use mode=warn.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:44[0m [90m[utils/gc_utils.py:40][0m GC Debug Config. enabled:False,top_objects:-1
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:44[0m [90m[v1/engine/core.py:347][0m init engine (profile, create kv cache, warmup model) took 1.21 s
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:44[0m [90m[tokenizers/registry.py:78][0m Loading CachedHfTokenizer for tokenizer_mode='hf'
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [33mWARNING[0m [90m08-03 15:23:45[0m [90m[config/scheduler.py:192][0m Using custom scheduler class vllm_omni.core.sched.omni_generation_scheduler.OmniGenerationScheduler. This scheduler interface is not public and compatibility may not be maintained. If you have subclassed Scheduler instead of AsyncScheduler, you will see degraded performance due to async scheduling being disabled.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:45[0m [90m[factory.py:46][0m Created connector: SharedMemoryConnector
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:45[0m [90m[v1/engine/core.py:204][0m Batch queue is enabled with size 2
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:45[0m [90m[utils/gc_utils.py:40][0m GC Debug Config. enabled:False,top_objects:-1
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:45 [v1/engine/utils.py:1360] READY from local core engine process 0.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:45[0m [90m[config/vllm.py:1109][0m Asynchronous scheduling is enabled.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [33mWARNING[0m [90m08-03 15:23:45[0m [90m[config/vllm.py:1163][0m Enforce eager set, disabling torch.compile and CUDAGraphs. This is equivalent to setting -cc.mode=none -cc.cudagraph_mode=none
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:23:45 [stage_runtime.py:589] [StageRuntime] Stage 2 engine startup completed
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [33mWARNING[0m [90m08-03 15:23:45[0m [90m[config/vllm.py:1213][0m Inductor compilation was disabled by user settings, optimizations settings that are only active during inductor compilation will be ignored.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:23:45 [stage_engine_core_client.py:157] [StageEngineCoreClient] stage-2 [rep-0] initializing EngineCore
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:45 [stage_engine_core_client.py:173] [StageEngineCoreClient] Patched EngineCoreOutputs -> <class 'vllm_omni.engine.OmniEngineCoreOutputs'>
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:45[0m [90m[config/kernel.py:277][0m Setting platform-specific IR op priority defaults: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native']), user-defined: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native'])
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:45[0m [90m[config/kernel.py:295][0m Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['vllm_c', 'native'], fused_add_rms_norm=['vllm_c', 'native'])
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:45[0m [90m[config/vllm.py:1392][0m Cudagraph is disabled under eager mode
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [32mINFO[0m [90m08-03 15:23:45[0m [90m[config/compilation.py:329][0m Enabled custom fusions: norm_quant, act_quant
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:23:45[0m [90m[v1/engine/core.py:1380][0m EngineCore waiting for work.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:23:45 [stage_engine_core_client.py:213] [StageEngineCoreClient] stage-2 [rep-0] EngineCore running
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:23:45 [stage_runtime.py:603] [StageRuntime] Stage 2 initialized
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:45 [stage_init_utils.py:1147] Released initialization lock (fd=21)
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:45 [tokenizers/registry.py:78] Loading CachedHfTokenizer for tokenizer_mode='hf'
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:46 [renderers/registry.py:57] Loading HfRenderer for renderer_mode='hf'
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:23:46 [utils/torch_utils.py:167] OMP_NUM_THREADS is not set; defaulting Torch threads to 1.
+[0;36m(APIServer pid=1425)[0;0m [transformers] `MiniCPMOProcessor` defines `image_processor_class = 'AutoImageProcessor'`, which is deprecated. Register the correct mapping in `AutoImageProcessor` instead.
+[0;36m(APIServer pid=1425)[0;0m [transformers] Requested torchvision backend is not available. Falling back to pil backend.
+[0;36m(APIServer pid=1425)[0;0m [transformers] `MiniCPMOProcessor` defines `feature_extractor_class = 'WhisperFeatureExtractor'`, which is deprecated. Register the correct mapping in `AutoFeatureExtractor` instead.
+[0;36m(APIServer pid=1425)[0;0m [transformers] Image processor MiniCPMVImageProcessor: kwargs ['max_slice_nums'] were applied for backward compatibility. To avoid this warning, add them to valid_kwargs: create a custom TypedDict extending ImagesKwargs with these keys and set it as the `valid_kwargs` class attribute.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:02 [orchestrator.py:503] [Orchestrator] Starting event loop
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:02 [async_omni_engine.py:300] [AsyncOmniEngine] Orchestrator ready with 3 stages
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:02 [omni_base.py:190] [AsyncOmni] AsyncOmniEngine initialized in 130.67 seconds
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:02 [omni_base.py:210] [AsyncOmni] Initialized with 3 stages for model openbmb/MiniCPM-o-4_5
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:24:02 [plugins/io_processors/__init__.py:53] No IOProcessor plugins requested by the model
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:02 [api_server.py:823] Supported tasks: {'generate', 'speech'}
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:24:02 [config/model.py:1546] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:24:02 [renderers/base.py:248] Warming up chat template processing...
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:03 [renderers/hf.py:540] Detected the chat template content format to be 'string'. You can set `--chat-template-content-format` to override this.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:24:03 [renderers/base.py:254] Chat template warmup completed in 1.334s
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:24:03 [renderers/base.py:262] Warming up multi-modal processing...
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:34 [renderers/base.py:236] Multi-modal warmup completed in 30.979s
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:24:34 [renderers/base.py:274] Warming up readonly multi-modal processing...
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [renderers/base.py:236] Readonly multi-modal warmup completed in 0.202s
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [speaker_cache.py:242] Speaker cache ready (max_bytes=536870912)
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [serving_speech.py:350] Speaker storage: dir=/root/.cache/vllm-omni/speakers, max_speakers=1000, restored=0
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [serving_speech.py:512] Loaded 0 supported speakers: []
+[0;36m(APIServer pid=1425)[0;0m WARNING 08-03 15:24:35 [serving_speech.py:667] Failed to load codec frame rate from speech tokenizer config: openbmb/MiniCPM-o-4_5 does not appear to have a file named speech_tokenizer/config.json. Checkout 'https://huggingface.co/openbmb/MiniCPM-o-4_5/tree/main' for available files.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/.../realtime/serving.py:45] OpenAIServingRealtime initialized for task: realtime
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [api_server.py:539] Starting vLLM API server 0 on http://0.0.0.0:28889
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:37] Available routes are:
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /openapi.json, Methods: GET, HEAD
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /docs, Methods: GET, HEAD
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /docs/oauth2-redirect, Methods: GET, HEAD
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /redoc, Methods: GET, HEAD
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /load, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /version, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /health, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /metrics, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /tokenize, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /detokenize, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /ping, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /ping, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /invocations, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/responses, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/responses/{response_id}, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/responses/{response_id}/cancel, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/completions, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/messages, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/messages/count_tokens, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /generative_scoring, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /scale_elastic_ep, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /is_scaling_elastic_ep, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/chat/completions/render, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/completions/render, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/chat/completions/derender, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/completions/derender, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /inference/v1/generate, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/chat/completions, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/audio/speech, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/audio/speech/batch, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/audio/generate, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/audio/voices, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/audio/voices, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/audio/voices/{name}, Methods: DELETE
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /health, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/models, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/images/generations, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/images/edits, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/videos, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/videos/sync, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/videos, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/videos/{video_id}, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/videos/{video_id}, Methods: DELETE
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/videos/{video_id}/content, Methods: GET
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/omni/sleep, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/omni/wakeup, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:46] Route: /v1/chat/completions/batch, Methods: POST
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:57] Route: /v1/audio/speech/stream, Endpoint: streaming_speech
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:57] Route: /v1/video/chat/stream, Endpoint: streaming_video_chat
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:57] Route: /v1/realtime/video, Endpoint: streaming_video_output
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:57] Route: /v1/realtime, Endpoint: realtime_websocket
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:57] Route: /v1/realtime/robot/openpi, Endpoint: realtime_robot_openpi
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:24:35 [entrypoints/launcher.py:57] Route: /v1/duplex, Endpoint: duplex_websocket
+[0;36m(APIServer pid=1425)[0;0m INFO:     Started server process [1425]
+[0;36m(APIServer pid=1425)[0;0m INFO:     Waiting for application startup.
+[0;36m(APIServer pid=1425)[0;0m INFO:     Application startup complete.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:01 [entrypoints/.../engine/protocol.py:56] The following fields were present in the request but ignored: {'modalities'}
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:01 [async_omni.py:512] [AsyncOmni] generate() called for request chatcmpl-bc78957e20fb1168
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:01 [async_omni.py:955] [AsyncOmni] Final output handler started
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:01 [v1/sample/logits_processor/__init__.py:63] No logitsprocs plugins installed (group vllm.logits_processors).
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:01 [orchestrator.py:650] [Orchestrator] _handle_add_request: stage=0 req=chatcmpl-bc78957e20fb1168-a48a68ca prompt_type=OmniEngineCoreRequest original_prompt_type=dict final_stage=2 num_sampling_params=3
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:01 [stage_engine_core_client.py:233] [StageEngineCoreClient] stage-0 [rep-0] add request: chatcmpl-bc78957e20fb1168-a48a68ca
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:01 [stage_engine_core_client.py:233] [StageEngineCoreClient] stage-2 [rep-0] add request: chatcmpl-bc78957e20fb1168-a48a68ca
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:01[0m [90m[v1/engine/core.py:1392][0m EngineCore loop active.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:01[0m [90m[v1/engine/core.py:1392][0m EngineCore loop active.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [33mWARNING[0m [90m08-03 15:26:02[0m [90m[utils/jit_monitor.py:135][0m Triton kernel JIT compilation during inference: kernel_unified_attention. This causes a latency spike; consider extending warmup to cover this shape/config.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:11[0m [90m[v1/engine/core.py:1380][0m EngineCore waiting for work.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:11[0m [90m[chunk_transfer_adapter.py:358][0m [Stage-0] Sent chatcmpl-bc78957e20fb1168-a48a68ca_0_0
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:11 [async_omni.py:848] [AsyncOmni] req=chatcmpl-bc78957e20fb1168-a48a68ca stage-0 yielding final_output_type=text
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:11 [minicpmo_4_5_omni.py:1048] [MiniCPM-o][Stage0->Stage1][handoff] request_id=chatcmpl-bc78957e20fb1168-a48a68ca native_duplex=False tts_tokens=1418 hidden_rows=1418 condition_prompt_len=11 replace_prompt=True next_stage_prompt_len=11 turn_start=False turn_end=False segment_end=False
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:11 [stage_engine_core_client.py:233] [StageEngineCoreClient] stage-1 [rep-0] add request: chatcmpl-bc78957e20fb1168-a48a68ca
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:11[0m [90m[v1/engine/core.py:1392][0m EngineCore loop active.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:12[0m [90m[minicpmo_4_5_omni_tts.py:567][0m [MiniCPM-o][Stage1][prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca mode=streaming input_span=11 prompt_len=11 computed_offset=0 tts_tokens=1418 hidden_rows=1418 condition_count=142 condition_lengths=[11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 10] empty_condition=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [33mWARNING[0m [90m08-03 15:26:12[0m [90m[utils/jit_monitor.py:135][0m Triton kernel JIT compilation during inference: kernel_unified_attention. This causes a latency spike; consider extending warmup to cover this shape/config.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni.py:253][0m [MiniCPM-o][Stage1->Stage2][stream-start] request_id=chatcmpl-bc78957e20fb1168-a48a68ca internal_id=chatcmpl-bc78957e20fb1168-a48a68ca
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni.py:442][0m [MiniCPM-o][Stage1->Stage2][codec-window] request_id=chatcmpl-bc78957e20fb1168-a48a68ca cache_epoch=0 chunk_seq=0 new_codes=25 output_codes=28 pending_remaining=0 flush_pending=False last_chunk=False tts_is_last_chunk=False turn_end=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[chunk_transfer_adapter.py:358][0m [Stage-1] Sent chatcmpl-bc78957e20fb1168-a48a68ca_1_0
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[chunk_transfer_adapter.py:299][0m [Stage-2] Received one chunk for key chatcmpl-bc78957e20fb1168-a48a68ca_1_0
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:900][0m [MiniCPM-o][Stage1][condition-boundary] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=0/142 reason=audio_eos condition_steps=46 emitted_codes=45 has_more_conditions=True next_condition_index=1 kv_action=append_native_kv
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=1 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=2 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[gpu_generation_model_runner.py:241][0m Running batch with cudagraph_mode: NONE, batch_descriptor: BatchDescriptor(num_tokens=28, num_reqs=None, uniform=False, has_lora=False, num_active_loras=0), should_ubatch: False, num_tokens_across_dp: None
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[gpu_generation_model_runner.py:260][0m ubatch_slices: None, ubatch_slices_padded: None
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_code2wav.py:429][0m [MiniCPM-o][Stage2][input] request_id=chatcmpl-bc78957e20fb1168-a48a68ca state_id=chatcmpl-bc78957e20fb1168-a48a68ca cache_epoch=0 chunk_seq=0 codec_tokens=28 last_chunk=False tts_is_last_chunk=False segment_end=False turn_end=False
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_code2wav.py:663][0m [MiniCPM-o][Stage2][decode] request_ids=['chatcmpl-bc78957e20fb1168-a48a68ca'] batch_size=1 codec_len=28 last_chunks=[False] tts_last_chunks=[False]
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=3 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=4 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=5 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=6 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=7 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=8 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=9 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=10 span=1 condition_len=11 sample_ready=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:614][0m [MiniCPM-o][Stage1][condition-prefill] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 cursor=11 span=1 condition_len=11 sample_ready=True
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni.py:442][0m [MiniCPM-o][Stage1->Stage2][codec-window] request_id=chatcmpl-bc78957e20fb1168-a48a68ca cache_epoch=0 chunk_seq=1 new_codes=25 output_codes=28 pending_remaining=0 flush_pending=False last_chunk=False tts_is_last_chunk=False turn_end=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[chunk_transfer_adapter.py:358][0m [Stage-1] Sent chatcmpl-bc78957e20fb1168-a48a68ca_1_1
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni.py:442][0m [MiniCPM-o][Stage1->Stage2][codec-window] request_id=chatcmpl-bc78957e20fb1168-a48a68ca cache_epoch=0 chunk_seq=2 new_codes=25 output_codes=28 pending_remaining=0 flush_pending=False last_chunk=False tts_is_last_chunk=False turn_end=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[chunk_transfer_adapter.py:358][0m [Stage-1] Sent chatcmpl-bc78957e20fb1168-a48a68ca_1_2
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni.py:442][0m [MiniCPM-o][Stage1->Stage2][codec-window] request_id=chatcmpl-bc78957e20fb1168-a48a68ca cache_epoch=0 chunk_seq=3 new_codes=25 output_codes=28 pending_remaining=0 flush_pending=False last_chunk=False tts_is_last_chunk=False turn_end=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[chunk_transfer_adapter.py:358][0m [Stage-1] Sent chatcmpl-bc78957e20fb1168-a48a68ca_1_3
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:884][0m [MiniCPM-o][Stage1][sliding-recompute-schedule] request_id=chatcmpl-bc78957e20fb1168-a48a68ca previous_condition_index=1 next_condition_index=2 recomputed_chunks=1 previous_audio_tokens=61 prompt_len=83 reset_offset=0
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [32mINFO[0m [90m08-03 15:26:13[0m [90m[minicpmo_4_5_omni_tts.py:900][0m [MiniCPM-o][Stage1][condition-boundary] request_id=chatcmpl-bc78957e20fb1168-a48a68ca condition_index=1/142 reason=audio_eos condition_steps=62 emitted_codes=61 has_more_conditions=True next_condition_index=2 kv_action=sliding_recompute_prompt_replace
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[logging_utils/dump_input.py:72][0m Dumping input data for V1 LLM engine (v0.26.0) with config: model='openbmb/MiniCPM-o-4_5', speculative_config=None, tokenizer='openbmb/MiniCPM-o-4_5', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=True, dtype=torch.bfloat16, max_seq_len=4096, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=None, quantization_config=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False, jit_monitor_mode='warn', jit_monitor_verbose=False), seed=0, served_model_name=openbmb/MiniCPM-o-4_5, enable_prefix_caching=False, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '/root/.cache/vllm/torch_compile_cache/a95f514dd9', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['+sparse_attn_indexer', 'none', '+sparse_attn_indexer', '+sparse_attn_indexer', '+sparse_attn_indexer'], 'ir_enable_torch_wrap': True, 'splitting_ops': ['vllm::unified_attention_with_output', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::qwen_gdn_attention_core', 'vllm::gdn_attention_core_xpu', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::kda_attention', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::deepseek_v4_attention', 'vllm::hpc_rope_norm_forward', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update'], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': [], 'compile_ranges_endpoints': [8192], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': True, 'alignment_asserts': True, 'scalar_asserts': True, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': False, 'fuse_act_quant': False, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False, 'enable_qk_norm_rope_fusion': False, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False, 'fuse_mla_dual_rms_norm': False, 'fuse_rope_kvcache': False, 'fuse_qk_norm_rope_kvcache': False}, 'max_cudagraph_capture_size': 8, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': '/root/.cache/vllm/torch_compile_cache/a95f514dd9/rank_0_0/backbone', 'fast_moe_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_bf16x3_router_gemm=False, moe_backend='auto', linear_backend='auto'),
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[logging_utils/dump_input.py:79][0m Dumping scheduler output for model execution: OmniSchedulerOutput(scheduled_new_reqs=[], scheduled_cached_reqs=CachedRequestData(req_ids=['chatcmpl-bc78957e20fb1168-a48a68ca'],resumed_req_ids=set(),new_token_ids_lens=[],all_token_ids_lens={},new_block_ids=[([9],)],num_computed_tokens=[128],num_output_tokens=[118]), num_scheduled_tokens={chatcmpl-bc78957e20fb1168-a48a68ca: 1}, total_num_scheduled_tokens=1, scheduled_spec_decode_tokens={}, scheduled_encoder_inputs={}, num_common_prefix_blocks=[0], finished_req_ids=[], free_encoder_mm_hashes=[], scheduled_encoder_input_stats=null, preempted_req_ids=[], has_structured_output_requests=false, pending_structured_output_tokens=false, num_invalid_spec_tokens=null, kv_connector_metadata=null, ec_connector_metadata=null, new_block_ids_to_zero=null, kv_cache_block_copies=null, num_spec_tokens_to_schedule=0, finished_requests_needing_kv_transfer={}, pending_input_registrations=[])
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m StageEngineCoreProc encountered a fatal error.
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m Traceback (most recent call last):
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/app/vllm-omni/vllm_omni/engine/stage_engine_core_proc.py", line 183, in run_stage_core
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     engine_core.run_busy_loop()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 1364, in run_busy_loop
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     self._process_engine_step()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 1403, in _process_engine_step
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     outputs, model_executed = self.step_fn()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m                               ^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 647, in step_with_batch_queue
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     exec_future = self.model_executor.execute_model(
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/uniproc_executor.py", line 120, in execute_model
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     output.result()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     return self.__get_result()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m            ^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     raise self._exception
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/uniproc_executor.py", line 98, in collective_rpc
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     result = run_method(self.driver_worker, method, args, kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/serial_utils.py", line 510, in run_method
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     return func(*args, **kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m            ^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/worker_base.py", line 351, in execute_model
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     return self.worker.execute_model(scheduler_output)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     return func(*args, **kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m            ^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_worker.py", line 1147, in execute_model
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     output = self.model_runner.execute_model(
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/usr/local/lib/python3.12/dist-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     return func(*args, **kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m            ^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/app/vllm-omni/vllm_omni/worker/gpu_ar_model_runner.py", line 1264, in execute_model
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     ) = self._preprocess(scheduler_output, num_tokens_padded, intermediate_tensors)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/app/vllm-omni/vllm_omni/worker/gpu_model_runner.py", line 1774, in _preprocess
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     req_input_ids, req_embeds, update_dict = self.model.preprocess(
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m                                              ^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/app/vllm-omni/vllm_omni/model_executor/models/minicpmo_4_5/minicpmo_4_5_omni.py", line 305, in preprocess
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     return self.talker.preprocess(input_ids=input_ids, input_embeds=input_embeds, **kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m   File "/app/vllm-omni/vllm_omni/model_executor/models/minicpmo_4_5/minicpmo_4_5_omni_tts.py", line 422, in preprocess
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m     raise ValueError(
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [31mERROR[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:192][0m ValueError: MiniCPM-o sliding recompute prompt is shorter than its rebuilt condition: request_id=chatcmpl-bc78957e20fb1168-a48a68ca prompt_len=11 rebuilt_len=83
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[v1/engine/core.py:744][0m [shutdown] EngineCore: tearing down local resources
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142] [StagePool] _poll_stage_raw failed for stage-1 replica-0
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142] Traceback (most recent call last):
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]   File "/app/vllm-omni/vllm_omni/engine/stage_pool.py", line 1133, in poll_llm_raw_output
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]     return await asyncio.wait_for(
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]            ^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]   File "/usr/lib/python3.12/asyncio/tasks.py", line 520, in wait_for
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]     return await fut
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]            ^^^^^^^^^
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]   File "/app/vllm-omni/vllm_omni/engine/stage_pool.py", line 1083, in _poll_stage_raw
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]     outputs = await client.get_output_async()
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core_client.py", line 1061, in get_output_async
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142]     raise self._format_exception(outputs) from None
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [stage_pool.py:1142] vllm.v1.engine.exceptions.EngineDeadError: EngineCore encountered an issue. See stack trace (above) for the root cause.
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [orchestrator.py:961] [Orchestrator] Stage-1 replica-0 is dead: EngineCore encountered an issue. See stack trace (above) for the root cause.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:13 [orchestrator.py:536] [Orchestrator] Engine dead during shutdown: EngineCore encountered an issue. See stack trace (above) for the root cause.
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [async_omni.py:926] [AsyncOmni] Engine dead: EngineCore encountered an issue. See stack trace (above) for the root cause.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:13 [orchestrator.py:2256] [Orchestrator] Shutting down all 3 client(s)
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [async_omni.py:814] [AsyncOmni] Orchestrator error for req=chatcmpl-bc78957e20fb1168-a48a68ca stage-1: EngineCore encountered an issue. See stack trace (above) for the root cause.
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:13 [v1/engine/core_client.py:655] [shutdown] MPClient: start timeout=default
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:13 [async_omni.py:1074] [AsyncOmni] Aborted request(s) chatcmpl-bc78957e20fb1168-a48a68ca
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:13 [v1/engine/core_client.py:657] [shutdown] MPClient: stopping engine manager
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:13 [async_omni.py:650] [AsyncOmni] Request chatcmpl-bc78957e20fb1168-a48a68ca failed (input error): EngineCore encountered an issue. See stack trace (above) for the root cause.
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:13 [v1/utils.py:602] [shutdown] Process manager: start process_count=1 timeout=5.0s
+[0;36m(APIServer pid=1425)[0;0m ERROR 08-03 15:26:13 [api_server.py:337] EngineDeadError: orchestrator_alive=True, errored=True, request_id=chatcmpl-bc78957e20fb1168, error_stage_id=1
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:13 [entrypoints/.../utils/error_response.py:26] create_error_response called with OmniEngineDeadError: EngineCore encountered an issue. See stack trace (above) for the root cause.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[stage_engine_core_proc.py:186][0m StageEngineCoreProc exiting.
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[v1/engine/core.py:744][0m [shutdown] EngineCore: tearing down local resources
+[0;36m(APIServer pid=1425)[0;0m INFO:     127.0.0.1:59886 - "POST /v1/chat/completions HTTP/1.1" 500 Internal Server Error
+[0;36m(APIServer pid=1425)[0;0m INFO:     Shutting down
+[0;36m(APIServer pid=1425)[0;0m INFO:     Waiting for application shutdown.
+[0;36m(APIServer pid=1425)[0;0m INFO:     Application shutdown complete.
+[0;36m(APIServer pid=1425)[0;0m INFO:     Finished server process [1425]
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:13 [omni_base.py:629] [AsyncOmni] Shutting down
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:13 [async_omni_engine.py:1820] [AsyncOmniEngine] Shutting down Orchestrator
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[v1/worker/gpu_model_runner.py:6537][0m Cleaned up profiling KV cache and CUDA graphs
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:13[0m [90m[v1/worker/gpu_model_runner.py:6537][0m Cleaned up profiling KV cache and CUDA graphs
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[v1/core/sched/scheduler.py:2464][0m [shutdown] Scheduler: start
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[v1/core/sched/scheduler.py:2473][0m [shutdown] Scheduler: complete
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[distributed/parallel_state.py:2108][0m [shutdown] Distributed: cleanup start shutdown_ray=False
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[v1/core/sched/scheduler.py:2464][0m [shutdown] Scheduler: start
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[v1/core/sched/scheduler.py:2473][0m [shutdown] Scheduler: complete
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[distributed/parallel_state.py:2108][0m [shutdown] Distributed: cleanup start shutdown_ray=False
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[distributed/parallel_state.py:2146][0m [shutdown] Distributed: cleanup complete
+[0;36m(StageEngineCoreProc_stage0_replica0 pid=1614)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[v1/engine/core.py:759][0m [shutdown] EngineCore: local resource teardown complete
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[distributed/parallel_state.py:2146][0m [shutdown] Distributed: cleanup complete
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m [37mDEBUG[0m [90m08-03 15:26:14[0m [90m[v1/engine/core.py:759][0m [shutdown] EngineCore: local resource teardown complete
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m Process StageEngineCoreProc_stage1_replica0:
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m Traceback (most recent call last):
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     self.run()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     self._target(*self._args, **self._kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/app/vllm-omni/vllm_omni/engine/stage_engine_core_proc.py", line 183, in run_stage_core
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     engine_core.run_busy_loop()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 1364, in run_busy_loop
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     self._process_engine_step()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 1403, in _process_engine_step
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     outputs, model_executed = self.step_fn()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m                               ^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/core.py", line 647, in step_with_batch_queue
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     exec_future = self.model_executor.execute_model(
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/uniproc_executor.py", line 120, in execute_model
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     output.result()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     return self.__get_result()
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m            ^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     raise self._exception
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/uniproc_executor.py", line 98, in collective_rpc
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     result = run_method(self.driver_worker, method, args, kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/serial_utils.py", line 510, in run_method
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     return func(*args, **kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m            ^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/worker_base.py", line 351, in execute_model
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     return self.worker.execute_model(scheduler_output)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     return func(*args, **kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m            ^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_worker.py", line 1147, in execute_model
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     output = self.model_runner.execute_model(
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/usr/local/lib/python3.12/dist-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     return func(*args, **kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m            ^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/app/vllm-omni/vllm_omni/worker/gpu_ar_model_runner.py", line 1264, in execute_model
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     ) = self._preprocess(scheduler_output, num_tokens_padded, intermediate_tensors)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/app/vllm-omni/vllm_omni/worker/gpu_model_runner.py", line 1774, in _preprocess
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     req_input_ids, req_embeds, update_dict = self.model.preprocess(
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m                                              ^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/app/vllm-omni/vllm_omni/model_executor/models/minicpmo_4_5/minicpmo_4_5_omni.py", line 305, in preprocess
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     return self.talker.preprocess(input_ids=input_ids, input_embeds=input_embeds, **kwargs)
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m   File "/app/vllm-omni/vllm_omni/model_executor/models/minicpmo_4_5/minicpmo_4_5_omni_tts.py", line 422, in preprocess
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m     raise ValueError(
+[0;36m(StageEngineCoreProc_stage1_replica0 pid=1812)[0;0m ValueError: MiniCPM-o sliding recompute prompt is shorter than its rebuilt condition: request_id=chatcmpl-bc78957e20fb1168-a48a68ca prompt_len=11 rebuilt_len=83
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:16 [v1/utils.py:602] [shutdown] Process manager: start process_count=1 timeout=5.0s
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:16 [v1/utils.py:633] [shutdown] Process manager: complete
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:16 [v1/engine/core_client.py:659] [shutdown] MPClient: engine manager stopped
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:16 [v1/engine/core_client.py:660] [shutdown] MPClient: cleaning up background resources
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:16 [v1/engine/core_client.py:395] [shutdown] MPClient: background resource cleanup start
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:16 [v1/engine/core_client.py:452] [shutdown] MPClient: background resource cleanup complete
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:16 [v1/engine/core_client.py:662] [shutdown] MPClient: complete
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:16 [stage_pool.py:1234] [StagePool] Stage 0 replica 0 shut down
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:16 [v1/engine/core_client.py:655] [shutdown] MPClient: start timeout=default
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:16 [stage_pool.py:1234] [StagePool] Stage 1 replica 0 shut down
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:16 [v1/engine/core_client.py:655] [shutdown] MPClient: start timeout=default
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:16 [v1/utils.py:602] [shutdown] Process manager: start process_count=1 timeout=5.0s
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:19[0m [90m[stage_engine_core_proc.py:186][0m StageEngineCoreProc exiting.
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:19[0m [90m[v1/engine/core.py:744][0m [shutdown] EngineCore: tearing down local resources
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:19[0m [90m[v1/worker/gpu_model_runner.py:6537][0m Cleaned up profiling KV cache and CUDA graphs
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:19[0m [90m[v1/core/sched/scheduler.py:2464][0m [shutdown] Scheduler: start
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:19[0m [90m[v1/core/sched/scheduler.py:2473][0m [shutdown] Scheduler: complete
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:19[0m [90m[distributed/parallel_state.py:2108][0m [shutdown] Distributed: cleanup start shutdown_ray=False
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:19[0m [90m[distributed/parallel_state.py:2146][0m [shutdown] Distributed: cleanup complete
+[0;36m(StageEngineCoreProc_stage2_replica0 pid=1987)[0;0m [37mDEBUG[0m [90m08-03 15:26:19[0m [90m[v1/engine/core.py:759][0m [shutdown] EngineCore: local resource teardown complete
+[0;36m(APIServer pid=1425)[0;0m INFO 08-03 15:26:21 [stage_pool.py:1234] [StagePool] Stage 2 replica 0 shut down
+[0;36m(APIServer pid=1425)[0;0m DEBUG 08-03 15:26:21 [async_omni_engine.py:1897] [AsyncOmniEngine] Released CuMem memory pool during shutdown
+/usr/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 4 leaked shared_memory objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+## 2026-08-04 KV session and position invariants
 
-**Observed:** The reference `sliding_recompute` path clears `past_key_values`, rebuilds the previous condition plus previous generated audio embeddings plus the current condition, and restarts positions at zero.
+**Changed:** Kept MiniCPM's model-owned codec sampler and added a Talker KV-cache epoch that resets to position zero at each sliding recompute boundary.
 
-**Observed:** The reference default uses one recomputed prior chunk and a two-chunk window, while the current vLLM-Omni Talker has no equivalent context mode yet.
+**Changed:** Added sidecar history, prompt-length, scheduler-position, epoch, and prefill-continuity checks with boundary logging; GPU E2E remains unproven.
 
-Evidence: [`utils.py`](../issue_5259_backup/MiniCPM-o-4_5/utils.py) and [`modeling_minicpmo.py`](../issue_5259_backup/MiniCPM-o-4_5/modeling_minicpmo.py).
+**Tests:** Added negative unit coverage for nonzero reset starts, prefill gaps, epoch drift, runner-position mismatch, and full 500-token condition history.
 
-### Architecture decision
+## 2026-08-04 epoch metadata enforcement
 
-**Proposed:** Keep native vLLM KV caching for the default Talker path and add an internal model-to-scheduler prompt-replacement control for the opt-in sliding recompute path.
+**Changed:** Made the scheduler reject a sliding replacement without a positive `kv_cache_epoch` and include the epoch in the fresh-session reset logs.
 
-**Proposed:** The Talker owns request-keyed recompute state, while the scheduler owns prompt replacement and KV lifetime; no model code will mutate vLLM KV blocks directly.
-
-**Proposed:** Do not move Thinker-to-Talker conditions onto a new async connector for this feature because only the Talker knows the exact number of previous audio codes needed to size the recompute prompt.
-
-**~~Unproven:~~** ~~The control event, scheduler requeue, Code2Wav segment handling, and long-request output budget still require implementation and E2E validation.~~
-
-**Changed:** The Talker now emits a replacement prompt event at the official `sliding_recompute` cadence, and the scheduler requeues the same request through its existing prompt-replacement boundary.
-
-**Unproven:** Code2Wav continuity, long-request quality, and the full output budget still require GPU E2E validation.
-
-### Logging instrumentation
-
-**Changed:** Added boundary logs for Thinker-to-Talker handoff, Talker prefill, ordinary condition EOS or 500-step termination, native duplex chunk termination, Talker cleanup, codec-window emission, and Code2Wav input validation.
-
-**Changed:** The logs include request ID, stage boundary, condition index, condition length, prompt length, computed-token offset, codec count, cache epoch, chunk sequence, segment flags, and terminal flags where available.
-
-**Observed:** The default base deployment still reports `kv_action=append_native_kv`, while the opt-in overlay can report `sliding_recompute_prompt_replace` followed by a scheduler reset event.
-
-**Unproven:** The current async bridge must be tested to verify that a condition boundary cannot be mistaken for a final Code2Wav chunk.
-
-**Unproven:** Logging shows the control-flow evidence but does not prove audio correctness, cache correctness, or long-form continuity.
-
-### 2026-08-03 runtime implementation
-
-**Changed:** Added `vllm_omni/deploy/minicpmo_4_5_sliding.yaml` as a thin opt-in overlay with the reference two-condition window and one recomputed prior condition.
-
-**Changed:** The Talker retains bounded full audio history, rebuilds prior condition plus audio embeddings plus the current condition, and leaves native KV caching unchanged when the overlay is not enabled.
-
-**Changed:** The scheduler saves the current codec output before resetting prompt bookkeeping, KV ownership, output budget, and chunk-send watermark for the next bounded session.
-
-**Tested:** The focused implementation suite passed with 60 tests passed and 14 warnings; this is unit evidence only.
-
-**Unproven:** No GPU serving request has yet proved long-form continuity, audio quality, or multi-request isolation.
-
-**Changed:** The reset now avoids replaying the stale scheduler handoff into the runner and preserves only reference-audio fields needed by a queued codec payload.
-
-**Tested:** The final focused and bridge regression suite passed with 122 tests passed, 1 skipped, and 14 warnings; this remains unit evidence only.
-
-### Validation after instrumentation
-
-**Tested:** The focused MiniCPM unit suite passed with 84 tests passed and 1 skipped after the logging changes.
-
-Command: `.venv/bin/pytest -q tests/model_executor/models/minicpmo_4_5/test_talker_batching.py tests/model_executor/models/minicpmo_4_5/test_code2wav_batching.py tests/model_executor/models/minicpmo_4_5/test_llm2tts.py tests/model_executor/stage_input_processors/test_minicpmo_4_5_async_chunk.py`.
-
-**Tested:** Ruff checks and formatting passed for all three modified Python files.
-
-**Unproven:** These checks do not prove sliding recompute, long-form audio continuity, or an end-to-end server request.
-
-### 2026-08-03 E2E log correction
-
-**Observed:** The first GPU request reached the condition 1 to 2 sliding boundary, then Stage 1 failed because serialized condition chunks were on CPU while codec embeddings were on CUDA. Evidence: [`minicpm-sliding-server.log`](minicpm-sliding-server.log), lines 2164 to 2220.
-
-**Changed:** Recomputed conditions now follow the Talker device, and `audio_state.condition_chunks` stays GPU-resident through runner buffer updates with explicit normalization logging.
-
-**Tested:** The targeted Talker and runner regression suite passed 50 tests; GPU E2E remains unproven.
-
-## Future entry template
-
-### YYYY-MM-DD short title
-
-**Observed/Proposed/Tested/Unproven:** State one change or result in no more than two sentences.
-
-Evidence: Link the exact file, command, log excerpt, or test result.
-
-## E2E proof status
-
-**Unproven:** No sliding recompute E2E request has passed yet.
-
-The first accepted proof must include the server log, client log, commit, deployment configuration, request text, audio output, and a boundary-by-boundary result.
+**Tests:** 47 Talker tests, 23 scheduler/config tests, and 27 stage/Talker tests pass; GPU E2E remains unproven.

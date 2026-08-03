@@ -51,6 +51,10 @@ _MINICPMO_SLIDING_RECOMPUTED_CHUNKS = "minicpmo_sliding_recomputed_chunks"
 _MINICPMO_CODEC_SAMPLING_PARAMS = "minicpmo_codec_sampling_params"
 _DEFAULT_SLIDING_WINDOW_SIZE = 2
 _DEFAULT_SLIDING_RECOMPUTED_CHUNKS = 1
+_KV_CACHE_EPOCH = "kv_cache_epoch"
+_KV_NEXT_POSITION = "kv_next_position"
+_KV_PREFILL_STARTED = "kv_prefill_started"
+_KV_SESSION_PROMPT_LEN = "kv_session_prompt_len"
 _CODEC_SAMPLING_KEYS = frozenset(
     {
         "seed",
@@ -242,12 +246,166 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
 
         self.has_preprocess = True
         self.has_postprocess = False
+        # The runner supplies linear position metadata so this model can verify
+        # that a replacement really starts a new KV-cache session.
+        self.requires_request_position_invariants = True
         self.gpu_resident_buffer_keys: set[tuple[str, str]] = {
             ("audio_codes", "current"),
             ("audio_codes", "accumulated"),
             ("audio_state", "condition_chunks"),
         }
         self._init_native_talker(prefix)
+
+    def _ensure_kv_state(self, state: dict[str, Any], request_id: str) -> None:
+        """Initialize and validate the state owned by the current KV session."""
+        raw_recompute_epoch = state.get("recompute_epoch", 0)
+        raw_kv_epoch = state.get(_KV_CACHE_EPOCH, raw_recompute_epoch)
+        try:
+            recompute_epoch = int(raw_recompute_epoch)
+            kv_epoch = int(raw_kv_epoch)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "MiniCPM-o Talker has an invalid KV-cache epoch: "
+                f"request_id={request_id} recompute_epoch={raw_recompute_epoch!r} "
+                f"kv_cache_epoch={raw_kv_epoch!r}"
+            ) from exc
+        if recompute_epoch != kv_epoch:
+            raise RuntimeError(
+                "MiniCPM-o Talker codec state and KV-cache epoch diverged: "
+                f"request_id={request_id} recompute_epoch={recompute_epoch} kv_cache_epoch={kv_epoch}"
+            )
+        if recompute_epoch < 0:
+            raise RuntimeError(
+                f"MiniCPM-o Talker KV-cache epoch must be non-negative: request_id={request_id} epoch={recompute_epoch}"
+            )
+        state["recompute_epoch"] = recompute_epoch
+        state[_KV_CACHE_EPOCH] = kv_epoch
+        state.setdefault(_KV_NEXT_POSITION, 0)
+        state.setdefault(_KV_PREFILL_STARTED, False)
+
+    def _validate_kv_input_progress(
+        self,
+        state: dict[str, Any],
+        info_dict: Mapping[str, Any],
+        *,
+        span_len: int,
+        is_prefill: bool,
+        request_id: str,
+        source: str,
+    ) -> None:
+        """Verify that the runner position and sidecar KV cursor agree."""
+        # Direct unit tests and non-runner callers do not have a scheduler
+        # cursor. Production runner calls always provide this field.
+        if "_omni_num_computed_tokens" not in info_dict:
+            return
+        if span_len <= 0:
+            raise RuntimeError(
+                f"MiniCPM-o Talker received an empty scheduler span: request_id={request_id} source={source}"
+            )
+        try:
+            offset = int(info_dict["_omni_num_computed_tokens"])
+            expected_next_position = int(state[_KV_NEXT_POSITION])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "MiniCPM-o Talker is missing KV position state: "
+                f"request_id={request_id} source={source} state_keys={sorted(state)}"
+            ) from exc
+        if offset < 0:
+            raise RuntimeError(
+                f"MiniCPM-o Talker received a negative KV position: request_id={request_id} offset={offset}"
+            )
+        if source == "sliding_recompute" and is_prefill and not state[_KV_PREFILL_STARTED] and offset != 0:
+            raise RuntimeError(
+                "MiniCPM-o sliding recompute must start its fresh KV session at position zero: "
+                f"request_id={request_id} epoch={state[_KV_CACHE_EPOCH]} offset={offset}"
+            )
+        if offset != expected_next_position:
+            logger.error(
+                "[MiniCPM-o][Stage1][kv-invariant-failure] request_id=%s source=%s "
+                "kv_cache_epoch=%s expected_position=%s actual_position=%s span=%s",
+                request_id,
+                source,
+                state[_KV_CACHE_EPOCH],
+                expected_next_position,
+                offset,
+                span_len,
+            )
+            raise RuntimeError(
+                "MiniCPM-o Talker KV position is not contiguous with sidecar state: "
+                f"request_id={request_id} source={source} expected={expected_next_position} "
+                f"actual={offset} epoch={state[_KV_CACHE_EPOCH]}"
+            )
+
+        actual_position_start = info_dict.get("_omni_position_start")
+        actual_position_end = info_dict.get("_omni_position_end")
+        expected_position_end = offset + span_len - 1
+        if actual_position_start is not None and int(actual_position_start) != offset:
+            raise RuntimeError(
+                "MiniCPM-o Talker runner position does not match scheduler offset: "
+                f"request_id={request_id} source={source} scheduler_offset={offset} "
+                f"runner_position_start={actual_position_start}"
+            )
+        if actual_position_end is not None and int(actual_position_end) != expected_position_end:
+            raise RuntimeError(
+                "MiniCPM-o Talker runner position span is invalid: "
+                f"request_id={request_id} source={source} expected_end={expected_position_end} "
+                f"runner_position_end={actual_position_end}"
+            )
+
+        next_position = offset + span_len
+        session_prompt_len = state.get(_KV_SESSION_PROMPT_LEN)
+        prompt_bound_active = source == "sliding_recompute" or state.get("initial_prefill_pending", False)
+        if (
+            is_prefill
+            and prompt_bound_active
+            and session_prompt_len is not None
+            and next_position > int(session_prompt_len)
+        ):
+            raise RuntimeError(
+                "MiniCPM-o Talker prefill exceeded the current KV session prompt: "
+                f"request_id={request_id} epoch={state[_KV_CACHE_EPOCH]} next_position={next_position} "
+                f"prompt_len={session_prompt_len}"
+            )
+        state[_KV_NEXT_POSITION] = next_position
+        if is_prefill:
+            state[_KV_PREFILL_STARTED] = True
+        if source == "sliding_recompute" or offset == 0:
+            logger.info(
+                "[MiniCPM-o][Stage1][kv-invariant] request_id=%s source=%s kv_cache_epoch=%s "
+                "position_start=%s position_end=%s next_position=%s prompt_len=%s",
+                request_id,
+                source,
+                state[_KV_CACHE_EPOCH],
+                offset,
+                expected_position_end,
+                next_position,
+                session_prompt_len,
+            )
+
+    def _start_sliding_recompute_epoch(
+        self,
+        state: dict[str, Any],
+        *,
+        prompt_len: int,
+        request_id: str,
+    ) -> int:
+        """Advance the logical KV session before the scheduler replaces it."""
+        self._ensure_kv_state(state, request_id)
+        next_epoch = int(state[_KV_CACHE_EPOCH]) + 1
+        state["recompute_epoch"] = next_epoch
+        state[_KV_CACHE_EPOCH] = next_epoch
+        state[_KV_NEXT_POSITION] = 0
+        state[_KV_PREFILL_STARTED] = False
+        state[_KV_SESSION_PROMPT_LEN] = int(prompt_len)
+        logger.info(
+            "[MiniCPM-o][Stage1][kv-session-boundary] request_id=%s "
+            "kv_cache_epoch=%s previous_epoch=%s prompt_len=%s action=replace_and_fresh_prefill",
+            request_id,
+            next_epoch,
+            next_epoch - 1,
+            prompt_len,
+        )
+        return next_epoch
 
     def _init_native_talker(self, prefix: str) -> None:
         if self._tts_config is None:
@@ -478,6 +636,36 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         chunks[-1] = torch.cat([chunks[-1][:-1], self._boundary_embeddings()], dim=0)
         return chunks
 
+    def _build_initial_prefill_embeddings(
+        self,
+        state: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> torch.Tensor:
+        """Rebuild the first condition for a chunked initial prefill."""
+        chunks = state.get("condition_chunks")
+        if not isinstance(chunks, list) or not chunks:
+            raise RuntimeError(
+                "MiniCPM-o Talker cannot continue its initial prefill without condition chunks: "
+                f"request_id={request_id}"
+            )
+        target_len = int(state[_KV_SESSION_PROMPT_LEN])
+        first_chunk = self._condition_chunk_on_device(state, 0, request_id)
+        prefix_len = target_len - int(first_chunk.shape[0])
+        if prefix_len < 0:
+            raise RuntimeError(
+                "MiniCPM-o Talker initial condition exceeds its scheduler prompt: "
+                f"request_id={request_id} condition_len={first_chunk.shape[0]} prompt_len={target_len}"
+            )
+        if prefix_len == 0:
+            return first_chunk
+        placeholder_ids = torch.zeros(
+            prefix_len,
+            dtype=torch.long,
+            device=self.emb_text.weight.device,
+        )
+        return torch.cat([self.emb_text(placeholder_ids), first_chunk], dim=0)
+
     def preprocess(
         self,
         input_ids: torch.Tensor,
@@ -494,6 +682,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         if isinstance(local_state, dict):
             state = local_state
         first_call = not isinstance(state, dict)
+        if isinstance(state, dict):
+            self._ensure_kv_state(state, request_id)
 
         if isinstance(state, dict) and state.get("sliding_recompute_pending"):
             condition_index = int(state.get("condition_chunk_index", 0))
@@ -512,6 +702,19 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     "MiniCPM-o sliding recompute state is missing its authoritative prompt length: "
                     f"request_id={request_id} value={raw_expected_prompt_len!r}"
                 ) from exc
+            expected_from_state, expected_audio_tokens = self._sliding_recompute_prompt_stats(
+                state,
+                condition_index,
+            )
+            recorded_audio_tokens = int(state.get("sliding_recompute_audio_tokens", -1))
+            if expected_prompt_len != expected_from_state or recorded_audio_tokens != expected_audio_tokens:
+                raise ValueError(
+                    "MiniCPM-o sliding recompute sidecar history does not match its rebuilt condition: "
+                    f"request_id={request_id} condition_index={condition_index} "
+                    f"recorded_prompt_len={expected_prompt_len} rebuilt_prompt_len={expected_from_state} "
+                    f"recorded_audio_tokens={recorded_audio_tokens} rebuilt_audio_tokens={expected_audio_tokens}"
+                )
+            state[_KV_SESSION_PROMPT_LEN] = expected_prompt_len
             raw_runner_prompt_len = info_dict.get("_omni_prompt_len")
             try:
                 runner_prompt_len = int(raw_runner_prompt_len)
@@ -530,7 +733,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 "[MiniCPM-o][Stage1][sliding-recompute-prefill-input] request_id=%s "
                 "condition_index=%s runner_prompt_len=%s expected_prompt_len=%s "
                 "rebuilt_len=%s computed_offset=%s is_prefill=%s prefill_source=%s "
-                "recompute_epoch=%s previous_audio_tokens=%s input_checksum=%s input_l2=%s",
+                "recompute_epoch=%s kv_cache_epoch=%s previous_audio_tokens=%s "
+                "input_checksum=%s input_l2=%s",
                 request_id,
                 condition_index,
                 runner_prompt_len,
@@ -540,6 +744,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 is_prefill,
                 state.get("prefill_source"),
                 state.get("recompute_epoch", 0),
+                state.get(_KV_CACHE_EPOCH, 0),
                 state.get("sliding_recompute_audio_tokens", 0),
                 recompute_input_checksum,
                 recompute_input_l2,
@@ -562,6 +767,12 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 )
             target_len = expected_prompt_len
             offset = int(info_dict.get("_omni_num_computed_tokens", 0))
+            if offset + span_len > target_len:
+                raise ValueError(
+                    "MiniCPM-o sliding recompute prefill exceeds its fresh KV session: "
+                    f"request_id={request_id} epoch={state[_KV_CACHE_EPOCH]} offset={offset} "
+                    f"span={span_len} prompt_len={target_len}"
+                )
             embeds = recompute_embeds[offset : offset + span_len]
             if embeds.shape[0] != span_len:
                 raise ValueError(
@@ -569,7 +780,15 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     f"request_id={request_id} condition_index={condition_index} offset={offset} "
                     f"span={span_len} prompt_len={target_len} rebuilt_len={recompute_embeds.shape[0]}"
                 )
-            if offset + span_len >= target_len:
+            self._validate_kv_input_progress(
+                state,
+                info_dict,
+                span_len=span_len,
+                is_prefill=True,
+                request_id=request_id,
+                source="sliding_recompute",
+            )
+            if offset + span_len == target_len:
                 state["sliding_recompute_pending"] = False
                 state["conditioning"] = False
                 state["condition_sample_ready"] = False
@@ -577,7 +796,8 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 logger.info(
                     "[MiniCPM-o][Stage1][sliding-recompute-prefill] request_id=%s "
                     "condition_index=%s prompt_len=%s computed_offset=%s span=%s "
-                    "previous_audio_tokens=%s reset_offset=0 prefill_source=%s recompute_epoch=%s",
+                    "previous_audio_tokens=%s reset_offset=0 prefill_source=%s "
+                    "recompute_epoch=%s kv_cache_epoch=%s",
                     request_id,
                     condition_index,
                     target_len,
@@ -586,6 +806,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     state.get("sliding_recompute_audio_tokens", 0),
                     state.get("prefill_source"),
                     state.get("recompute_epoch", 0),
+                    state.get(_KV_CACHE_EPOCH, 0),
                 )
             empty_codes = torch.empty(0, dtype=torch.long, device=embeds.device)
             return (
@@ -600,7 +821,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 },
             )
 
-        if is_prefill or first_call:
+        if first_call:
             token_ids, hidden_states = get_tts_handoff(info_dict)
             # Cross-process stage transport serializes CPU tensors as lists.
             # Normalize both local tensor handoffs and transported payloads
@@ -671,6 +892,11 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     "min_tokens": 0 if duplex_boundary else _DUPLEX_CODEC_TOKENS_PER_CHUNK,
                     "prefill_source": "initial_condition",
                     "recompute_epoch": 0,
+                    _KV_CACHE_EPOCH: 0,
+                    _KV_NEXT_POSITION: 0,
+                    _KV_PREFILL_STARTED: False,
+                    _KV_SESSION_PROMPT_LEN: target_len,
+                    "initial_prefill_pending": offset + span_len < target_len,
                 }
             else:
                 state = {
@@ -684,6 +910,11 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                     "conditioning": False,
                     "prefill_source": "initial_condition",
                     "recompute_epoch": 0,
+                    _KV_CACHE_EPOCH: 0,
+                    _KV_NEXT_POSITION: 0,
+                    _KV_PREFILL_STARTED: False,
+                    _KV_SESSION_PROMPT_LEN: target_len,
+                    "initial_prefill_pending": offset + span_len < target_len,
                 }
                 if self._sliding_recompute_settings()[0]:
                     state.update(
@@ -692,6 +923,15 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                             "completed_condition_audio": [],
                         }
                     )
+            self._ensure_kv_state(state, request_id)
+            self._validate_kv_input_progress(
+                state,
+                info_dict,
+                span_len=span_len,
+                is_prefill=is_prefill,
+                request_id=request_id,
+                source="initial_condition",
+            )
             request_states = getattr(self, "_request_audio_states", None)
             if request_states is None:
                 request_states = {}
@@ -728,6 +968,43 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 },
             )
 
+        if is_prefill and state.get("initial_prefill_pending"):
+            state["prefill_source"] = "initial_condition"
+            initial_embeds = self._build_initial_prefill_embeddings(
+                state,
+                request_id=request_id,
+            )
+            offset = int(info_dict.get("_omni_num_computed_tokens", 0))
+            target_len = int(state[_KV_SESSION_PROMPT_LEN])
+            embeds = initial_embeds[offset : offset + span_len]
+            if embeds.shape[0] != span_len:
+                raise ValueError(
+                    "MiniCPM-o Talker initial prefill span exceeds its condition: "
+                    f"request_id={request_id} offset={offset} span={span_len} prompt_len={target_len}"
+                )
+            self._validate_kv_input_progress(
+                state,
+                info_dict,
+                span_len=span_len,
+                is_prefill=True,
+                request_id=request_id,
+                source="initial_condition",
+            )
+            if offset + span_len == target_len:
+                state["initial_prefill_pending"] = False
+            logger.info(
+                "[MiniCPM-o][Stage1][initial-prefill] request_id=%s kv_cache_epoch=%s "
+                "prompt_len=%s computed_offset=%s span=%s next_position=%s complete=%s",
+                request_id,
+                state[_KV_CACHE_EPOCH],
+                target_len,
+                offset,
+                span_len,
+                state[_KV_NEXT_POSITION],
+                not state["initial_prefill_pending"],
+            )
+            return input_ids, embeds, {"audio_state": state}
+
         if state.get("conditioning"):
             state["prefill_source"] = "native_kv_condition"
             chunks = state.get("condition_chunks")
@@ -748,6 +1025,14 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             cursor += span_len
             state["condition_cursor"] = cursor
             state["condition_sample_ready"] = cursor == int(chunk.shape[0])
+            self._validate_kv_input_progress(
+                state,
+                info_dict,
+                span_len=span_len,
+                is_prefill=True,
+                request_id=request_id,
+                source="native_kv_condition",
+            )
             logger.info(
                 "[MiniCPM-o][Stage1][condition-prefill] request_id=%s condition_index=%s/%s "
                 "cursor=%s span=%s condition_len=%s sample_ready=%s prefill_source=%s "
@@ -772,10 +1057,26 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 # stop token. make_omni_output ignores its hidden states, so any
                 # shape-correct embedding will do.
                 weight = self.emb_code[0].weight
+                self._validate_kv_input_progress(
+                    state,
+                    info_dict,
+                    span_len=span_len,
+                    is_prefill=False,
+                    request_id=request_id,
+                    source="native_kv_decode",
+                )
                 return input_ids, weight.new_zeros((span_len, weight.shape[1])), {}
             raise RuntimeError("MiniCPM-o Talker decode is missing the previous request-local audio code")
         code = current.to(device=self.emb_code[0].weight.device, dtype=torch.long).reshape(1)
         embeds = self.emb_code[0](code)
+        self._validate_kv_input_progress(
+            state,
+            info_dict,
+            span_len=span_len,
+            is_prefill=False,
+            request_id=request_id,
+            source="native_kv_decode",
+        )
         return input_ids, embeds, {}
 
     def _request_generator(self, request_id: str, device: torch.device) -> torch.Generator:
@@ -944,6 +1245,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         terminal_flags: list[torch.Tensor] = []
         sliding_recompute_flags: list[torch.Tensor] = []
         sliding_recompute_prompt_lengths: list[torch.Tensor] = []
+        sliding_recompute_epochs: list[torch.Tensor] = []
         native_duplex_flags: list[torch.Tensor] = []
         duplex_epochs: list[torch.Tensor] = []
         duplex_turn_ids: list[torch.Tensor] = []
@@ -951,6 +1253,10 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
         turn_end_flags: list[torch.Tensor] = []
         empty_delta = hidden.new_empty((0, 1), dtype=torch.long)
         for index, info in enumerate(infos):
+            if sliding_recompute_enabled:
+                # Keep one epoch value per request so the scheduler can verify
+                # that a replacement event belongs to a fresh KV session.
+                sliding_recompute_epochs.append(torch.tensor(0, dtype=torch.long))
             info_dict = info if isinstance(info, dict) else {}
             native_duplex = info_dict.get("native_duplex") is True
             if emit_duplex_metadata:
@@ -1021,6 +1327,12 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             if not isinstance(state, dict):
                 state = dict(info.get("audio_state", {}) or {})
                 request_states[request_id] = state
+            self._ensure_kv_state(state, request_id)
+            if sliding_recompute_enabled:
+                sliding_recompute_epochs[-1] = torch.tensor(
+                    int(state[_KV_CACHE_EPOCH]),
+                    dtype=torch.long,
+                )
             if state.get("finished"):
                 stop_rows.append(hidden.new_tensor([float("-inf"), 0.0]))
                 codec_deltas.append(empty_delta)
@@ -1096,6 +1408,16 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 kv_action = "append_native_kv"
                 if sliding_recompute_enabled and not is_eos:
                     state.setdefault("condition_audio_codes", []).append(int(sampled.item()))
+                if sliding_recompute_enabled:
+                    condition_audio_codes = state.setdefault("condition_audio_codes", [])
+                    expected_audio_codes = condition_step - int(is_eos)
+                    if len(condition_audio_codes) != expected_audio_codes:
+                        raise RuntimeError(
+                            "MiniCPM-o Talker codec history is out of sync with condition steps: "
+                            f"request_id={request_id} condition_index={chunk_index} "
+                            f"condition_step={condition_step} is_eos={is_eos} "
+                            f"history_len={len(condition_audio_codes)}"
+                        )
                 if condition_finished and has_more_conditions:
                     # Normal chat follows streaming_generate: audio EOS or the
                     # 500-step budget advances to the next text condition.
@@ -1111,17 +1433,22 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                                 state,
                                 next_condition_index,
                             )
-                            state["recompute_epoch"] = int(state.get("recompute_epoch", 0)) + 1
+                            next_epoch = self._start_sliding_recompute_epoch(
+                                state,
+                                prompt_len=recompute_prompt_len,
+                                request_id=request_id,
+                            )
                             state["sliding_recompute_pending"] = True
                             state["sliding_recompute_prompt_len"] = recompute_prompt_len
                             state["sliding_recompute_audio_tokens"] = recompute_audio_tokens
                             state["conditioning"] = False
                             kv_action = "sliding_recompute_prompt_replace"
+                            sliding_recompute_epochs[-1] = torch.tensor(next_epoch, dtype=torch.long)
                             logger.info(
                                 "[MiniCPM-o][Stage1][sliding-recompute-schedule] request_id=%s "
                                 "previous_condition_index=%s next_condition_index=%s "
                                 "recomputed_chunks=%s previous_audio_tokens=%s prompt_len=%s reset_offset=0 "
-                                "next_prefill_source=sliding_recompute recompute_epoch=%s",
+                                "next_prefill_source=sliding_recompute recompute_epoch=%s kv_cache_epoch=%s",
                                 request_id,
                                 chunk_index,
                                 next_condition_index,
@@ -1129,6 +1456,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                                 recompute_audio_tokens,
                                 recompute_prompt_len,
                                 state["recompute_epoch"],
+                                state[_KV_CACHE_EPOCH],
                             )
                         else:
                             state["conditioning"] = True
@@ -1146,7 +1474,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                         "[MiniCPM-o][Stage1][condition-boundary] request_id=%s "
                         "condition_index=%s/%s reason=%s condition_steps=%s emitted_codes=%s "
                         "has_more_conditions=%s next_condition_index=%s kv_action=%s "
-                        "next_prefill_source=%s recompute_epoch=%s",
+                        "next_prefill_source=%s recompute_epoch=%s kv_cache_epoch=%s",
                         request_id,
                         chunk_index,
                         len(chunks) if isinstance(chunks, list) else 0,
@@ -1158,6 +1486,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                         kv_action,
                         next_prefill_source,
                         state.get("recompute_epoch", 0),
+                        state.get(_KV_CACHE_EPOCH, 0),
                     )
                 state["finished"] = finished
                 if not is_eos:
@@ -1187,6 +1516,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 {
                     "replace_streaming_prompt": sliding_recompute_flags,
                     "next_stage_prompt_len": sliding_recompute_prompt_lengths,
+                    "kv_cache_epoch": sliding_recompute_epochs,
                 }
             )
         if emit_duplex_metadata:

@@ -218,9 +218,11 @@ def tts2code2wav_async_chunk(
     output_meta = output_meta if isinstance(output_meta, Mapping) else {}
     if bool(_coerce_int(output_meta.get("replace_streaming_prompt"))):
         logger.info(
-            "[MiniCPM-o][Stage1->Stage2][sliding-recompute-boundary] request_id=%s prompt_len=%s reset_offset=0",
+            "[MiniCPM-o][Stage1->Stage2][sliding-recompute-boundary] request_id=%s "
+            "prompt_len=%s kv_cache_epoch=%s reset_offset=0",
             request_id,
             _coerce_int(output_meta.get("next_stage_prompt_len")),
+            _coerce_int(output_meta.get("kv_cache_epoch")),
         )
     native_duplex = bool(_coerce_int(output_meta.get("native_duplex")))
     duplex_epoch = _coerce_int(output_meta.get("duplex_epoch"))

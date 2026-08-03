@@ -231,6 +231,31 @@ def test_minicpmo_sliding_recompute_reads_flat_payload_metadata() -> None:
     )
 
     assert prompt_len == 27
+    epoch = sched._minicpmo_sliding_recompute_epoch(
+        request,
+        {
+            "meta.replace_streaming_prompt": torch.tensor(True),
+            "meta.next_stage_prompt_len": torch.tensor(27),
+            "meta.kv_cache_epoch": torch.tensor(3),
+        },
+    )
+
+    assert epoch == 3
+
+
+def test_minicpmo_sliding_recompute_rejects_missing_epoch() -> None:
+    sched = _make_scheduler(stage_id=1)
+    sched.vllm_config.model_config.hf_config = SimpleNamespace(minicpmo_sliding_recompute=True)
+    request = _make_request()
+
+    with pytest.raises(RuntimeError, match="missing its KV-cache epoch"):
+        sched._minicpmo_sliding_recompute_epoch(
+            request,
+            {
+                "meta.replace_streaming_prompt": torch.tensor(True),
+                "meta.next_stage_prompt_len": torch.tensor(27),
+            },
+        )
 
 
 def test_minicpmo_sliding_recompute_rejects_missing_prompt_length() -> None:

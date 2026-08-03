@@ -16,6 +16,9 @@ from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni import (
 )
 from vllm_omni.model_executor.models.minicpmo_4_5.minicpmo_4_5_omni_tts import (
     _DUPLEX_CODEC_TOKENS_PER_CHUNK,
+    _KV_CACHE_EPOCH,
+    _KV_NEXT_POSITION,
+    _KV_PREFILL_STARTED,
     _MAX_AUDIO_TOKENS_PER_CONDITION,
     MiniCPMO45OmniTTSForConditionalGeneration,
     _resolve_codec_sampling_params,
@@ -223,6 +226,127 @@ def test_sliding_recompute_prefill_uses_full_previous_audio_context() -> None:
     assert update["audio_state"]["prefill_source"] == "sliding_recompute"
 
 
+def _make_sliding_prefill_state(*, prompt_len: int = 4) -> dict:
+    return {
+        "mode": "streaming",
+        "condition_chunks": [torch.ones(1, 2), torch.zeros(1, 2)],
+        "condition_chunk_index": 1,
+        "condition_cursor": 0,
+        "condition_step": 0,
+        "conditioning": False,
+        "finished": False,
+        "sliding_recompute_pending": True,
+        "sliding_recompute_prompt_len": prompt_len,
+        "sliding_recompute_audio_tokens": prompt_len - 2,
+        "completed_condition_audio": [{"condition_index": 0, "codes": list(range(prompt_len - 2))}],
+        "recompute_epoch": 3,
+        _KV_CACHE_EPOCH: 3,
+        _KV_NEXT_POSITION: 0,
+        _KV_PREFILL_STARTED: False,
+    }
+
+
+def test_sliding_recompute_rejects_nonzero_first_kv_position() -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = True
+    talker._sliding_window_size = 2
+    talker._sliding_recomputed_chunks = 1
+    talker.emb_text = nn.Embedding(1, 2)
+    talker.emb_code = nn.ModuleList([nn.Embedding(64, 2)])
+    state = _make_sliding_prefill_state()
+    talker._request_audio_states["req-nonzero-start"] = state
+
+    with pytest.raises(RuntimeError, match="position zero"):
+        talker.preprocess(
+            torch.zeros(1, dtype=torch.long),
+            None,
+            _omni_is_prefill=True,
+            _omni_num_computed_tokens=1,
+            _omni_prompt_len=4,
+            request_id="req-nonzero-start",
+            audio_state=state,
+        )
+
+
+def test_sliding_recompute_rejects_a_gap_between_prefill_spans() -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = True
+    talker._sliding_window_size = 2
+    talker._sliding_recomputed_chunks = 1
+    talker.emb_text = nn.Embedding(1, 2)
+    talker.emb_code = nn.ModuleList([nn.Embedding(64, 2)])
+    state = _make_sliding_prefill_state()
+    talker._request_audio_states["req-prefill-gap"] = state
+
+    talker.preprocess(
+        torch.zeros(2, dtype=torch.long),
+        None,
+        _omni_is_prefill=True,
+        _omni_num_computed_tokens=0,
+        _omni_prompt_len=4,
+        request_id="req-prefill-gap",
+        audio_state=state,
+    )
+
+    with pytest.raises(RuntimeError, match="not contiguous"):
+        talker.preprocess(
+            torch.zeros(1, dtype=torch.long),
+            None,
+            _omni_is_prefill=True,
+            _omni_num_computed_tokens=3,
+            _omni_prompt_len=4,
+            request_id="req-prefill-gap",
+            audio_state=state,
+        )
+
+
+def test_sliding_recompute_rejects_epoch_divergence() -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = True
+    talker._sliding_window_size = 2
+    talker._sliding_recomputed_chunks = 1
+    talker.emb_text = nn.Embedding(1, 2)
+    talker.emb_code = nn.ModuleList([nn.Embedding(64, 2)])
+    state = _make_sliding_prefill_state()
+    state[_KV_CACHE_EPOCH] = 2
+    talker._request_audio_states["req-epoch-drift"] = state
+
+    with pytest.raises(RuntimeError, match="epoch"):
+        talker.preprocess(
+            torch.zeros(1, dtype=torch.long),
+            None,
+            _omni_is_prefill=True,
+            _omni_num_computed_tokens=0,
+            _omni_prompt_len=4,
+            request_id="req-epoch-drift",
+            audio_state=state,
+        )
+
+
+def test_sliding_recompute_rejects_runner_position_mismatch() -> None:
+    talker = _make_talker()
+    talker._sliding_recompute_enabled = True
+    talker._sliding_window_size = 2
+    talker._sliding_recomputed_chunks = 1
+    talker.emb_text = nn.Embedding(1, 2)
+    talker.emb_code = nn.ModuleList([nn.Embedding(64, 2)])
+    state = _make_sliding_prefill_state()
+    talker._request_audio_states["req-position-mismatch"] = state
+
+    with pytest.raises(RuntimeError, match="runner position"):
+        talker.preprocess(
+            torch.zeros(1, dtype=torch.long),
+            None,
+            _omni_is_prefill=True,
+            _omni_num_computed_tokens=0,
+            _omni_position_start=1,
+            _omni_position_end=1,
+            _omni_prompt_len=4,
+            request_id="req-position-mismatch",
+            audio_state=state,
+        )
+
+
 @pytest.mark.parametrize(
     ("expected_prompt_len", "runner_prompt_len", "is_prefill", "error"),
     [
@@ -253,6 +377,7 @@ def test_sliding_recompute_rejects_invalid_session_boundary(
         "finished": False,
         "sliding_recompute_pending": True,
         "sliding_recompute_prompt_len": expected_prompt_len,
+        "sliding_recompute_audio_tokens": 1,
         "completed_condition_audio": [{"condition_index": 0, "codes": [1]}],
     }
     talker._request_audio_states["req-invalid-boundary"] = state
@@ -285,6 +410,7 @@ def test_sliding_recompute_normalizes_transport_condition_device() -> None:
         "finished": False,
         "sliding_recompute_pending": True,
         "sliding_recompute_prompt_len": 4,
+        "sliding_recompute_audio_tokens": 2,
         "completed_condition_audio": [{"condition_index": 0, "codes": [1, 2]}],
         "condition_chunks": [torch.ones(1, 2), torch.zeros(1, 2)],
     }
@@ -320,7 +446,8 @@ def test_sliding_recompute_emits_prompt_replacement_at_condition_boundary(mocker
         "condition_chunk_index": 1,
         "condition_cursor": 0,
         "conditioning": False,
-        "condition_audio_codes": [],
+        "condition_audio_codes": list(range(_MAX_AUDIO_TOKENS_PER_CONDITION - 1)),
+        "sliding_recompute_audio_tokens": 2,
         "completed_condition_audio": [{"condition_index": 0, "codes": [1, 2]}],
     }
     talker._request_audio_states["req-recompute-boundary"] = state
@@ -338,14 +465,23 @@ def test_sliding_recompute_emits_prompt_replacement_at_condition_boundary(mocker
 
     meta = output.multimodal_outputs["meta"]
     assert meta["replace_streaming_prompt"][0].item() is True
-    assert meta["next_stage_prompt_len"][0].item() == chunks[1].shape[0] + 1 + chunks[2].shape[0]
+    assert meta["kv_cache_epoch"][0].item() == 1
+    assert meta["next_stage_prompt_len"][0].item() == (
+        chunks[1].shape[0] + _MAX_AUDIO_TOKENS_PER_CONDITION + chunks[2].shape[0]
+    )
     routed = _routed(output, 0)
     assert routed["meta"]["replace_streaming_prompt"].item() is True
     assert routed["meta"]["next_stage_prompt_len"].item() == meta["next_stage_prompt_len"][0].item()
     assert state["condition_chunk_index"] == 2
     assert state["condition_step"] == 0
     assert state["sliding_recompute_pending"] is True
-    assert state["completed_condition_audio"][-1] == {"condition_index": 1, "codes": [3]}
+    assert state[_KV_CACHE_EPOCH] == 1
+    assert state[_KV_NEXT_POSITION] == 0
+    assert state[_KV_PREFILL_STARTED] is False
+    assert state["completed_condition_audio"][-1] == {
+        "condition_index": 1,
+        "codes": [*range(_MAX_AUDIO_TOKENS_PER_CONDITION - 1), 3],
+    }
 
 
 def test_condition_chunks_match_official_streaming_boundaries() -> None:
