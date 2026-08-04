@@ -1031,7 +1031,6 @@ class Flux2KleinPipeline(
                 "txt_ids": text_ids,
                 "img_ids": latent_image_ids,
                 "joint_attention_kwargs": self.attention_kwargs,
-                "return_dict": False,
             }
             if self.do_classifier_free_guidance:
                 negative_kwargs = {
@@ -1042,7 +1041,6 @@ class Flux2KleinPipeline(
                     "txt_ids": negative_text_ids,
                     "img_ids": latent_image_ids,
                     "joint_attention_kwargs": self.attention_kwargs,
-                    "return_dict": False,
                 }
             else:
                 negative_kwargs = None
