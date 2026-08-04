@@ -454,7 +454,6 @@ class FluxPipeline(
                 "txt_ids": text_ids,
                 "img_ids": latent_image_ids,
                 "joint_attention_kwargs": self.joint_attention_kwargs,
-                "return_dict": False,
             }
 
             # Forward pass for negative prompt (CFG)
@@ -468,7 +467,6 @@ class FluxPipeline(
                     "txt_ids": negative_text_ids,
                     "img_ids": latent_image_ids,
                     "joint_attention_kwargs": self.joint_attention_kwargs,
-                    "return_dict": False,
                 }
             else:
                 negative_kwargs = None
