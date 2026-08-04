@@ -19,6 +19,7 @@ from typing import ClassVar
 
 import numpy as np
 import torch
+import torchaudio
 from tokenizers import Tokenizer as HFTokenizer
 from torch import nn
 from vllm.logger import init_logger
@@ -26,6 +27,11 @@ from vllm.logger import init_logger
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.utils import get_local_device
 from vllm_omni.diffusion.models.interface import SupportAudioOutput
+from vllm_omni.diffusion.models.omnivoice.audio import (
+    add_reference_punctuation,
+    postprocess_generated_audio,
+    prepare_reference_audio,
+)
 from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
 from vllm_omni.model_executor.models.omnivoice.duration import RuleDurationEstimator
 from vllm_omni.model_executor.models.omnivoice.omnivoice_decoder import OmniVoiceDecoder
@@ -38,9 +44,14 @@ try:
 except ImportError:
     HiggsAudioV2TokenizerModel = None
 
-import torchaudio
+try:
+    from transformers import pipeline as hf_pipeline
+except ImportError:
+    hf_pipeline = None
 
 logger = init_logger(__name__)
+
+_ASR_MODEL_NAME = "openai/whisper-large-v3-turbo"
 
 
 def get_omnivoice_post_process_func(od_config: OmniDiffusionConfig):
@@ -138,6 +149,7 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
         self.od_config = od_config
         self.device = get_local_device()
         self.model_path = od_config.model
+        self._asr_pipeline = None
 
         # Resolve model path (HF hub ID → local cache)
         if not os.path.isdir(self.model_path):
@@ -184,6 +196,86 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
         self.position_temperature = self.config.position_temperature
         self.class_temperature = self.config.class_temperature
         self.sample_rate = self.config.sample_rate
+
+    def _load_asr_pipeline(self):
+        """Load the reference-audio ASR pipeline on first use."""
+        if self._asr_pipeline is not None:
+            return self._asr_pipeline
+        if hf_pipeline is None:
+            raise RuntimeError(
+                "OmniVoice automatic transcription requires the Hugging Face "
+                f"ASR pipeline ({_ASR_MODEL_NAME!r}) on device {self.device}."
+            )
+
+        asr_dtype = torch.float16 if str(self.device).startswith(("cuda", "xpu")) else torch.float32
+        logger.info(
+            "Loading OmniVoice ASR model %s on %s",
+            _ASR_MODEL_NAME,
+            self.device,
+        )
+        try:
+            self._asr_pipeline = hf_pipeline(
+                "automatic-speech-recognition",
+                model=_ASR_MODEL_NAME,
+                dtype=asr_dtype,
+                device=self.device,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load OmniVoice ASR model {_ASR_MODEL_NAME!r} on device {self.device}: {exc}"
+            ) from exc
+        logger.info("OmniVoice ASR model loaded on %s", self.device)
+        return self._asr_pipeline
+
+    @torch.inference_mode()
+    def _transcribe_ref_audio(self, ref_audio) -> str:
+        """Transcribe a reference waveform with the lazily loaded ASR model."""
+        waveform, sr = ref_audio
+        if isinstance(waveform, torch.Tensor):
+            waveform = waveform.detach().cpu().numpy()
+        waveform = np.squeeze(np.array(waveform, copy=True))
+        result = self._load_asr_pipeline()(
+            {
+                "array": waveform,
+                "sampling_rate": int(sr),
+            }
+        )
+        if not isinstance(result, dict) or "text" not in result:
+            raise RuntimeError("OmniVoice ASR returned a malformed result without a 'text' field.")
+        transcript = result["text"]
+        if not isinstance(transcript, str):
+            raise RuntimeError("OmniVoice ASR returned a malformed result: 'text' must be a string.")
+        transcript = transcript.strip()
+        if not transcript:
+            raise ValueError("OmniVoice ASR returned an empty reference transcription.")
+        return transcript
+
+    def _resolve_ref_text(self, ref_audio, ref_text: str | None) -> str | None:
+        """Resolve missing reference text only when reference audio is present."""
+        if ref_audio is not None and (ref_text is None or not ref_text.strip()):
+            logger.info("Automatically transcribing OmniVoice reference audio")
+            return self._transcribe_ref_audio(ref_audio)
+        return ref_text
+
+    def _estimate_target_len(
+        self,
+        text: str,
+        ref_text: str | None,
+        ref_audio_tokens: torch.Tensor | None,
+    ) -> int:
+        """Estimate target audio tokens using resolved voice-clone conditioning."""
+        if ref_audio_tokens is None or not ref_text:
+            ref_text = "Nice to meet you."
+            num_ref_audio_tokens = 25
+        else:
+            num_ref_audio_tokens = ref_audio_tokens.size(-1)
+
+        target_len = self.duration_estimator.estimate_duration(
+            text,
+            ref_text,
+            num_ref_audio_tokens,
+        )
+        return max(1, int(target_len))
 
     def _encode_ref_audio(self, audio_signal: torch.Tensor, sr: int) -> torch.Tensor:
         """Encode reference audio to 8-codebook tokens for voice cloning."""
@@ -278,27 +370,28 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
         num_cb = self.config.num_audio_codebook
         mask_id = self.config.audio_mask_id
 
-        # Estimate target duration
-        target_len = self.duration_estimator.estimate_duration(text, "Nice to meet you.", 25)
-        target_len = max(1, int(target_len))
-
-        # Build text prompt with control tokens
-        style_text = f"<|denoise|><|lang_start|>{lang}<|lang_end|><|instruct_start|>{instruct}<|instruct_end|>"
-        full_text = _combine_text(ref_text=ref_text, text=text)
-        wrapped_text = f"<|text_start|>{full_text}<|text_end|>"
-        style_tokens = self.tokenizer.encode(style_text).ids
-        text_tokens = _tokenize_with_nonverbal_tags(wrapped_text, self.tokenizer)
-        encoding_ids = style_tokens + text_tokens
-        text_tokens = torch.tensor(encoding_ids, dtype=torch.long, device=device)
-        text_len = text_tokens.shape[0]
-
-        # Encode reference audio tokens if provided (with voice caching)
         ref_audio_tokens = None
+        reference_rms = None
         if ref_audio is not None:
             if self.audio_tokenizer is None:
                 raise RuntimeError(
                     "Voice cloning requires transformers>=5.3.0. Try: uv pip install 'transformers>=5.3.0'"
                 )
+
+            needs_asr = ref_text is None or not ref_text.strip()
+            audio_signal, sample_rate = ref_audio
+            try:
+                prepared_audio = prepare_reference_audio(
+                    audio_signal,
+                    int(sample_rate),
+                    target_sample_rate=self.audio_tokenizer.config.sample_rate,
+                    hop_length=self.audio_tokenizer.config.hop_length,
+                    trim_long=needs_asr,
+                )
+            except (RuntimeError, ValueError) as exc:
+                return DiffusionOutput(error=str(exc))
+            reference_rms = prepared_audio.original_rms
+
             # Check speaker cache first
             _cache_key = None
             if voice_name:
@@ -310,19 +403,52 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
                 cached = self._speaker_cache.get(_cache_key)
                 if cached is not None:
                     ref_audio_tokens = cached["ref_audio_tokens"].to(device)
+                    reference_rms = cached["reference_rms"]
+                    if needs_asr and cached.get("ref_text"):
+                        ref_text = cached["ref_text"]
                     _cache_key = None  # hit → don't store again
                     logger.debug("Speaker cache HIT for OmniVoice speaker '%s'", voice_name)
 
+            if needs_asr and not ref_text:
+                try:
+                    ref_text = self._resolve_ref_text(
+                        (prepared_audio.waveform, prepared_audio.sample_rate),
+                        ref_text,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    return DiffusionOutput(error=str(exc))
+            if ref_text:
+                ref_text = add_reference_punctuation(ref_text)
+
             if ref_audio_tokens is None:
-                audio_signal, sr = ref_audio
-                if isinstance(audio_signal, np.ndarray):
-                    audio_signal = torch.from_numpy(audio_signal).float()
-                ref_audio_tokens = self._encode_ref_audio(audio_signal, int(sr)).to(device)
+                ref_audio_tokens = self._encode_ref_audio(
+                    torch.from_numpy(prepared_audio.waveform),
+                    prepared_audio.sample_rate,
+                ).to(device)
 
                 # Store in cache for next request
                 if _cache_key is not None:
-                    self._speaker_cache.put(_cache_key, {"ref_audio_tokens": ref_audio_tokens.cpu()})
+                    self._speaker_cache.put(
+                        _cache_key,
+                        {
+                            "ref_audio_tokens": ref_audio_tokens.cpu(),
+                            "ref_text": ref_text if needs_asr else None,
+                            "reference_rms": reference_rms,
+                        },
+                    )
                     logger.debug("Speaker cache STORE for OmniVoice speaker '%s'", voice_name)
+
+        target_len = self._estimate_target_len(text, ref_text, ref_audio_tokens)
+
+        # Build text prompt with control tokens
+        style_text = f"<|denoise|><|lang_start|>{lang}<|lang_end|><|instruct_start|>{instruct}<|instruct_end|>"
+        full_text = _combine_text(ref_text=ref_text, text=text)
+        wrapped_text = f"<|text_start|>{full_text}<|text_end|>"
+        style_tokens = self.tokenizer.encode(style_text).ids
+        text_tokens = _tokenize_with_nonverbal_tags(wrapped_text, self.tokenizer)
+        encoding_ids = style_tokens + text_tokens
+        text_tokens = torch.tensor(encoding_ids, dtype=torch.long, device=device)
+        text_len = text_tokens.shape[0]
 
         # Build conditional + unconditional batches [2, 8, max_len]
         text_ids = text_tokens.unsqueeze(0).repeat(num_cb, 1)
@@ -371,6 +497,13 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
         )
         # Decode tokens to audio
         audio = self.decoder(tokens)  # [1, 1, samples]
+        audio_np = audio.squeeze(0).detach().cpu().float().numpy()
+        audio_np = postprocess_generated_audio(
+            audio_np,
+            sample_rate=self.sample_rate,
+            reference_rms=reference_rms,
+        )
+        audio = torch.from_numpy(audio_np).unsqueeze(0).to(device)
 
         return DiffusionOutput(output=audio)
 
