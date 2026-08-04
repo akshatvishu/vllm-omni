@@ -873,7 +873,6 @@ class Flux2Pipeline(
         prompt_embeds: torch.Tensor | None = None,
         negative_prompt_embeds: torch.Tensor | None = None,
         output_type: str | None = "pil",
-        return_dict: bool = True,
         attention_kwargs: dict[str, Any] | None = None,
         callback_on_step_end: Callable[[int, int, dict], None] | None = None,
         callback_on_step_end_tensor_inputs: list[str] = ["latents"],
@@ -1089,7 +1088,6 @@ class Flux2Pipeline(
                     "txt_ids": text_ids,
                     "img_ids": latent_image_ids,
                     "joint_attention_kwargs": self.attention_kwargs,
-                    "return_dict": False,
                 }
                 if do_true_cfg:
                     negative_kwargs = {
@@ -1100,7 +1098,6 @@ class Flux2Pipeline(
                         "txt_ids": negative_text_ids,
                         "img_ids": latent_image_ids,
                         "joint_attention_kwargs": self.attention_kwargs,
-                        "return_dict": False,
                     }
                 else:
                     negative_kwargs = None

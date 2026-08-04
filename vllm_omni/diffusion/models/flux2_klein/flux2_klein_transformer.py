@@ -16,8 +16,9 @@
 # limitations under the License.
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 import torch.nn as nn
@@ -29,6 +30,7 @@ from diffusers.models.embeddings import (
 )
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.normalization import AdaLayerNormContinuous
+from diffusers.utils import is_torch_npu_available
 from vllm.logger import init_logger
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (
@@ -48,7 +50,7 @@ from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
     SequenceParallelOutput,
 )
-from vllm_omni.diffusion.forward_context import get_forward_context
+from vllm_omni.diffusion.forward_context import get_forward_context, is_forward_context_available
 from vllm_omni.diffusion.layers.rope import RotaryEmbedding, apply_rope_to_qk
 
 logger = init_logger(__name__)
@@ -671,6 +673,21 @@ class Flux2PosEmbed(nn.Module):
         return freqs_cos, freqs_sin
 
 
+@dataclass
+class Flux2KleinState:
+    """Intermediate model-specific info for Flux2 Transformer.
+
+    NOTE: The implementation for Flux2/Flux2Klein is exactly the
+    same.
+    """
+
+    joint_attention_kwargs: dict[str, Any]
+    double_stream_mod_txt: tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...]
+    double_stream_mod_img: tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...]
+    single_stream_mod: tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...]
+    image_rotary_emb: tuple[torch.Tensor, torch.Tensor]
+
+
 class Flux2RopePrepare(nn.Module):
     """Prepares RoPE embeddings for sequence parallel.
 
@@ -909,20 +926,7 @@ class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
         return next(self.parameters()).dtype
 
     # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
-        raise NotImplementedError
-
-    def get_teacache_coefficients(self) -> list[float]:
-        # Same as FLUX.1 (similar dual-stream architecture)
-        return [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01]
-
-    def forward(
+    def preprocess(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
@@ -931,14 +935,12 @@ class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
         txt_ids: torch.Tensor,
         guidance: torch.Tensor | None = None,
         joint_attention_kwargs: dict[str, Any] | None = None,
-        return_dict: bool = True,
-    ) -> torch.Tensor | Transformer2DModelOutput:
+        *,
+        skip_modulated_input: bool = False,
+    ) -> ForwardState[Flux2KleinState]:
         joint_attention_kwargs = joint_attention_kwargs or {}
-
-        num_txt_tokens = encoder_hidden_states.shape[1]
-
         sp_size = self.parallel_config.sequence_parallel_size
-        if sp_size is not None and sp_size > 1:
+        if sp_size and sp_size > 1 and is_forward_context_available():
             get_forward_context().split_text_embed_in_sp = False
 
         timestep = timestep.to(hidden_states.dtype) * 1000
@@ -951,73 +953,118 @@ class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
         double_stream_mod_txt = self.double_stream_modulation_txt(temb)
         single_stream_mod = self.single_stream_modulation(temb)[0]
 
+        hidden_states = self.x_embedder(hidden_states)
+        encoder_hidden_states = self.context_embedder(encoder_hidden_states)
+
         if img_ids.ndim == 3:
             img_ids = img_ids[0]
         if txt_ids.ndim == 3:
             txt_ids = txt_ids[0]
 
-        hidden_states = self.x_embedder(hidden_states)
-        encoder_hidden_states = self.context_embedder(encoder_hidden_states)
-
-        txt_freqs_cos, txt_freqs_sin, img_freqs_cos, img_freqs_sin = self.rope_prepare(img_ids, txt_ids)
-
+        if is_torch_npu_available():
+            txt_freqs_cos, txt_freqs_sin, img_freqs_cos, img_freqs_sin = self.rope_prepare(img_ids.cpu(), txt_ids.cpu())
+            txt_freqs_cos = txt_freqs_cos.npu()
+            txt_freqs_sin = txt_freqs_sin.npu()
+            img_freqs_cos = img_freqs_cos.npu()
+            img_freqs_sin = img_freqs_sin.npu()
+        else:
+            txt_freqs_cos, txt_freqs_sin, img_freqs_cos, img_freqs_sin = self.rope_prepare(img_ids, txt_ids)
         concat_rotary_emb = (
             torch.cat([txt_freqs_cos, img_freqs_cos], dim=0),
             torch.cat([txt_freqs_sin, img_freqs_sin], dim=0),
         )
 
-        # Create separate masks for image and text portions for Ulysses SP joint attention
+        if not skip_modulated_input:
+            block = cast(Flux2TransformerBlock, self.transformer_blocks[0])
+            shift_msa, scale_msa, _ = double_stream_mod_img[0]
+            modulated_input = block.norm1(hidden_states)
+            modulated_input = (1 + scale_msa) * modulated_input + shift_msa
+        else:
+            modulated_input = None
+        return ForwardState[Flux2KleinState](
+            modulated_input,
+            hidden_states,
+            encoder_hidden_states,
+            temb,
+            intermediates=Flux2KleinState(
+                joint_attention_kwargs=joint_attention_kwargs,
+                double_stream_mod_txt=double_stream_mod_txt,
+                double_stream_mod_img=double_stream_mod_img,
+                single_stream_mod=single_stream_mod,
+                image_rotary_emb=concat_rotary_emb,
+            ),
+        )
+
+    def run_transformer_blocks(self, ctx: ForwardState[Flux2KleinState]) -> ForwardState[Flux2KleinState]:
         hidden_states_mask = None
         encoder_hidden_states_mask = None
-        ctx = get_forward_context()
-        if ctx.sp_original_seq_len is not None and ctx.sp_padding_size > 0:
-            batch_size = hidden_states.shape[0]
-            img_padded_seq_len = ctx.sp_original_seq_len + ctx.sp_padding_size
+        if ctx.encoder_hidden_states is None or ctx.hidden_states is None:
+            raise RuntimeError("Flux2 requires hidden & encoder states to be set!")
+        num_txt_tokens = ctx.encoder_hidden_states.shape[1]
 
+        fwd_ctx = get_forward_context() if is_forward_context_available() else None
+
+        if fwd_ctx is not None and fwd_ctx.sp_original_seq_len is not None and fwd_ctx.sp_padding_size > 0:
+            batch_size = ctx.hidden_states.shape[0]
+            img_padded_seq_len = fwd_ctx.sp_original_seq_len + fwd_ctx.sp_padding_size
             hidden_states_mask = torch.ones(
                 batch_size,
                 img_padded_seq_len,
                 dtype=torch.bool,
-                device=hidden_states.device,
+                device=ctx.hidden_states.device,
             )
-            hidden_states_mask[:, ctx.sp_original_seq_len :] = False
+            hidden_states_mask[:, fwd_ctx.sp_original_seq_len :] = False
             if hidden_states_mask.all():
                 hidden_states_mask = None
 
         if hidden_states_mask is not None:
-            joint_attention_kwargs["hidden_states_mask"] = hidden_states_mask
+            ctx.intermediates.joint_attention_kwargs["hidden_states_mask"] = hidden_states_mask
         if encoder_hidden_states_mask is not None:
-            joint_attention_kwargs["encoder_hidden_states_mask"] = encoder_hidden_states_mask
+            ctx.intermediates.joint_attention_kwargs["encoder_hidden_states_mask"] = encoder_hidden_states_mask
 
         for block in self.transformer_blocks:
-            encoder_hidden_states, hidden_states = block(
-                hidden_states=hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-                temb_mod_params_img=double_stream_mod_img,
-                temb_mod_params_txt=double_stream_mod_txt,
-                image_rotary_emb=concat_rotary_emb,
-                joint_attention_kwargs=joint_attention_kwargs,
+            ctx.encoder_hidden_states, ctx.hidden_states = block(
+                hidden_states=ctx.hidden_states,
+                encoder_hidden_states=ctx.encoder_hidden_states,
+                temb_mod_params_img=ctx.intermediates.double_stream_mod_img,
+                temb_mod_params_txt=ctx.intermediates.double_stream_mod_txt,
+                image_rotary_emb=ctx.intermediates.image_rotary_emb,
+                joint_attention_kwargs=ctx.intermediates.joint_attention_kwargs,
             )
 
-        hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
+        ctx.hidden_states = torch.cat([ctx.encoder_hidden_states, ctx.hidden_states], dim=1)
 
         for block in self.single_transformer_blocks:
-            hidden_states = block(
-                hidden_states=hidden_states,
+            ctx.hidden_states = block(
+                hidden_states=ctx.hidden_states,
                 encoder_hidden_states=None,
-                temb_mod_params=single_stream_mod,
-                image_rotary_emb=concat_rotary_emb,
-                joint_attention_kwargs=joint_attention_kwargs,
+                temb_mod_params=ctx.intermediates.single_stream_mod,
+                image_rotary_emb=ctx.intermediates.image_rotary_emb,
+                joint_attention_kwargs=ctx.intermediates.joint_attention_kwargs,
                 text_seq_len=num_txt_tokens,
             )
 
-        hidden_states = hidden_states[:, num_txt_tokens:, ...]
-        hidden_states = self.norm_out(hidden_states, temb)
-        output = self.proj_out(hidden_states)
+        ctx.hidden_states = ctx.hidden_states[:, num_txt_tokens:, ...]
+        return ctx
 
-        if not return_dict:
-            return (output,)
+    def postprocess(self, ctx: ForwardState[Flux2KleinState]) -> Transformer2DModelOutput:
+        hidden_states = self.norm_out(ctx.hidden_states, ctx.temb)
+        output = self.proj_out(hidden_states)
         return Transformer2DModelOutput(sample=output)
+
+    def get_teacache_coefficients(self) -> list[float]:
+        # Same as FLUX.1 (similar dual-stream architecture)
+        return [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01]
+
+    def forward(self, *args, **kwargs) -> Transformer2DModelOutput:
+        """Forward pass for the DiT, which is implemented using the methods outlined by SupportsTeaCache.
+
+        NOTE: this is the disabled cache path; the forward is overridden by the TeaCache hook when it is
+        enabled, which needs the modulated inputs for cache decision. Skipping modulated inputs is intentional.
+        """
+        ctx = self.preprocess(*args, **kwargs, skip_modulated_input=True)
+        ctx = self.run_transformer_blocks(ctx)
+        return self.postprocess(ctx)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
