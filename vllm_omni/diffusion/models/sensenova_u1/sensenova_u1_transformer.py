@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -131,6 +132,20 @@ def _compute_default_rope_parameters(config, device=None, **_kw):
     dim = int(head_dim * partial_rotary_factor)
     inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.int64).float().to(device) / dim))
     return inv_freq, 1.0
+
+
+@dataclass
+class SenseNovaU1State:
+    """Intermediate model-specific info for SenseNova U1."""
+
+    exist_und: bool
+    exist_gen: bool
+    past_key_values: DynamicCache
+    attention_mask: dict[str, torch.Tensor]
+    indexes: torch.Tensor | None
+    compute_logits: bool
+    use_cache: bool
+    update_cache: bool
 
 
 class Qwen3RotaryEmbedding(nn.Module):
@@ -429,7 +444,7 @@ class SenseNovaU1Attention(nn.Module):
         key_states = torch.cat([k_t, k_h, k_w], dim=-1)
         return query_states, key_states, value_states
 
-    def forward_und(self, hidden_states, indexes, attention_mask, past_key_values=None, **kwargs):
+    def forward_und(self, hidden_states, indexes, attention_mask, past_key_values, update_cache: bool):
         """Understanding path — unified Attention with explicit 4D mask."""
         input_shape = hidden_states.shape[:-1]
         query_states, key_states, value_states = self._project_and_rope(
@@ -441,7 +456,6 @@ class SenseNovaU1Attention(nn.Module):
             self.q_norm_hw,
             self.k_norm_hw,
         )
-        update_cache = kwargs.get("update_cache", True)
         if past_key_values is not None:
             if update_cache:
                 key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx)
@@ -456,7 +470,7 @@ class SenseNovaU1Attention(nn.Module):
         attn_output, _ = self.o_proj(attn_output)
         return attn_output
 
-    def forward_gen(self, hidden_states, indexes, attention_mask, past_key_values=None, **kwargs):
+    def forward_gen(self, hidden_states, indexes, attention_mask, past_key_values, update_cache: bool):
         """Generation path — unified Attention, bidirectional with optional KV cache."""
         input_shape = hidden_states.shape[:-1]
         query_states, key_states, value_states = self._project_and_rope(
@@ -468,7 +482,6 @@ class SenseNovaU1Attention(nn.Module):
             self.q_norm_hw_mot_gen,
             self.k_norm_hw_mot_gen,
         )
-        update_cache = kwargs.get("update_cache", True)
 
         if attention_mask is None:
             # Bidirectional path: no causal mask, optionally attend to a prefix.
@@ -524,18 +537,17 @@ class SenseNovaU1Attention(nn.Module):
     def forward(
         self,
         hidden_states,
-        image_gen_indicators,
         exist_und,
         exist_gen,
         indexes,
         attention_mask,
-        past_key_values=None,
-        **kwargs,
+        past_key_values,
+        update_cache: bool,
     ):
         if exist_und and not exist_gen:
-            return self.forward_und(hidden_states, indexes, attention_mask, past_key_values, **kwargs)
+            return self.forward_und(hidden_states, indexes, attention_mask, past_key_values, update_cache)
         if not exist_und and exist_gen:
-            return self.forward_gen(hidden_states, indexes, attention_mask, past_key_values, **kwargs)
+            return self.forward_gen(hidden_states, indexes, attention_mask, past_key_values, update_cache)
         raise NotImplementedError("Mixed und+gen tokens in a single forward not implemented for initial port")
 
 
@@ -570,36 +582,34 @@ class SenseNovaU1DecoderLayer(nn.Module):
         self.post_attention_layernorm_mot_gen = Qwen3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.attention_type = config.layer_types[layer_idx]
 
-    def _forward_und(self, hidden_states, indexes, attention_mask, past_key_values, **kwargs):
+    def _forward_und(self, hidden_states, indexes, attention_mask, past_key_values, update_cache: bool):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
         hidden_states = self.self_attn(
             hidden_states,
-            image_gen_indicators=None,
             exist_und=True,
             exist_gen=False,
             indexes=indexes,
             attention_mask=attention_mask,
             past_key_values=past_key_values,
-            **kwargs,
+            update_cache=update_cache,
         )
         hidden_states = residual + hidden_states
         residual = hidden_states
         hidden_states = self.mlp(self.post_attention_layernorm(hidden_states))
         return residual + hidden_states
 
-    def _forward_gen(self, hidden_states, indexes, attention_mask, past_key_values, **kwargs):
+    def _forward_gen(self, hidden_states, indexes, attention_mask, past_key_values, update_cache: bool):
         residual = hidden_states
         hidden_states = self.input_layernorm_mot_gen(hidden_states)
         hidden_states = self.self_attn(
             hidden_states,
-            image_gen_indicators=None,
             exist_und=False,
             exist_gen=True,
             indexes=indexes,
             attention_mask=attention_mask,
             past_key_values=past_key_values,
-            **kwargs,
+            update_cache=update_cache,
         )
         hidden_states = residual + hidden_states
         residual = hidden_states
@@ -609,13 +619,12 @@ class SenseNovaU1DecoderLayer(nn.Module):
     def forward(
         self,
         hidden_states,
-        image_gen_indicators,
         exist_und,
         exist_gen,
         indexes,
         attention_mask,
-        past_key_values=None,
-        **kwargs,
+        past_key_values,
+        update_cache: bool = True,
     ):
         if isinstance(attention_mask, dict):
             attention_mask = attention_mask.get(
@@ -624,9 +633,9 @@ class SenseNovaU1DecoderLayer(nn.Module):
             )
 
         if exist_und and not exist_gen:
-            return self._forward_und(hidden_states, indexes, attention_mask, past_key_values, **kwargs)
+            return self._forward_und(hidden_states, indexes, attention_mask, past_key_values, update_cache)
         if not exist_und and exist_gen:
-            return self._forward_gen(hidden_states, indexes, attention_mask, past_key_values, **kwargs)
+            return self._forward_gen(hidden_states, indexes, attention_mask, past_key_values, update_cache)
         raise NotImplementedError("Mixed und+gen tokens in a single forward not implemented for initial port")
 
 
@@ -703,14 +712,11 @@ class SenseNovaU1Model(nn.Module):
         for layer in self.layers:
             hidden_states = layer(
                 hidden_states,
-                image_gen_indicators=image_gen_indicators,
                 exist_und=exist_und,
                 exist_gen=exist_gen,
                 indexes=indexes,
                 attention_mask=causal_mask_mapping,
                 past_key_values=past_key_values,
-                use_cache=use_cache,
-                **kwargs,
             )
 
         if not exist_gen:
@@ -741,36 +747,107 @@ class SenseNovaU1ForCausalLM(nn.Module, SupportsTeaCache):
         self.logits_processor = LogitsProcessor(config.vocab_size)
 
     # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
+    def preprocess(
+        self,
+        input_ids: torch.Tensor | None,
+        image_gen_indicators: torch.Tensor,
+        indexes: torch.Tensor | None,
+        attention_mask: dict[str, torch.Tensor] | torch.Tensor | None,
+        past_key_values: DynamicCache,
+        update_cache: bool,
+        inputs_embeds: torch.Tensor | None,
+        use_cache: bool,
+        compute_logits: bool,
+        *,
+        skip_modulated_input: bool = False,
+        cache_dit_skip: bool = False,
+    ) -> ForwardState[SenseNovaU1State]:
+        if inputs_embeds is None:
+            inputs_embeds = self.model.embed_tokens(input_ids)
 
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
+        if use_cache and past_key_values is None:
+            past_key_values = DynamicCache()
+
+        if image_gen_indicators is None:
+            exist_und, exist_gen = True, False
+        else:
+            exist_und = bool((~image_gen_indicators).any().item())
+            exist_gen = bool(image_gen_indicators.any().item())
+
+        # Resolve attention mask. Callers must always provide `indexes`; this
+        # keeps the model stateless and safe under concurrent requests.
+        assert indexes is not None, "SenseNovaU1Model.forward requires explicit `indexes`."
+        if not isinstance(attention_mask, dict):
+            assert inputs_embeds is not None
+            past_len = past_key_values.get_seq_length() if past_key_values else 0
+            seq_len = inputs_embeds.shape[1]
+            total_len = past_len + seq_len
+            mask = torch.zeros(1, 1, seq_len, total_len, device=inputs_embeds.device)
+            if seq_len > 1:
+                causal = torch.tril(torch.ones(seq_len, seq_len, device=inputs_embeds.device))
+                mask[:, :, :, past_len:] = torch.where(causal == 1, 0.0, float("-inf"))
+            attention_mask = {"full_attention": mask}
+
+        if not skip_modulated_input:
+            first_layer = cast(SenseNovaU1DecoderLayer, self.model.layers[0])
+            modulated_input = first_layer.input_layernorm_mot_gen(inputs_embeds)
+        else:
+            modulated_input = None
+
+        return ForwardState(
+            modulated_input=modulated_input,
+            hidden_states=inputs_embeds,
+            encoder_hidden_states=None,
+            temb=inputs_embeds,
+            intermediates=SenseNovaU1State(
+                exist_und=exist_und,
+                exist_gen=exist_gen,
+                indexes=indexes,
+                past_key_values=past_key_values,
+                attention_mask=attention_mask,
+                compute_logits=compute_logits,
+                use_cache=use_cache,
+                update_cache=update_cache,
+            ),
+        )
+
+    def run_transformer_blocks(self, ctx: ForwardState[SenseNovaU1State]) -> ForwardState[SenseNovaU1State]:
+        for layer in self.model.layers:
+            ctx.hidden_states = layer(
+                ctx.hidden_states,
+                exist_und=ctx.intermediates.exist_und,
+                exist_gen=ctx.intermediates.exist_gen,
+                indexes=ctx.intermediates.indexes,
+                attention_mask=ctx.intermediates.attention_mask,
+                past_key_values=ctx.intermediates.past_key_values,
+                update_cache=ctx.intermediates.update_cache,
+            )
+        return ctx
 
     def postprocess(self, ctx: ForwardState) -> SenseNovaU1CausalLMOutput:
-        raise NotImplementedError
+        if not ctx.intermediates.exist_gen:
+            ctx.hidden_states = self.model.norm(ctx.hidden_states)
+        else:
+            ctx.hidden_states = self.model.norm_mot_gen(ctx.hidden_states)
+
+        logits = self.logits_processor(self.lm_head, ctx.hidden_states) if ctx.intermediates.compute_logits else None
+        return SenseNovaU1CausalLMOutput(
+            logits=logits,
+            past_key_values=ctx.intermediates.past_key_values if ctx.intermediates.use_cache else None,
+            hidden_states=ctx.hidden_states,
+        )
 
     def get_teacache_coefficients(self) -> list[float]:
         return [9.07281930e04, -2.17699186e04, 1.83940990e03, -6.30339273e01, 7.61309272e-01]
 
     def forward(
-        self,
-        input_ids=None,
-        indexes=None,
-        attention_mask=None,
-        past_key_values=None,
-        inputs_embeds=None,
-        use_cache=None,
-        embed_only: bool = False,
-        compute_logits: bool = True,
-        **kwargs,
-    ):
-        # Routing every access through ``forward`` keeps any externally-attached
-        # hooks (e.g. CPU-offload swap) firing for sub-module accesses such as
-        # token embedding lookup or hidden-state-only model runs. Callers should
-        # prefer this entry point over reaching into ``self.model`` /
-        # ``self.lm_head`` directly so that offloaded weights get materialised
-        # on the right device first.
+        self, *args, input_ids: torch.Tensor | None = None, embed_only: bool = False, **kwargs
+    ) -> SenseNovaU1CausalLMOutput:
+        """Forward pass for the DiT, which is implemented using the methods outlined by SupportsTeaCache.
+
+        NOTE: this is the disabled cache path; the forward is overridden by the TeaCache hook when it is
+        enabled, which needs the modulated inputs for cache decision. Skipping modulated inputs is intentional.
+        """
         if embed_only:
             if input_ids is None:
                 raise ValueError("embed_only=True requires input_ids")
@@ -778,21 +855,14 @@ class SenseNovaU1ForCausalLM(nn.Module, SupportsTeaCache):
                 inputs_embeds=self.model.embed_tokens(input_ids),
             )
 
-        outputs = self.model(
-            input_ids=input_ids,
-            indexes=indexes,
-            attention_mask=attention_mask,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            use_cache=use_cache,
+        ctx = self.preprocess(
+            *args,
             **kwargs,
+            input_ids=input_ids,
+            skip_modulated_input=True,
         )
-        logits = self.logits_processor(self.lm_head, outputs.last_hidden_state) if compute_logits else None
-        return SenseNovaU1CausalLMOutput(
-            logits=logits,
-            past_key_values=outputs.past_key_values,
-            hidden_states=outputs.last_hidden_state,
-        )
+        ctx = self.run_transformer_blocks(ctx)
+        return self.postprocess(ctx)
 
     def get_input_embeddings(self):
         return self.model.embed_tokens
