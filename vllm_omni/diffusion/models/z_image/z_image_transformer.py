@@ -15,10 +15,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import math
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 import torch
 import torch.nn as nn
@@ -58,6 +58,19 @@ ADALN_EMBED_DIM = 256
 SEQ_MULTI_OF = 32
 
 logger = init_logger(__name__)
+
+
+@dataclass
+class ZImageState:
+    """Intermediate model-specific info for ZImage."""
+
+    attn_mask: torch.Tensor
+    cos: torch.Tensor
+    sin: torch.Tensor
+    all_image_size: list[tuple[int]]
+    all_seqlens: list[int]
+    patch_size: int
+    f_patch_size: int
 
 
 class UnifiedPrepare(nn.Module):
@@ -926,27 +939,16 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         )
 
     # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> tuple[torch.Tensor, dict]:
-        raise NotImplementedError
-
-    def get_teacache_coefficients(self) -> list[float]:
-        # Copied from Qwen-Image, needs tuning for Z-Image
-        return [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02]
-
-    def forward(
+    def preprocess(
         self,
         x: list[torch.Tensor],
-        t,
+        t: torch.Tensor,
         cap_feats: list[torch.Tensor],
-        patch_size=2,
-        f_patch_size=1,
-    ):
+        patch_size: int,
+        f_patch_size: int,
+        *,
+        skip_modulated_input: bool = False,
+    ) -> ForwardState[ZImageState]:
         assert patch_size in self.all_patch_size
         assert f_patch_size in self.all_f_patch_size
 
@@ -970,24 +972,24 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         assert all(_ % SEQ_MULTI_OF == 0 for _ in x_item_seqlens)
         x_max_item_seqlen = max(x_item_seqlens)
 
-        x = torch.cat(x, dim=0)
-        x = self.all_x_embedder[f"{patch_size}-{f_patch_size}"](x)
+        x_cat = torch.cat(x, dim=0)
+        x_cat = self.all_x_embedder[f"{patch_size}-{f_patch_size}"](x_cat)
 
         # Match t_embedder output dtype to x for layerwise casting compatibility
-        adaln_input = t.type_as(x)
+        temb = t.type_as(x_cat)
         # Use torch.where instead of x[mask]= to avoid aten::index_put_/nonzero and cudaStreamSynchronize
         x_pad_mask = torch.cat(x_inner_pad_mask)
-        x = torch.where(
-            x_pad_mask.unsqueeze(1).expand_as(x),
-            self.x_pad_token.expand(x.shape[0], -1),
-            x,
+        x_cat = torch.where(
+            x_pad_mask.unsqueeze(1).expand_as(x_cat),
+            self.x_pad_token.expand(x_cat.shape[0], -1),
+            x_cat,
         )
-        x = list(x.split(x_item_seqlens, dim=0))
+        x_cat = list(x_cat.split(x_item_seqlens, dim=0))
         x_cos, x_sin = self.rope_embedder(torch.cat(x_pos_ids, dim=0))
         x_cos = list(x_cos.split(x_item_seqlens, dim=0))
         x_sin = list(x_sin.split(x_item_seqlens, dim=0))
 
-        x = pad_sequence(x, batch_first=True, padding_value=0.0)
+        x_cat = pad_sequence(x_cat, batch_first=True, padding_value=0.0)
         x_cos = pad_sequence(x_cos, batch_first=True, padding_value=0.0)
         x_sin = pad_sequence(x_sin, batch_first=True, padding_value=0.0)
         x_attn_mask = torch.zeros((bsz, x_max_item_seqlen), dtype=torch.bool, device=device)
@@ -995,28 +997,28 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
             x_attn_mask[i, :seq_len] = 1
 
         for layer in self.noise_refiner:
-            x = layer(x, x_attn_mask, x_cos, x_sin, adaln_input)
+            x_cat = layer(x_cat, x_attn_mask, x_cos, x_sin, temb)
 
         # cap embed & refine
         cap_item_seqlens = [len(_) for _ in cap_feats]
         assert all(_ % SEQ_MULTI_OF == 0 for _ in cap_item_seqlens)
         cap_max_item_seqlen = max(cap_item_seqlens)
 
-        cap_feats = torch.cat(cap_feats, dim=0)
-        cap_feats = self.cap_embedder(cap_feats)
+        cap_feats_cat = torch.cat(cap_feats, dim=0)
+        cap_feats_cat = self.cap_embedder(cap_feats_cat)
         # Use torch.where instead of cap_feats[mask]= to avoid aten::index_put_/nonzero and cudaStreamSynchronize
         cap_pad_mask = torch.cat(cap_inner_pad_mask)
-        cap_feats = torch.where(
-            cap_pad_mask.unsqueeze(1).expand_as(cap_feats),
-            self.cap_pad_token.expand(cap_feats.shape[0], -1),
-            cap_feats,
+        cap_feats_cat = torch.where(
+            cap_pad_mask.unsqueeze(1).expand_as(cap_feats_cat),
+            self.cap_pad_token.expand(cap_feats_cat.shape[0], -1),
+            cap_feats_cat,
         )
-        cap_feats = list(cap_feats.split(cap_item_seqlens, dim=0))
+        cap_feats_cat = list(cap_feats_cat.split(cap_item_seqlens, dim=0))
         cap_cos, cap_sin = self.rope_embedder(torch.cat(cap_pos_ids, dim=0))
         cap_cos = list(cap_cos.split(cap_item_seqlens, dim=0))
         cap_sin = list(cap_sin.split(cap_item_seqlens, dim=0))
 
-        cap_feats = pad_sequence(cap_feats, batch_first=True, padding_value=0.0)
+        cap_feats_cat = pad_sequence(cap_feats_cat, batch_first=True, padding_value=0.0)
         cap_cos = pad_sequence(cap_cos, batch_first=True, padding_value=0.0)
         cap_sin = pad_sequence(cap_sin, batch_first=True, padding_value=0.0)
         cap_attn_mask = torch.zeros((bsz, cap_max_item_seqlen), dtype=torch.bool, device=device)
@@ -1024,25 +1026,76 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
             cap_attn_mask[i, :seq_len] = 1
 
         for layer in self.context_refiner:
-            cap_feats = layer(cap_feats, cap_attn_mask, cap_cos, cap_sin)
+            cap_feats_cat = layer(cap_feats_cat, cap_attn_mask, cap_cos, cap_sin)
 
         # Prepare unified tensors via UnifiedPrepare module
         # This enables _cp_plan to shard outputs via split_output=True
-        unified, unified_cos, unified_sin, unified_attn_mask = self.unified_prepare(
-            x, x_cos, x_sin, cap_feats, cap_cos, cap_sin, x_item_seqlens, cap_item_seqlens
+        hidden_states, unified_cos, unified_sin, attn_mask = self.unified_prepare(
+            x_cat, x_cos, x_sin, cap_feats_cat, cap_cos, cap_sin, x_item_seqlens, cap_item_seqlens
         )
 
-        # Main transformer blocks
+        if not skip_modulated_input:
+            block = cast(ZImageTransformerBlock, self.layers[0])
+            # Get modulation parameters: scale_msa, gate_msa, scale_mlp, gate_mlp
+            mod_params = block.adaLN_modulation(temb).unsqueeze(1).chunk(4, dim=2)
+            scale_msa = 1.0 + mod_params[0]
+            # Extract modulated input: normalized hidden states scaled by modulation
+            modulated_input = block.attention_norm1(hidden_states) * scale_msa
+        else:
+            modulated_input = None
+        return ForwardState[ZImageState](
+            modulated_input,
+            hidden_states,
+            None,  # Z-Image uses unified sequence, no separate encoder states
+            temb,
+            intermediates=ZImageState(
+                attn_mask=attn_mask,
+                cos=unified_cos,
+                sin=unified_sin,
+                all_image_size=x_size,
+                all_seqlens=x_item_seqlens,
+                patch_size=patch_size,
+                f_patch_size=f_patch_size,
+            ),
+        )
+
+    def run_transformer_blocks(self, ctx: ForwardState[ZImageState]) -> ForwardState[ZImageState]:
         for layer in self.layers:
-            unified = layer(unified, unified_attn_mask, unified_cos, unified_sin, adaln_input)
+            ctx.hidden_states = layer(
+                ctx.hidden_states,
+                ctx.intermediates.attn_mask,
+                ctx.intermediates.cos,
+                ctx.intermediates.sin,
+                ctx.temb,
+            )
+        return ctx
 
-        # Final layer
-        unified = self.all_final_layer[f"{patch_size}-{f_patch_size}"](unified, adaln_input)
+    def postprocess(self, ctx: ForwardState[ZImageState]) -> list[torch.Tensor]:
+        ctx.hidden_states = self.all_final_layer[f"{ctx.intermediates.patch_size}-{ctx.intermediates.f_patch_size}"](
+            ctx.hidden_states,
+            ctx.temb,
+        )
 
-        unified = list(unified.unbind(dim=0))
-        x = self.unpatchify(unified, x_size, patch_size, f_patch_size)
+        return self.unpatchify(
+            list(ctx.hidden_states.unbind(dim=0)),
+            ctx.intermediates.all_image_size,
+            ctx.intermediates.patch_size,
+            ctx.intermediates.f_patch_size,
+        )
 
-        return x, {}
+    def get_teacache_coefficients(self) -> list[float]:
+        # Copied from Qwen-Image, needs tuning for Z-Image
+        return [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02]
+
+    def forward(self, *args, **kwargs) -> list[torch.Tensor]:
+        """Forward pass for the DiT, which is implemented using the methods outlined by SupportsTeaCache.
+
+        NOTE: this is the disabled cache path; the forward is overridden by the TeaCache hook when it is
+        enabled, which needs the modulated inputs for cache decision. Skipping modulated inputs is intentional.
+        """
+        ctx = self.preprocess(*args, **kwargs, skip_modulated_input=True)
+        ctx = self.run_transformer_blocks(ctx)
+        return self.postprocess(ctx)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [

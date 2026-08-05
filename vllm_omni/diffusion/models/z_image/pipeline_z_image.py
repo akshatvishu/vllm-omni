@@ -658,7 +658,9 @@ class ZImagePipeline(nn.Module, DiffusionPipelineProfilerMixin, SupportsComponen
                 latent_model_input_list,
                 timestep_model_input,
                 prompt_embeds_model_input,
-            )[0]
+                patch_size=2,
+                f_patch_size=1,
+            )
 
             if apply_cfg:
                 # Perform CFG
