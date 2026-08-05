@@ -57,6 +57,39 @@ _ASR_MODEL_NAME = "openai/whisper-large-v3-turbo"
 _INLINE_CACHE_MAX_ENTRIES = 8
 
 
+def _asr_memory_stats(device: str | torch.device) -> dict[str, int] | None:
+    """Return CUDA/ROCm allocator and device memory stats without affecting loading."""
+    torch_device = torch.device(device)
+    if torch_device.type != "cuda" or not torch.accelerator.is_available():
+        return None
+    try:
+        torch.accelerator.synchronize(torch_device)
+        free_bytes, total_bytes = torch.accelerator.get_memory_info(torch_device)
+        return {
+            "allocated_bytes": int(torch.accelerator.memory_allocated(torch_device)),
+            "reserved_bytes": int(torch.accelerator.memory_reserved(torch_device)),
+            "max_allocated_bytes": int(torch.accelerator.max_memory_allocated(torch_device)),
+            "max_reserved_bytes": int(torch.accelerator.max_memory_reserved(torch_device)),
+            "free_bytes": int(free_bytes),
+            "total_bytes": int(total_bytes),
+        }
+    except Exception:
+        logger.debug("Unable to collect OmniVoice ASR memory stats", exc_info=True)
+        return None
+
+
+def _asr_parameter_stats(asr_pipeline: object) -> tuple[str | None, int | None]:
+    """Return the ASR parameter device and byte size when the model exposes them."""
+    try:
+        model = getattr(asr_pipeline, "model")
+        first_parameter = next(model.parameters())
+        parameter_bytes = sum(int(parameter.numel()) * parameter.element_size() for parameter in model.parameters())
+        return str(first_parameter.device), parameter_bytes
+    except Exception:
+        logger.debug("Unable to collect OmniVoice ASR parameter stats", exc_info=True)
+        return None, None
+
+
 def _parse_asr_config(additional_config: Mapping[str, object] | None) -> tuple[bool, str, str | None]:
     """Return validated OmniVoice ASR settings from the model config."""
     if additional_config is None:
@@ -247,6 +280,8 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
             )
 
         asr_dtype = torch.float16 if str(asr_device).lower().startswith(("cuda", "xpu")) else torch.float32
+        memory_before = _asr_memory_stats(asr_device)
+        logger.info("OmniVoice ASR memory before load on %s: %s", asr_device, memory_before)
         logger.info(
             "Loading OmniVoice ASR model %s on %s",
             self._asr_model_name,
@@ -263,7 +298,19 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
             raise RuntimeError(
                 f"Failed to load OmniVoice ASR model {self._asr_model_name!r} on device {asr_device}: {exc}"
             ) from exc
-        logger.info("OmniVoice ASR model loaded on %s", asr_device)
+        memory_after = _asr_memory_stats(asr_device)
+        parameter_device, parameter_bytes = _asr_parameter_stats(self._asr_pipeline)
+        memory_delta = None
+        if memory_before is not None and memory_after is not None:
+            memory_delta = {name: memory_after[name] - memory_before[name] for name in memory_before}
+        logger.info(
+            "OmniVoice ASR model loaded on %s; parameter_device=%s parameter_bytes=%s memory_after=%s memory_delta=%s",
+            asr_device,
+            parameter_device,
+            parameter_bytes,
+            memory_after,
+            memory_delta,
+        )
         return self._asr_pipeline
 
     @torch.inference_mode()
