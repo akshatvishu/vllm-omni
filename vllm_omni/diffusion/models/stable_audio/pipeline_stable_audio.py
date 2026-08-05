@@ -567,7 +567,6 @@ class StableAudioPipeline(nn.Module, SupportAudioOutput, SupportsComponentDiscov
                 encoder_hidden_states=text_audio_duration_embeds,
                 global_hidden_states=audio_duration_embeds,
                 rotary_embedding=rotary_embedding,
-                return_dict=False,
             )[0]
 
             # Perform CFG
