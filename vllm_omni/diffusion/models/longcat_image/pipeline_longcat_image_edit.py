@@ -602,6 +602,9 @@ class LongCatImageEditPipeline(
                 num_images_per_prompt=num_images_per_prompt,
             )
 
+        # TeaCache tracks positive/negative CFG branches separately via this flag.
+        self.transformer.do_true_cfg = do_true_cfg
+
         device = self.device
 
         # Prepare latent variables
@@ -660,7 +663,6 @@ class LongCatImageEditPipeline(
                 "encoder_hidden_states": prompt_embeds,
                 "txt_ids": text_ids,
                 "img_ids": latent_image_ids,
-                "return_dict": False,
             }
 
             if do_true_cfg:
@@ -670,7 +672,6 @@ class LongCatImageEditPipeline(
                     "encoder_hidden_states": negative_prompt_embeds,
                     "txt_ids": negative_text_ids,
                     "img_ids": latent_image_ids,
-                    "return_dict": False,
                 }
             else:
                 negative_kwargs = None
