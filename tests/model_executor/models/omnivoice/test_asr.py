@@ -12,10 +12,24 @@ from vllm_omni.diffusion.models.omnivoice import pipeline_omnivoice
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
 
+class _FakeASRModel:
+    def __init__(self):
+        self.to_calls = []
+
+    def to(self, device):
+        self.to_calls.append(device)
+        return self
+
+    def parameters(self):
+        return iter(())
+
+
 class _FakeASRPipeline:
     def __init__(self, result):
         self.result = result
         self.inputs = []
+        self.model = _FakeASRModel()
+        self.device = torch.device("cpu")
 
     def __call__(self, audio_input):
         self.inputs.append(audio_input)
@@ -119,6 +133,24 @@ def test_asr_load_failure_includes_checkpoint_and_device(pipeline, monkeypatch):
     assert "download failed" in message
 
 
+def test_asr_device_placement_failure_includes_checkpoint_and_device(pipeline, monkeypatch):
+    asr, _ = _install_fake_asr(monkeypatch)
+    pipeline._asr_device = "cuda:1"
+
+    def move_model(device):
+        raise RuntimeError(f"cannot move to {device}")
+
+    monkeypatch.setattr(asr.model, "to", move_model)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        pipeline._load_asr_pipeline()
+
+    message = str(exc_info.value)
+    assert pipeline_omnivoice._ASR_MODEL_NAME in message
+    assert "cuda:1" in message
+    assert "cannot move" in message
+
+
 @pytest.mark.parametrize(
     ("additional_config", "expected"),
     [
@@ -161,6 +193,8 @@ def test_asr_loader_uses_configured_model_and_device(pipeline, monkeypatch):
     pipeline._load_asr_pipeline()
 
     assert asr is pipeline._asr_pipeline
+    assert asr.model.to_calls == [torch.device("cpu")]
+    assert asr.device == torch.device("cpu")
     assert load_calls == [
         (
             ("automatic-speech-recognition",),
@@ -250,7 +284,7 @@ def test_asr_input_accepts_numpy_and_torch_waveforms_without_mutating(waveform, 
     ],
 )
 def test_loader_receives_checkpoint_device_and_dtype(pipeline, monkeypatch, device, dtype):
-    _, load_calls = _install_fake_asr(monkeypatch)
+    asr, load_calls = _install_fake_asr(monkeypatch)
     pipeline._asr_device = str(device)
 
     pipeline._load_asr_pipeline()
@@ -258,6 +292,8 @@ def test_loader_receives_checkpoint_device_and_dtype(pipeline, monkeypatch, devi
     assert load_calls[0][1]["model"] == "openai/whisper-large-v3-turbo"
     assert load_calls[0][1]["device"] == str(device)
     assert load_calls[0][1]["dtype"] is dtype
+    assert asr.model.to_calls == [torch.device(device)]
+    assert asr.device == torch.device(device)
 
 
 def test_transcript_is_combined_before_target_text(pipeline, monkeypatch):

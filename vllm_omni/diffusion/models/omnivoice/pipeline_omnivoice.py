@@ -294,6 +294,13 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
                 dtype=asr_dtype,
                 device=asr_device,
             )
+            # Transformers keeps a newly loaded pipeline model on CPU when a
+            # torch.distributed process group is already initialized. vLLM
+            # workers always have one, so explicitly honor the configured
+            # device after construction, as other auxiliary models do here.
+            target_device = torch.device(asr_device)
+            self._asr_pipeline.model = self._asr_pipeline.model.to(target_device)
+            self._asr_pipeline.device = target_device
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load OmniVoice ASR model {self._asr_model_name!r} on device {asr_device}: {exc}"
