@@ -606,6 +606,9 @@ class LongCatImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfile
         # custom partial function with cfg_renorm_min
         self.cfg_normalize_function = partial(self.cfg_normalize_function, cfg_renorm_min=cfg_renorm_min)
 
+        # TeaCache tracks positive/negative CFG branches separately via this flag.
+        self.transformer.do_true_cfg = self.do_classifier_free_guidance
+
         # 6. Denoising loop
         for i, t in enumerate(timesteps):
             if self._interrupt:
@@ -621,7 +624,6 @@ class LongCatImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfile
                 "encoder_hidden_states": prompt_embeds,
                 "txt_ids": text_ids,
                 "img_ids": latent_image_ids,
-                "return_dict": False,
             }
             if self.do_classifier_free_guidance:
                 negative_kwargs = {
@@ -630,7 +632,6 @@ class LongCatImagePipeline(nn.Module, CFGParallelMixin, DiffusionPipelineProfile
                     "encoder_hidden_states": negative_prompt_embeds,
                     "txt_ids": negative_text_ids,
                     "img_ids": latent_image_ids,
-                    "return_dict": False,
                 }
             else:
                 negative_kwargs = None
