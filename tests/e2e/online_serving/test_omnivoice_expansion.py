@@ -96,11 +96,7 @@ class TestOmniVoiceSeed:
         r2 = openai_client.send_audio_speech_request(cfg)[0]
         assert r1.audio_bytes is not None
         assert r2.audio_bytes is not None
-        audio1, sample_rate1 = sf.read(BytesIO(r1.audio_bytes), dtype="float32")
-        audio2, sample_rate2 = sf.read(BytesIO(r2.audio_bytes), dtype="float32")
-        assert sample_rate1 == sample_rate2
-        assert audio1.shape == audio2.shape
-        np.testing.assert_allclose(audio1, audio2, rtol=1e-5, atol=1e-4)
+        assert r1.audio_bytes == r2.audio_bytes
 
     @hardware_test(res={"cuda": "L4"}, num_cards=1)
     def test_speech_auto_voice_seed_non_deterministic(self, omni_server, openai_client) -> None:

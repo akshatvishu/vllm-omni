@@ -300,7 +300,7 @@ python examples/offline_inference/text_to_speech/omnivoice/end2end.py \
     --ref-text  "This is the reference transcription."
 ```
 
-Omit `--ref-text` to use automatic transcription. The default OmniVoice deploy config loads Whisper on the configured device when the first request needs it. Set `load_asr: true` in `additional_config.omnivoice_asr` to load it during worker startup:
+Omit `--ref-text` to use automatic transcription. The default OmniVoice deploy config loads Whisper on the worker device when the first request needs it. Set `load_asr: true` in `additional_config.omnivoice_asr` to load it during worker startup. Set `asr_device: "cuda:0"` or `asr_device: "cpu"` in the same block to override the worker device:
 
 ```bash
 python examples/offline_inference/text_to_speech/omnivoice/end2end.py \
@@ -352,8 +352,9 @@ python examples/offline_inference/text_to_speech/omnivoice/end2end.py \
 - Stage 0 (Generator): Qwen3-0.6B with 32-step iterative unmasking.
 - Stage 1 (Decoder): HiggsAudioV2 RVQ + DAC at 24 kHz.
 - The default deploy config uses `openai/whisper-large-v3-turbo` for lazy ASR on
-  the configured device. Set `load_asr: true` in `additional_config.omnivoice_asr`
-  to load it during worker startup. Supplying `--ref-text` avoids ASR.
+  the worker device. Set `load_asr: true` in `additional_config.omnivoice_asr`
+  to load it during worker startup. Set `asr_device` in the same block to use a
+  different GPU or the CPU. Supplying `--ref-text` avoids ASR.
 - Generated audio remains mono at 24 kHz.
 
 ---

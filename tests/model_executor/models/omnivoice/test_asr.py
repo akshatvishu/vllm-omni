@@ -156,6 +156,10 @@ def test_asr_device_placement_failure_includes_checkpoint_and_device(pipeline, m
     [
         ({}, (False, pipeline_omnivoice._ASR_MODEL_NAME, None)),
         (
+            {"omnivoice_asr": {"load_asr": False, "asr_device": None}},
+            (False, pipeline_omnivoice._ASR_MODEL_NAME, None),
+        ),
+        (
             {
                 "omnivoice_asr": {
                     "load_asr": True,

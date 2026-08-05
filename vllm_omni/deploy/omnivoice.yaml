@@ -15,3 +15,4 @@ stages:
       omnivoice_asr:
         load_asr: false
         asr_model_name: "openai/whisper-large-v3-turbo"
+        asr_device: null
