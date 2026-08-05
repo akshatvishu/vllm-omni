@@ -6,6 +6,8 @@ Stable Audio DiT Model for vLLM-Omni.
 """
 
 from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -70,6 +72,15 @@ def apply_rotary_emb_stable_audio(
 
     x_rot = (x_rot.float() * cos + x_rotated.float() * sin).to(hidden_states.dtype)
     return torch.cat([x_rot, x_pass], dim=-1)
+
+
+@dataclass
+class StableAudioState:
+    """Intermediate model-specific info for the StableAudio Transformer."""
+
+    original_seq_len: int
+    cross_attention_hidden_states: torch.Tensor
+    rotary_embedding: tuple[torch.Tensor, torch.Tensor]
 
 
 class StableAudioSchedulerWrapper:
@@ -216,7 +227,6 @@ class StableAudioSelfAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size, seq_len, _ = hidden_states.shape
 
@@ -305,8 +315,6 @@ class StableAudioCrossAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        attention_mask: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size, seq_len, _ = hidden_states.shape
         encoder_seq_len = encoder_hidden_states.shape[1]
@@ -419,14 +427,12 @@ class StableAudioDiTBlock(nn.Module):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
-        attention_mask: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
+        rotary_embedding: tuple[torch.Tensor, torch.Tensor],
     ) -> torch.Tensor:
         # Self-attention with skip connection
         residual = hidden_states
         hidden_states = self.norm1(hidden_states)
-        hidden_states = self.attn1(hidden_states, rotary_emb=rotary_embedding, attention_mask=attention_mask)
+        hidden_states = self.attn1(hidden_states, rotary_emb=rotary_embedding)
         hidden_states = residual + hidden_states
 
         # Cross-attention with skip connection
@@ -435,8 +441,6 @@ class StableAudioDiTBlock(nn.Module):
         hidden_states = self.attn2(
             hidden_states,
             encoder_hidden_states,
-            attention_mask=attention_mask,
-            encoder_attention_mask=encoder_attention_mask,
         )
         hidden_states = residual + hidden_states
 
@@ -583,45 +587,16 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
         return next(self.parameters()).dtype
 
     # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> Transformer2DModelOutput:
-        raise NotImplementedError
-
-    def get_teacache_coefficients(self) -> list[float]:
-        return [121.77490545701518, -153.7449426160371, 68.05368574596551, -12.281286412689623, 1.0733905006198015]
-
-    def forward(
+    def preprocess(
         self,
         hidden_states: torch.Tensor,
         timestep: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        global_hidden_states: torch.Tensor | None = None,
-        rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
-        return_dict: bool = True,
-        attention_mask: torch.Tensor | None = None,
-        encoder_attention_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor | Transformer2DModelOutput:
-        """
-        Forward pass of the Stable Audio DiT model.
-
-        Args:
-            hidden_states: Input latent tensor [B, C, L] (C=in_channels=64)
-            timestep: Timestep tensor [B] or [1]
-            encoder_hidden_states: Text/condition embeddings [B, S, D]
-            global_hidden_states: Global conditioning (duration) [B, 1, D]
-            rotary_embedding: Precomputed rotary embeddings (cos, sin)
-            return_dict: Whether to return a dataclass or tuple
-            attention_mask: Attention mask for self-attention
-            encoder_attention_mask: Attention mask for cross-attention
-
-        Returns:
-            Denoised latent tensor
-        """
+        global_hidden_states: torch.Tensor | None,
+        rotary_embedding: tuple[torch.Tensor, torch.Tensor],
+        *,
+        skip_modulated_input: bool = True,
+    ) -> ForwardState[StableAudioState]:
         # Project cross-attention inputs
         cross_attention_hidden_states = self.cross_attention_proj(encoder_hidden_states)
 
@@ -632,7 +607,7 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
         time_hidden_states = self.timestep_proj(self.time_proj(timestep.to(self.dtype)))
 
         # Combine global and time embeddings [B, 1, inner_dim]
-        global_hidden_states = global_hidden_states + time_hidden_states.unsqueeze(1)
+        temb = global_hidden_states + time_hidden_states.unsqueeze(1)
 
         # Pre-process with residual: [B, C, L]
         hidden_states = self.preprocess_conv(hidden_states) + hidden_states
@@ -640,43 +615,64 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
         # Transpose: [B, C, L] -> [B, L, C]
         hidden_states = hidden_states.transpose(1, 2)
 
+        # Capture the original sequence length for safe post-processing slicing
+        original_seq_len = hidden_states.shape[1]
+
         # Project to inner_dim: [B, L, C] -> [B, L, inner_dim]
         hidden_states = self.proj_in(hidden_states)
 
         # Prepend global states to hidden states: [B, 1+L, inner_dim]
-        hidden_states = torch.cat([global_hidden_states, hidden_states], dim=1)
+        hidden_states = torch.cat([temb, hidden_states], dim=1)
 
-        # Update attention mask if provided
-        if attention_mask is not None:
-            prepend_mask = torch.ones(
-                (hidden_states.shape[0], 1),
-                device=hidden_states.device,
-                dtype=torch.bool,
-            )
-            attention_mask = torch.cat([prepend_mask, attention_mask], dim=-1)
+        if not skip_modulated_input:
+            # Stable Audio prepends the combined global+time embedding (`temb`) to the sequence.
+            # Therefore, the standard LayerNorm applied here still captures the timestep signal
+            # within the first token of the output, giving the cache discriminator the info it needs.
+            first_block = cast(StableAudioDiTBlock, self.transformer_blocks[0])
+            modulated_input = first_block.norm1(hidden_states)
+        else:
+            modulated_input = None
 
+        return ForwardState(
+            modulated_input=modulated_input,
+            hidden_states=hidden_states,
+            encoder_hidden_states=encoder_hidden_states,
+            temb=temb,
+            intermediates=StableAudioState(
+                original_seq_len=original_seq_len,
+                cross_attention_hidden_states=cross_attention_hidden_states,
+                rotary_embedding=rotary_embedding,
+            ),
+        )
+
+    def run_transformer_blocks(self, ctx: ForwardState[StableAudioState]) -> ForwardState[StableAudioState]:
         # Transformer blocks
         for block in self.transformer_blocks:
-            hidden_states = block(
-                hidden_states,
-                cross_attention_hidden_states,
-                rotary_embedding=rotary_embedding,
-                attention_mask=attention_mask,
-                encoder_attention_mask=encoder_attention_mask,
+            ctx.hidden_states = block(
+                ctx.hidden_states,
+                ctx.intermediates.cross_attention_hidden_states,
+                rotary_embedding=ctx.intermediates.rotary_embedding,
             )
+        return ctx
 
-        # Project back to out_channels: [B, 1+L, inner_dim] -> [B, 1+L, out_channels]
-        hidden_states = self.proj_out(hidden_states)
+    def postprocess(self, ctx: ForwardState[StableAudioState]) -> Transformer2DModelOutput:
+        ctx.hidden_states = self.proj_out(ctx.hidden_states)
+        ctx.hidden_states = ctx.hidden_states.transpose(1, 2)[:, :, -ctx.intermediates.original_seq_len :]
+        output = self.postprocess_conv(ctx.hidden_states) + ctx.hidden_states
+        return Transformer2DModelOutput(sample=output)
 
-        # Transpose and remove prepended global token: [B, L, C] -> [B, C, L]
-        hidden_states = hidden_states.transpose(1, 2)[:, :, 1:]
+    def get_teacache_coefficients(self) -> list[float]:
+        return [121.77490545701518, -153.7449426160371, 68.05368574596551, -12.281286412689623, 1.0733905006198015]
 
-        # Post-process with residual: [B, C, L]
-        hidden_states = self.postprocess_conv(hidden_states) + hidden_states
+    def forward(self, *args, **kwargs) -> Transformer2DModelOutput:
+        """Forward pass for the DiT, which is implemented using the methods outlined by SupportsTeaCache.
 
-        if return_dict:
-            return Transformer2DModelOutput(sample=hidden_states)
-        return (hidden_states,)
+        NOTE: this is the disabled cache path; the forward is overridden by the TeaCache hook when it is
+        enabled, which needs the modulated inputs for cache decision. Skipping modulated inputs is intentional.
+        """
+        ctx = self.preprocess(*args, **kwargs, skip_modulated_input=True)
+        ctx = self.run_transformer_blocks(ctx)
+        return self.postprocess(ctx)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         """
