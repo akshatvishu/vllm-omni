@@ -83,24 +83,8 @@ def enable_sensenova_u1_teacache(pipeline: Any, config: DiffusionCacheConfig) ->
     )
 
 
-def enable_flux2_klein_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
-    transformer = pipeline.transformer
-    teacache_config = TeaCacheConfig(
-        transformer_type="Flux2Klein",
-        rel_l1_thresh=config.rel_l1_thresh,
-        coefficients=_resolve_coefficients(transformer, config),
-    )
-    apply_teacache_hook(transformer, teacache_config)
-
-    logger.info(
-        f"TeaCache applied with rel_l1_thresh={teacache_config.rel_l1_thresh}, "
-        f"transformer_class={teacache_config.transformer_type}"
-    )
-
-
 CUSTOM_TEACACHE_ENABLERS = {
     "BagelPipeline": enable_bagel_teacache,
-    "Flux2KleinPipeline": enable_flux2_klein_teacache,
     "HunyuanImage3Pipeline": enable_hunyuan_image3_teacache,
     "SenseNovaU1Pipeline": enable_sensenova_u1_teacache,
 }
