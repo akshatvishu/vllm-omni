@@ -281,7 +281,7 @@ OmniVoice creates speech in more than 600 languages. It supports text-to-speech 
 ```bash
 huggingface-cli download k2-fsa/OmniVoice
 ```
-Voice cloning needs `transformers>=5.3.0`. When `ref_text` is omitted, OmniVoice loads `openai/whisper-large-v3-turbo` on the server GPU to transcribe the reference audio.
+Voice cloning needs `transformers>=5.3.0`. When `ref_text` is omitted, OmniVoice loads `openai/whisper-large-v3-turbo` on the worker device to transcribe the reference audio. Set `additional_config.omnivoice_asr.asr_device` to use another GPU or the CPU.
 
 ### Launch
 ```bash
@@ -304,9 +304,7 @@ The client supports `--api-base`, `--model`, `--text`, `--response-format`,
 
 ### Notes
 - The explicit `--ref-text` path is faster because it does not load Whisper.
-- The first request with reference audio and no reference text loads
-  `openai/whisper-large-v3-turbo` on the server GPU, adding latency and GPU
-  memory use. Generated audio is mono at 24 kHz.
+- The first request with reference audio and no reference text loads `openai/whisper-large-v3-turbo` on the worker device, which adds latency and device memory use. Generated audio is mono at 24 kHz.
 
 ### Reference audio and output processing
 
@@ -321,7 +319,7 @@ When a request includes `ref_audio`, OmniVoice prepares the reference clip befor
 - It adds a final period for English text or a Chinese full stop for Chinese text when the reference text has no ending punctuation.
 - It sends the same prepared waveform to the audio tokenizer.
 
-After decoding, OmniVoice removes middle gaps of at least 500 milliseconds. It trims edge silence while keeping 100 milliseconds at each edge. Voice cloning output uses the original reference RMS when it is below `0.1`. Output at or above `0.1` is not scaled. For text-only output, it sets the peak of nonzero audio to `0.5`. The pipeline fades the first and last 100 milliseconds, then adds 100 milliseconds of silence at both edges.
+After decoding, OmniVoice processes voice cloning output by removing middle gaps of at least 500 milliseconds and trimming edge silence while keeping 100 milliseconds at each edge. It uses the original reference RMS when the RMS is below `0.1`, and it leaves the level unchanged when the RMS is at least `0.1`. It fades the first and last 100 milliseconds, then adds 100 milliseconds of silence at both edges. Text only output returns the decoder tensor without this processing.
 
 ---
 
