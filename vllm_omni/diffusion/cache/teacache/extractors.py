@@ -21,8 +21,6 @@ import torch
 import torch.nn as nn
 from vllm.logger import init_logger
 
-from vllm_omni.diffusion.forward_context import get_forward_context
-
 logger = init_logger(__name__)
 
 
@@ -145,157 +143,6 @@ class CacheContext:
                 f"Device mismatch: modulated_input on {self.modulated_input.device}, "
                 f"hidden_states on {self.hidden_states.device}"
             )
-
-
-def extract_qwen_context(
-    module: nn.Module,
-    hidden_states: torch.Tensor,
-    encoder_hidden_states: torch.Tensor,
-    encoder_hidden_states_mask: torch.Tensor,
-    timestep: torch.Tensor | float | int,
-    img_shapes: torch.Tensor,
-    txt_seq_lens: torch.Tensor,
-    guidance: torch.Tensor | None = None,
-    additional_t_cond: torch.Tensor | None = None,
-    attention_kwargs: dict[str, Any] | None = None,
-    **kwargs: Any,
-) -> CacheContext:
-    """
-    Extract cache context for QwenImageTransformer2DModel.
-
-    This is the ONLY Qwen-specific code needed for TeaCache support.
-    It encapsulates preprocessing, modulated input extraction, transformer execution,
-    and postprocessing logic.
-
-    Args:
-        module: QwenImageTransformer2DModel instance
-        hidden_states: Input hidden states tensor
-        encoder_hidden_states: Text encoder outputs
-        encoder_hidden_states_mask: Mask for text encoder
-        timestep: Current diffusion timestep
-        img_shapes: Image shapes for position embedding
-        txt_seq_lens: Text sequence lengths
-        guidance: Optional guidance scale for CFG
-        additional_t_cond: Optional additional timestep conditioning
-        attention_kwargs: Additional attention arguments
-        **kwargs: Additional keyword arguments ignored by this extractor
-
-    Returns:
-        CacheContext with all information needed for generic caching
-    """
-    from diffusers.models.modeling_outputs import Transformer2DModelOutput
-
-    if not hasattr(module, "transformer_blocks") or len(module.transformer_blocks) == 0:
-        raise ValueError("Module must have transformer_blocks")
-
-    # ============================================================================
-    # PREPROCESSING (Qwen-specific)
-    # ============================================================================
-    # Call image_rope_prepare instead of img_in + pos_embed directly.
-    # This ensures the SequenceParallelSplitHook registered on image_rope_prepare
-    # fires when SP is enabled, correctly sharding hidden_states and vid_freqs.
-    hidden_states, vid_freqs, txt_freqs = module.image_rope_prepare(hidden_states, img_shapes, txt_seq_lens)
-    image_rotary_emb = (vid_freqs, txt_freqs)
-
-    timestep = timestep.to(device=hidden_states.device, dtype=hidden_states.dtype)
-
-    # Call modulate_index_prepare instead of handling timestep directly.
-    # For zero_cond_t=False: timestep unchanged, modulate_index=None.
-    # For zero_cond_t=True: timestep is doubled, modulate_index is created and
-    # sharded by the SequenceParallelSplitHook on modulate_index_prepare so that
-    # its sequence dimension matches the already-sharded hidden_states.
-    timestep, modulate_index = module.modulate_index_prepare(timestep, img_shapes)
-
-    encoder_hidden_states = module.txt_norm(encoder_hidden_states)
-    encoder_hidden_states = module.txt_in(encoder_hidden_states)
-
-    if guidance is not None:
-        guidance = guidance.to(hidden_states.dtype) * 1000
-
-    temb = (
-        module.time_text_embed(timestep, hidden_states, additional_t_cond)
-        if guidance is None
-        else module.time_text_embed(timestep, guidance, hidden_states, additional_t_cond)
-    )
-
-    # ============================================================================
-    # EXTRACT MODULATED INPUT (for cache decision)
-    # ============================================================================
-    block = module.transformer_blocks[0]
-    img_mod_params = block.img_mod(temb)
-    img_mod1, _ = img_mod_params.chunk(2, dim=-1)
-    img_scale1, img_shift1, _ = block._modulate(img_mod1)
-    img_modulated = block.img_norm1(hidden_states, img_scale1, img_shift1)
-
-    # ============================================================================
-    # DEFINE TRANSFORMER EXECUTION (Qwen-specific)
-    # ============================================================================
-    def run_transformer_blocks():
-        """Execute all Qwen transformer blocks."""
-        h = hidden_states
-        e = encoder_hidden_states
-        encoder_mask = encoder_hidden_states_mask
-        hidden_states_mask = None  # default
-        if module.parallel_config is not None and module.parallel_config.sequence_parallel_size > 1:
-            ctx = get_forward_context()
-            if ctx.sp_original_seq_len is not None and ctx.sp_padding_size > 0:
-                # Create mask for the full (padded) sequence
-                # valid positions = True, padding positions = False
-                batch_size = hidden_states.shape[0]
-                padded_seq_len = ctx.sp_original_seq_len + ctx.sp_padding_size
-                hidden_states_mask = torch.ones(
-                    batch_size,
-                    padded_seq_len,
-                    dtype=torch.bool,
-                    device=hidden_states.device,
-                )
-                hidden_states_mask[:, ctx.sp_original_seq_len :] = False
-
-        # if mask is all true, set it to None
-        if hidden_states_mask is not None and hidden_states_mask.all():
-            hidden_states_mask = None
-        if encoder_mask is not None and encoder_mask.all():
-            encoder_mask = None
-        for block in module.transformer_blocks:
-            e, h = block(
-                hidden_states=h,
-                encoder_hidden_states=e,
-                encoder_hidden_states_mask=encoder_mask,
-                temb=temb,
-                image_rotary_emb=image_rotary_emb,
-                joint_attention_kwargs=attention_kwargs,
-                modulate_index=modulate_index,
-                hidden_states_mask=hidden_states_mask,
-            )
-        return (h, e)
-
-    # ============================================================================
-    # DEFINE POSTPROCESSING (Qwen-specific)
-    # ============================================================================
-    return_dict = kwargs.get("return_dict", True)
-
-    def postprocess(h):
-        """Apply Qwen-specific output postprocessing."""
-        if getattr(module, "zero_cond_t", False):
-            h = module.norm_out(h, temb.chunk(2, dim=0)[0])
-        else:
-            h = module.norm_out(h, temb)
-        output = module.proj_out(h)
-        if not return_dict:
-            return (output,)
-        return Transformer2DModelOutput(sample=output)
-
-    # ============================================================================
-    # RETURN CONTEXT
-    # ============================================================================
-    return CacheContext(
-        modulated_input=img_modulated,
-        hidden_states=hidden_states,
-        encoder_hidden_states=encoder_hidden_states,
-        temb=temb,
-        run_transformer_blocks=run_transformer_blocks,
-        postprocess=postprocess,
-    )
 
 
 def extract_bagel_context(
@@ -655,7 +502,6 @@ def extract_zimage_context(
 # Note: Use the transformer class name as specified in pipelines as TeaCache hooks operate
 # on the transformer module and multiple pipelines can share the same transformer.
 EXTRACTOR_REGISTRY: dict[str, Callable] = {
-    "QwenImageTransformer2DModel": extract_qwen_context,
     "Bagel": extract_bagel_context,
     "StableAudioDiTModel": extract_stable_audio_context,
     "LongCatImageTransformer2DModel": extract_longcat_context,
