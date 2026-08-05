@@ -15,7 +15,7 @@ Usage:
     python end2end.py --model k2-fsa/OmniVoice --text "Hello" \
         --ref-audio ref.wav --ref-text "reference transcription"
 
-    # Automatic reference transcription with Whisper
+    # Automatic reference transcription when ASR is enabled in the deploy config
     python end2end.py --model k2-fsa/OmniVoice --text "hello" \
         --ref-audio trump_ref.wav
 """

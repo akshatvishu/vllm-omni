@@ -728,20 +728,20 @@ Fish Speech uses `ref_audio` and `ref_text` for voice cloning (no `task_type` ne
 |-------|-------------|
 | `k2-fsa/OmniVoice` | OmniVoice generates mono speech at 24 kHz. It supports text-to-speech without a reference clip, voice cloning with `ref_audio` and optional `ref_text`, and voice design. It has no built-in voice presets. |
 
-For voice cloning, send `ref_audio`. You can also send `ref_text`. When `ref_text` is missing or blank, OmniVoice loads `openai/whisper-large-v3-turbo` on the server GPU for the first request and transcribes the reference clip. Sending `ref_text` avoids this model load.
+For voice cloning, send `ref_audio`. If `ref_text` is missing or blank, the default deploy config leaves Whisper unloaded until the first such request, then loads `openai/whisper-large-v3-turbo` on the configured device and transcribes the clip. Set `additional_config.omnivoice_asr.load_asr` to `true` to load it during worker startup. Sending `ref_text` avoids ASR and uses the supplied transcript.
 
 OmniVoice prepares the reference clip before it builds the voice cloning input. It performs these steps:
 
 - It converts the clip to mono, resamples it to 24 kHz, and measures its original root mean square (RMS) level.
 - When the original RMS is greater than zero and less than `0.1`, it raises the waveform level to `0.1` and keeps the original RMS for output volume control.
-- When `ref_text` is missing, it trims a clip longer than 20 seconds at a detected silence.
+- When `ref_text` is missing, it trims a clip longer than 20 seconds at a detected silence. Supplied text skips this special long-audio trim.
 - It removes middle silence and trims silence at both edges whether the transcript is automatic or supplied by the caller.
 - It aligns the sample count down to the audio tokenizer hop size.
 - When `ref_text` is missing, it sends the prepared waveform to Whisper.
 - It adds a final period for English text or a Chinese full stop for Chinese text when the reference text has no ending punctuation.
 - It sends the same prepared waveform to the audio tokenizer.
 
-OmniVoice processes the generated audio after decoding. It removes middle gaps of at least 500 milliseconds. It trims edge silence while keeping 100 milliseconds at each edge. For voice cloning, it scales output using the original reference RMS when that value is below `0.1`. It leaves the level unchanged when the value is at least `0.1`. For text-only output, it sets the peak of nonzero audio to `0.5`. It fades the first and last 100 milliseconds, then adds 100 milliseconds of silence at each edge.
+OmniVoice processes voice-cloning audio after decoding. It removes middle gaps of at least 500 milliseconds. It trims edge silence while keeping 100 milliseconds at each edge. It scales cloned output using the original reference RMS when that value is below `0.1`, and leaves the level unchanged when the value is at least `0.1`. It fades the first and last 100 milliseconds, then adds 100 milliseconds of silence at each edge. Text-only output returns the decoder tensor without this voice-cloning postprocessing.
 
 ### VoxCPM2
 

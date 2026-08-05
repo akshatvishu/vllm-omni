@@ -11,3 +11,7 @@ stages:
     trust_remote_code: true
     distributed_executor_backend: "mp"
     dtype: "float32"
+    additional_config:
+      omnivoice_asr:
+        load_asr: false
+        asr_model_name: "openai/whisper-large-v3-turbo"

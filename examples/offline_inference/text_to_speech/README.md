@@ -300,7 +300,7 @@ python examples/offline_inference/text_to_speech/omnivoice/end2end.py \
     --ref-text  "This is the reference transcription."
 ```
 
-Omit `--ref-text` to let OmniVoice prepare the reference audio and transcribe it lazily with Whisper:
+Omit `--ref-text` to use automatic transcription. The default OmniVoice deploy config loads Whisper on the configured device when the first request needs it. Set `load_asr: true` in `additional_config.omnivoice_asr` to load it during worker startup:
 
 ```bash
 python examples/offline_inference/text_to_speech/omnivoice/end2end.py \
@@ -322,7 +322,7 @@ OmniVoice prepares the reference clip before it transcribes the clip or builds t
 - It adds a final period for English text or a Chinese full stop for Chinese text when the reference text has no ending punctuation.
 - It sends the same prepared waveform to the audio tokenizer.
 
-After decoding, OmniVoice removes middle gaps of at least 500 milliseconds. It trims edge silence while keeping 100 milliseconds at each edge. Voice cloning output uses the original reference RMS when it is below `0.1`. Output at or above `0.1` is not scaled. For text-only output, it sets the peak of nonzero audio to `0.5`. The pipeline fades the first and last 100 milliseconds, then adds 100 milliseconds of silence at both edges.
+After decoding, OmniVoice applies silence removal, RMS scaling, fades, and padding only to voice-cloning output. Text-only output returns the decoder tensor unchanged. Output audio is mono at 24 kHz.
 
 ### Voice design
 ```bash
@@ -351,9 +351,9 @@ python examples/offline_inference/text_to_speech/omnivoice/end2end.py \
 ### Notes
 - Stage 0 (Generator): Qwen3-0.6B with 32-step iterative unmasking.
 - Stage 1 (Decoder): HiggsAudioV2 RVQ + DAC at 24 kHz.
-- The first request with reference audio and no `--ref-text` loads
-  `openai/whisper-large-v3-turbo` on the same GPU, adding latency and GPU
-  memory use. Supplying `--ref-text` is faster.
+- The default deploy config uses `openai/whisper-large-v3-turbo` for lazy ASR on
+  the configured device. Set `load_asr: true` in `additional_config.omnivoice_asr`
+  to load it during worker startup. Supplying `--ref-text` avoids ASR.
 - Generated audio remains mono at 24 kHz.
 
 ---

@@ -27,6 +27,9 @@ def pipeline() -> pipeline_omnivoice.OmniVoicePipeline:
     model = pipeline_omnivoice.OmniVoicePipeline.__new__(pipeline_omnivoice.OmniVoicePipeline)
     torch.nn.Module.__init__(model)
     model.device = torch.device("cpu")
+    model._load_asr_on_init = False
+    model._asr_model_name = pipeline_omnivoice._ASR_MODEL_NAME
+    model._asr_device = "cpu"
     model._asr_pipeline = None
     return model
 
@@ -117,6 +120,105 @@ def test_asr_load_failure_includes_checkpoint_and_device(pipeline, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    ("additional_config", "expected"),
+    [
+        ({}, (False, pipeline_omnivoice._ASR_MODEL_NAME, None)),
+        (
+            {
+                "omnivoice_asr": {
+                    "load_asr": True,
+                    "asr_model_name": "local/whisper",
+                    "asr_device": "cuda:1",
+                }
+            },
+            (True, "local/whisper", "cuda:1"),
+        ),
+    ],
+)
+def test_asr_config_defaults_and_values(additional_config, expected):
+    assert pipeline_omnivoice._parse_asr_config(additional_config) == expected
+
+
+@pytest.mark.parametrize(
+    "additional_config",
+    [
+        {"omnivoice_asr": {"load_asr": "true"}},
+        {"omnivoice_asr": {"asr_model_name": "  "}},
+        {"omnivoice_asr": {"asr_device": ""}},
+        {"omnivoice_asr": []},
+    ],
+)
+def test_asr_config_rejects_invalid_values(additional_config):
+    with pytest.raises((TypeError, ValueError)):
+        pipeline_omnivoice._parse_asr_config(additional_config)
+
+
+def test_asr_loader_uses_configured_model_and_device(pipeline, monkeypatch):
+    asr, load_calls = _install_fake_asr(monkeypatch)
+    pipeline._asr_model_name = "local/whisper"
+    pipeline._asr_device = "cpu"
+
+    pipeline._load_asr_pipeline()
+
+    assert asr is pipeline._asr_pipeline
+    assert load_calls == [
+        (
+            ("automatic-speech-recognition",),
+            {"model": "local/whisper", "dtype": torch.float32, "device": "cpu"},
+        )
+    ]
+
+
+def test_eager_asr_is_loaded_during_initialization(monkeypatch):
+    model = pipeline_omnivoice.OmniVoicePipeline.__new__(pipeline_omnivoice.OmniVoicePipeline)
+    torch.nn.Module.__init__(model)
+    load_calls = []
+
+    def load_asr(self):
+        load_calls.append((self._asr_model_name, self._asr_device))
+
+    monkeypatch.setattr(pipeline_omnivoice.OmniVoicePipeline, "_load_asr_pipeline", load_asr)
+
+    model._initialize_asr(
+        {
+            "omnivoice_asr": {
+                "load_asr": True,
+                "asr_model_name": "local/whisper",
+                "asr_device": "cpu",
+            }
+        }
+    )
+
+    assert model._load_asr_on_init is True
+    assert load_calls == [("local/whisper", "cpu")]
+
+
+def test_lazy_asr_is_not_loaded_during_initialization(monkeypatch):
+    model = pipeline_omnivoice.OmniVoicePipeline.__new__(pipeline_omnivoice.OmniVoicePipeline)
+    torch.nn.Module.__init__(model)
+    load_calls = []
+
+    def load_asr(self):
+        load_calls.append(True)
+
+    monkeypatch.setattr(pipeline_omnivoice.OmniVoicePipeline, "_load_asr_pipeline", load_asr)
+
+    model._initialize_asr({"omnivoice_asr": {"load_asr": False}})
+
+    assert model._load_asr_on_init is False
+    assert load_calls == []
+
+
+def test_lazy_asr_uses_worker_device_on_first_request(pipeline, monkeypatch):
+    asr, load_calls = _install_fake_asr(monkeypatch)
+    pipeline._asr_device = None
+
+    assert pipeline._resolve_ref_text((np.zeros(4, dtype=np.float32), 16000), None) == "hello there"
+    assert asr is pipeline._asr_pipeline
+    assert load_calls[0][1]["device"] == torch.device("cpu")
+
+
+@pytest.mark.parametrize(
     "waveform",
     [
         np.arange(4, dtype=np.float32)[None, :],
@@ -149,12 +251,12 @@ def test_asr_input_accepts_numpy_and_torch_waveforms_without_mutating(waveform, 
 )
 def test_loader_receives_checkpoint_device_and_dtype(pipeline, monkeypatch, device, dtype):
     _, load_calls = _install_fake_asr(monkeypatch)
-    pipeline.device = device
+    pipeline._asr_device = str(device)
 
     pipeline._load_asr_pipeline()
 
     assert load_calls[0][1]["model"] == "openai/whisper-large-v3-turbo"
-    assert load_calls[0][1]["device"] == device
+    assert load_calls[0][1]["device"] == str(device)
     assert load_calls[0][1]["dtype"] is dtype
 
 

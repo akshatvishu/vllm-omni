@@ -393,7 +393,7 @@ OmniVoice creates speech in more than 600 languages. It supports text-to-speech 
 ```bash
 huggingface-cli download k2-fsa/OmniVoice
 ```
-Voice cloning needs `transformers>=5.3.0`. When `ref_text` is omitted, OmniVoice loads `openai/whisper-large-v3-turbo` on the server GPU to transcribe the reference audio.
+Voice cloning needs `transformers>=5.3.0`. The default OmniVoice deploy config loads `openai/whisper-large-v3-turbo` lazily on the configured device when `ref_text` is missing. Set `load_asr: true` in `additional_config.omnivoice_asr` to load it during worker startup.
 
 ### Launch
 ```bash
@@ -435,20 +435,20 @@ The client supports `--api-base`, `--model`, `--text`, `--response-format`, `--l
 
 ### Reference audio and output processing
 
-The explicit `--ref-text` path is faster because it does not load Whisper. When `--ref-text` is omitted, the first request loads `openai/whisper-large-v3-turbo` on the server GPU, which adds startup latency and uses more GPU memory.
+The explicit `--ref-text` path avoids Whisper. With the default config, missing `ref_text` loads `openai/whisper-large-v3-turbo` on the configured device during the first request that needs transcription. Set `load_asr: true` in `additional_config.omnivoice_asr` to move that load to worker startup.
 
 OmniVoice prepares the reference clip before it transcribes the clip or builds the voice cloning input. It performs these steps:
 
 - It converts the clip to mono and resamples it to 24 kHz.
 - It measures the original root mean square (RMS) level. When the RMS is greater than zero and below `0.1`, it raises the waveform level to `0.1` and keeps the original RMS for output volume control.
-- When `--ref-text` is omitted, it trims a clip longer than 20 seconds at a detected silence.
+- When `--ref-text` is omitted, it trims a clip longer than 20 seconds at a detected silence. Supplied text skips this special long-audio trim.
 - It removes middle silence and trims silence at both edges whether the transcript is automatic or supplied by the caller.
 - It aligns the sample count down to the audio tokenizer hop size.
 - When `--ref-text` is omitted, it sends the prepared waveform to Whisper.
 - It adds a final period for English text or a Chinese full stop for Chinese text when the reference text has no ending punctuation.
 - It sends the same prepared waveform to the audio tokenizer.
 
-After decoding, OmniVoice removes middle gaps of at least 500 milliseconds. It trims edge silence while keeping 100 milliseconds at each edge. Voice cloning output uses the original reference RMS when it is below `0.1`. Output at or above `0.1` is not scaled. For text-only output, it sets the peak of nonzero audio to `0.5`. The pipeline fades the first and last 100 milliseconds, then adds 100 milliseconds of silence at both edges. Output audio is mono at 24 kHz.
+After decoding, OmniVoice applies silence removal, RMS scaling, fades, and padding only to voice-cloning output. Text-only output returns the decoder tensor unchanged. Output audio is mono at 24 kHz.
 
 
 ## Qwen3-TTS
