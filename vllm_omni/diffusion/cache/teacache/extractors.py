@@ -391,190 +391,102 @@ def extract_bagel_context(
     )
 
 
-def extract_zimage_context(
-    module: nn.Module,
-    x: list[torch.Tensor],
-    t: torch.Tensor,
-    cap_feats: list[torch.Tensor],
-    patch_size: int = 2,
-    f_patch_size: int = 1,
-    **kwargs: Any,
+def extract_longcat_context(
+    module: nn.Module,  # LongCatImageTransformer2DModel
+    hidden_states,
+    timestep,
+    guidance,
+    encoder_hidden_states,
+    txt_ids,
+    img_ids,
+    **kwargs,
 ) -> CacheContext:
-    """
-    Extract cache context for ZImageTransformer2DModel.
+    """Extract the cache context for LongCat Image.
 
-    This is the ONLY Z-Image-specific code needed for TeaCache support.
-    It encapsulates preprocessing, modulated input extraction, transformer execution,
-    and postprocessing logic.
+    Similar to other extractors, this is currently the only code needed
+    for TeaCache support for LongCat image, and encapsulates preprocessing,
+    modulated input extraction, transformer execution, and postprocessing
+    logic.
 
-    Args:
-        module: ZImageTransformer2DModel instance
-        x: List of image tensors per batch item
-        t: Timestep tensor
-        cap_feats: List of caption feature tensors per batch item
-        patch_size: Patch size for patchification (default: 2)
-        f_patch_size: Frame patch size (default: 1)
-        **kwargs: Additional keyword arguments ignored by this extractor
+    Args & kawrgs are identical to the inputs to LongCat Image's forward.
 
     Returns:
         CacheContext with all information needed for generic caching
     """
-    from torch.nn.utils.rnn import pad_sequence
+    # TODO (Alex) - Refactor TeaCache extractors to more tightly integrate with .forward
+    from diffusers.models.modeling_outputs import Transformer2DModelOutput
 
-    if not hasattr(module, "layers") or len(module.layers) == 0:
-        raise ValueError("Module must have main transformer layers")
+    # 1. Model specific preprocessing
+    fwd_context = get_forward_context()
+    sp_size = module.parallel_config.sequence_parallel_size
+    if sp_size is not None and sp_size > 1:
+        # NOTE: For now, we set this to False on the forward context
+        # to be consistent with LongCat Image's current behavior when
+        # TeaCache is enabled. We do not need to reset it in post process
+        # since we should never split text embed in sp for this model.
+        fwd_context.split_text_embed_in_sp = False
 
-    bsz = len(x)
-    device = x[0].device
+    hidden_states = module.x_embedder(hidden_states)
 
-    # ============================================================================
-    # PREPROCESSING (Z-Image specific)
-    # ============================================================================
-    # Scale timestep and create timestep embedding
-    t_scaled = t * module.t_scale
-    adaln_input = module.t_embedder(t_scaled)
+    timestep = timestep.to(hidden_states.dtype) * 1000
 
-    # Patchify and embed inputs
-    (
-        x_patches,
-        cap_feats_processed,
-        x_size,
-        x_pos_ids,
-        cap_pos_ids,
-        x_inner_pad_mask,
-        cap_inner_pad_mask,
-        _cap_feats_2,
-    ) = module.patchify_and_embed(x, cap_feats, patch_size, f_patch_size)
+    temb = module.time_embed(timestep, hidden_states.dtype)
+    encoder_hidden_states = module.context_embedder(encoder_hidden_states)
 
-    # Process image patches through embedder and noise refiner
-    x_item_seqlens = [len(_) for _ in x_patches]
-    x_max_item_seqlen = max(x_item_seqlens)
+    # Compute RoPE embeddings via rope_preparer module
+    # _sp_plan will automatically shard img_cos/img_sin (outputs 2, 3)
+    # txt_cos/txt_sin (outputs 0, 1) remain replicated for dual-stream attention
+    txt_cos, txt_sin, img_cos, img_sin = module.rope_preparer(txt_ids, img_ids)
 
-    x_embedded = torch.cat(x_patches, dim=0)
-    x_embedded = module.all_x_embedder[f"{patch_size}-{f_patch_size}"](x_embedded)
+    # Reconstruct image_rotary_emb with chunked values
+    # Final shape: (txt_seq_len + img_seq_len // SP, head_dim)
+    image_rotary_emb = (
+        torch.cat([txt_cos, img_cos], dim=0),
+        torch.cat([txt_sin, img_sin], dim=0),
+    )
 
-    # Match adaln_input dtype to x_embedded
-    adaln_input = adaln_input.type_as(x_embedded)
+    # 2. Extract the modulated output from the first mm-DiT block
+    first_block = module.transformer_blocks[0]
+    img_modulated = first_block.norm1(hidden_states, emb=temb)[0]
 
-    # Apply pad token
-    x_embedded[torch.cat(x_inner_pad_mask)] = module.x_pad_token
-    x_list = list(x_embedded.split(x_item_seqlens, dim=0))
-
-    # Compute rope embeddings for image patches
-    x_cos, x_sin = module.rope_embedder(torch.cat(x_pos_ids, dim=0))
-    x_cos = list(x_cos.split(x_item_seqlens, dim=0))
-    x_sin = list(x_sin.split(x_item_seqlens, dim=0))
-
-    # Pad sequences for batch processing
-    x_batched = pad_sequence(x_list, batch_first=True, padding_value=0.0)
-    x_cos_batched = pad_sequence(x_cos, batch_first=True, padding_value=0.0)
-    x_sin_batched = pad_sequence(x_sin, batch_first=True, padding_value=0.0)
-    x_attn_mask = torch.zeros((bsz, x_max_item_seqlen), dtype=torch.bool, device=device)
-    for i, seq_len in enumerate(x_item_seqlens):
-        x_attn_mask[i, :seq_len] = 1
-
-    # Run noise refiner blocks
-    for layer in module.noise_refiner:
-        x_batched = layer(x_batched, x_attn_mask, x_cos_batched, x_sin_batched, adaln_input)
-
-    # Process caption features through embedder and context refiner
-    cap_item_seqlens = [len(_) for _ in cap_feats_processed]
-    cap_max_item_seqlen = max(cap_item_seqlens)
-
-    cap_embedded = torch.cat(cap_feats_processed, dim=0)
-    cap_embedded = module.cap_embedder(cap_embedded)
-    cap_embedded[torch.cat(cap_inner_pad_mask)] = module.cap_pad_token
-    cap_list = list(cap_embedded.split(cap_item_seqlens, dim=0))
-
-    # Compute rope embeddings for caption
-    cap_cos, cap_sin = module.rope_embedder(torch.cat(cap_pos_ids, dim=0))
-    cap_cos = list(cap_cos.split(cap_item_seqlens, dim=0))
-    cap_sin = list(cap_sin.split(cap_item_seqlens, dim=0))
-
-    # Pad sequences for batch processing
-    cap_batched = pad_sequence(cap_list, batch_first=True, padding_value=0.0)
-    cap_cos_batched = pad_sequence(cap_cos, batch_first=True, padding_value=0.0)
-    cap_sin_batched = pad_sequence(cap_sin, batch_first=True, padding_value=0.0)
-    cap_attn_mask = torch.zeros((bsz, cap_max_item_seqlen), dtype=torch.bool, device=device)
-    for i, seq_len in enumerate(cap_item_seqlens):
-        cap_attn_mask[i, :seq_len] = 1
-
-    # Run context refiner blocks
-    for layer in module.context_refiner:
-        cap_batched = layer(cap_batched, cap_attn_mask, cap_cos_batched, cap_sin_batched)
-
-    # Create unified sequence (image + caption)
-    unified_list = []
-    unified_cos_list = []
-    unified_sin_list = []
-    for i in range(bsz):
-        x_len = x_item_seqlens[i]
-        cap_len = cap_item_seqlens[i]
-        unified_list.append(torch.cat([x_batched[i][:x_len], cap_batched[i][:cap_len]]))
-        unified_cos_list.append(torch.cat([x_cos_batched[i][:x_len], cap_cos_batched[i][:cap_len]]))
-        unified_sin_list.append(torch.cat([x_sin_batched[i][:x_len], cap_sin_batched[i][:cap_len]]))
-
-    unified_item_seqlens = [a + b for a, b in zip(cap_item_seqlens, x_item_seqlens)]
-    unified_max_item_seqlen = max(unified_item_seqlens)
-
-    unified = pad_sequence(unified_list, batch_first=True, padding_value=0.0)
-    unified_cos = pad_sequence(unified_cos_list, batch_first=True, padding_value=0.0)
-    unified_sin = pad_sequence(unified_sin_list, batch_first=True, padding_value=0.0)
-    unified_attn_mask = torch.zeros((bsz, unified_max_item_seqlen), dtype=torch.bool, device=device)
-    for i, seq_len in enumerate(unified_item_seqlens):
-        unified_attn_mask[i, :seq_len] = 1
-
-    # ============================================================================
-    # EXTRACT MODULATED INPUT (for cache decision)
-    # ============================================================================
-    # Use the first main transformer block's modulation
-    # The main layers have modulation=True and process the unified sequence
-    block = module.layers[0]
-    # Get modulation parameters: scale_msa, gate_msa, scale_mlp, gate_mlp
-    mod_params = block.adaLN_modulation(adaln_input).unsqueeze(1).chunk(4, dim=2)
-    scale_msa = 1.0 + mod_params[0]
-    # Extract modulated input: normalized hidden states scaled by modulation
-    modulated_input = block.attention_norm1(unified) * scale_msa
-
-    # ============================================================================
-    # DEFINE TRANSFORMER EXECUTION (Z-Image specific)
-    # ============================================================================
+    # 3. Define the transformer execution
     def run_transformer_blocks():
-        """Execute all Z-Image main transformer blocks."""
-        h = unified
-        for layer in module.layers:
-            h = layer(h, unified_attn_mask, unified_cos, unified_sin, adaln_input)
-        return (h,)
+        """Execute all Longcat transformer blocks."""
+        h = hidden_states
+        e = encoder_hidden_states
+        for block in module.transformer_blocks:
+            e, h = block(
+                hidden_states=h,
+                encoder_hidden_states=e,
+                temb=temb,
+                image_rotary_emb=image_rotary_emb,
+            )
 
-    # ============================================================================
-    # DEFINE POSTPROCESSING (Z-Image specific)
-    # ============================================================================
+        for block in module.single_transformer_blocks:
+            e, h = block(
+                hidden_states=h,
+                encoder_hidden_states=e,
+                temb=temb,
+                image_rotary_emb=image_rotary_emb,
+            )
+        # Hook expects hidden states to be first
+        return (h, e)
+
+    # 4. Postprocessing
     def postprocess(h):
-        """Apply Z-Image specific output postprocessing."""
-        h = module.all_final_layer[f"{patch_size}-{f_patch_size}"](h, adaln_input)
-        h = list(h.unbind(dim=0))
-        output = module.unpatchify(h, x_size, patch_size, f_patch_size)
-        return output, {}
+        """Apply Longcat-specific output postprocessing."""
+        h = module.norm_out(h, temb)
+        output = module.proj_out(h)
+        return Transformer2DModelOutput(sample=output)
 
-    # ============================================================================
-    # RETURN CONTEXT
-    # ============================================================================
+    # 5. Return the CacheContext
     return CacheContext(
-        modulated_input=modulated_input,
-        hidden_states=unified,
-        encoder_hidden_states=None,  # Z-Image uses unified sequence, no separate encoder states
-        temb=adaln_input,
+        modulated_input=img_modulated,
+        hidden_states=hidden_states,
+        encoder_hidden_states=encoder_hidden_states,
+        temb=temb,
         run_transformer_blocks=run_transformer_blocks,
         postprocess=postprocess,
-        extra_states={
-            "unified_attn_mask": unified_attn_mask,
-            "unified_cos": unified_cos,
-            "unified_sin": unified_sin,
-            "x_size": x_size,
-            "x_item_seqlens": x_item_seqlens,
-            "patch_size": patch_size,
-            "f_patch_size": f_patch_size,
-        },
     )
 
 
@@ -1042,9 +954,6 @@ def extract_cosmos3_context(
 EXTRACTOR_REGISTRY: dict[str, Callable] = {
     "QwenImageTransformer2DModel": extract_qwen_context,
     "Bagel": extract_bagel_context,
-    "Cosmos3EdgeVFMTransformer": extract_cosmos3_context,
-    "Cosmos3VFMTransformer": extract_cosmos3_context,
-    "ZImageTransformer2DModel": extract_zimage_context,
     "StableAudioDiTModel": extract_stable_audio_context,
     "SenseNovaU1ForCausalLM": extract_sensenova_u1_context,
     "MiniMaxH3DiTModel": extract_minimax_h3_context,
