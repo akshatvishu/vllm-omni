@@ -911,6 +911,7 @@ class QwenImageState:
     joint_attention_kwargs: dict[str, Any] | None
     hidden_states_mask: torch.Tensor | None
     encoder_hidden_states_mask: torch.Tensor | None
+    return_dict: bool
 
 
 # Note: inheriting from CachedTransformer only when we support caching
@@ -1101,8 +1102,9 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         guidance: torch.Tensor = None,
         attention_kwargs: dict[str, Any] | None = None,
         additional_t_cond: torch.Tensor | None = None,
+        return_dict: bool = True,
+        *,
         skip_modulated_input: bool = False,
-        **kwargs: Any,
     ) -> ForwardState[QwenImageState]:
         if self.parallel_config.sequence_parallel_size > 1:
             get_forward_context().split_text_embed_in_sp = False
@@ -1185,6 +1187,7 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
                 joint_attention_kwargs=attention_kwargs,
                 hidden_states_mask=hidden_states_mask,
                 encoder_hidden_states_mask=encoder_hidden_states_mask,
+                return_dict=return_dict,
             ),
         )
 
@@ -1192,14 +1195,12 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         self,
         ctx: ForwardState[QwenImageState],
     ) -> ForwardState[QwenImageState]:
-        h = ctx.hidden_states
-        e = ctx.encoder_hidden_states
         state = ctx.intermediates
 
         for block in self.transformer_blocks:
-            e, h = block(
-                hidden_states=h,
-                encoder_hidden_states=e,
+            ctx.encoder_hidden_states, ctx.hidden_states = block(
+                hidden_states=ctx.hidden_states,
+                encoder_hidden_states=ctx.encoder_hidden_states,
                 encoder_hidden_states_mask=state.encoder_hidden_states_mask,
                 temb=ctx.temb,
                 image_rotary_emb=state.image_rotary_emb,
@@ -1208,19 +1209,18 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
                 hidden_states_mask=state.hidden_states_mask,
             )
 
-        ctx.hidden_states = h
-        ctx.encoder_hidden_states = e
         return ctx
 
-    def postprocess(self, ctx: ForwardState[QwenImageState]) -> Transformer2DModelOutput:
-        temb = ctx.temb
+    def postprocess(self, ctx: ForwardState[QwenImageState]) -> Transformer2DModelOutput | tuple[torch.Tensor, ...]:
         if self.zero_cond_t:
-            temb = temb.chunk(2, dim=0)[0]
-        hidden_states = self.norm_out(ctx.hidden_states, temb)
-        output = self.proj_out(hidden_states)
+            ctx.temb = ctx.temb.chunk(2, dim=0)[0]
+        ctx.hidden_states = self.norm_out(ctx.hidden_states, ctx.temb)
+        output = self.proj_out(ctx.hidden_states)
+        if not ctx.intermediates.return_dict:
+            return (output,)
         return Transformer2DModelOutput(sample=output)
 
-    def forward(self, *args: Any, **kwargs: Any) -> Transformer2DModelOutput:
+    def forward(self, *args: Any, **kwargs: Any) -> Transformer2DModelOutput | tuple[torch.Tensor, ...]:
         ctx = self.preprocess(*args, skip_modulated_input=True, **kwargs)
         ctx = self.run_transformer_blocks(ctx)
         return self.postprocess(ctx)
