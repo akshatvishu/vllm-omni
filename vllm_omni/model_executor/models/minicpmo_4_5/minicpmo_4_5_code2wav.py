@@ -109,6 +109,9 @@ class _WorkItem:
     prompt_wav: str
     last_chunk: bool
     tokens: torch.Tensor
+    code_flat_numel: int
+    codec_chunk_frames: int
+    codec_left_context_frames: int
     previous: _RequestState | None
     runtime_prompt_key: str | None
     duplex_epoch: int
@@ -144,6 +147,7 @@ class MiniCPMO45Code2Wav(nn.Module):
         self._model_revision = getattr(vllm_config.model_config, "revision", None)
         self.backend: BatchedToken2Wav | None = None
         self._states: dict[str, _RequestState] = {}
+        self._debug_stream_totals: dict[str, dict[str, int]] = {}
         self._runtime_prompts: dict[str, _RuntimePrompt] = {}
         self._request_prompt_keys: dict[str, str] = {}
         self._runtime_prompt_dir = tempfile.TemporaryDirectory(
@@ -334,6 +338,9 @@ class MiniCPMO45Code2Wav(nn.Module):
                 prompt_wav=self._default_prompt_wav,
                 last_chunk=False,
                 tokens=segment.new_empty(0, dtype=torch.long),
+                code_flat_numel=0,
+                codec_chunk_frames=0,
+                codec_left_context_frames=0,
                 previous=None,
                 runtime_prompt_key=None,
                 duplex_epoch=-1,
@@ -360,12 +367,36 @@ class MiniCPMO45Code2Wav(nn.Module):
         codes = info.get("codes")
         audio = codes.get("audio") if isinstance(codes, Mapping) else None
         tokens = _codec_tensor(audio, segment)
-        if int(_scalar(meta.get("code_flat_numel"), tokens.numel())) == 0:
+        raw_payload_tokens = int(tokens.numel())
+        code_flat_numel = int(_scalar(meta.get("code_flat_numel"), raw_payload_tokens))
+        codec_left_context_frames = int(
+            _scalar(meta.get("codec_left_context_frames"), _scalar(meta.get("left_context_size"), 0))
+        )
+        codec_chunk_frames = int(
+            _scalar(meta.get("codec_chunk_frames"), max(0, raw_payload_tokens - codec_left_context_frames))
+        )
+        if code_flat_numel == 0:
             # The generation scheduler reserves one placeholder token for an
             # empty terminal or segment-boundary chunk. The producer's
             # explicit length is the authority, so do not decode that
             # placeholder as codec data.
             tokens = segment.new_empty(0, dtype=torch.long)
+        logger.debug(
+            "MiniCPM-o Code2Wav input: request_id=%s epoch=%d chunk_seq=%d "
+            "raw_payload_tokens=%d code_flat_numel=%d effective_payload_tokens=%d "
+            "new_codec_frames=%d left_context_frames=%d last_chunk=%s "
+            "tts_is_last_chunk=%s",
+            request_id,
+            cache_epoch,
+            chunk_seq,
+            raw_payload_tokens,
+            code_flat_numel,
+            int(tokens.numel()),
+            codec_chunk_frames,
+            codec_left_context_frames,
+            last_chunk,
+            tts_is_last_chunk,
+        )
         previous = self._states.get(state_id)
         if previous is None:
             if chunk_seq != 0:
@@ -431,6 +462,9 @@ class MiniCPMO45Code2Wav(nn.Module):
             prompt_wav=prompt_wav,
             last_chunk=last_chunk,
             tokens=tokens,
+            code_flat_numel=code_flat_numel,
+            codec_chunk_frames=codec_chunk_frames,
+            codec_left_context_frames=codec_left_context_frames,
             previous=previous,
             runtime_prompt_key=runtime_prompt_key,
             duplex_epoch=int(_scalar(meta.get("duplex_epoch"), -1)),
@@ -663,6 +697,57 @@ class MiniCPMO45Code2Wav(nn.Module):
                 )
             for item, audio, next_state in zip(bucket, audios, next_states, strict=True):
                 outputs[item.output_index] = audio.reshape(-1).to(dtype=torch.float32)
+                totals = self._debug_stream_totals.setdefault(
+                    item.state_id,
+                    {
+                        "chunks": 0,
+                        "new_codec_frames": 0,
+                        "payload_frames": 0,
+                        "left_context_frames": 0,
+                        "audio_samples": 0,
+                    },
+                )
+                totals["chunks"] += 1
+                totals["new_codec_frames"] += item.codec_chunk_frames
+                totals["payload_frames"] += item.code_flat_numel
+                totals["left_context_frames"] += item.codec_left_context_frames
+                totals["audio_samples"] += int(audio.numel())
+                old_speech_cache = (
+                    item.previous.token2wav.hift_cache.get("speech") if item.previous is not None else None
+                )
+                next_speech_cache = next_state.hift_cache.get("speech")
+                logger.debug(
+                    "MiniCPM-o Code2Wav output: request_id=%s epoch=%d chunk_seq=%d "
+                    "new_codec_frames=%d payload_frames=%d left_context_frames=%d "
+                    "decode_input_tokens=%d audio_samples=%d old_speech_cache_samples=%d "
+                    "next_speech_cache_samples=%d last_chunk=%s tts_is_last_chunk=%s",
+                    item.request_id,
+                    item.cache_epoch,
+                    item.chunk_seq,
+                    item.codec_chunk_frames,
+                    item.code_flat_numel,
+                    item.codec_left_context_frames,
+                    int(item.tokens.numel()),
+                    int(audio.numel()),
+                    int(old_speech_cache.shape[-1]) if isinstance(old_speech_cache, torch.Tensor) else 0,
+                    int(next_speech_cache.shape[-1]) if isinstance(next_speech_cache, torch.Tensor) else 0,
+                    item.last_chunk,
+                    item.tts_is_last_chunk,
+                )
+                if item.last_chunk:
+                    logger.info(
+                        "MiniCPM-o Code2Wav complete: request_id=%s epoch=%d chunks=%d "
+                        "new_codec_frames=%d payload_frames=%d left_context_frames=%d "
+                        "audio_samples=%d sample_rate=24000",
+                        item.request_id,
+                        item.cache_epoch,
+                        totals["chunks"],
+                        totals["new_codec_frames"],
+                        totals["payload_frames"],
+                        totals["left_context_frames"],
+                        totals["audio_samples"],
+                    )
+                    self._debug_stream_totals.pop(item.state_id, None)
                 pending[item.state_id] = (
                     None
                     if item.last_chunk
@@ -673,6 +758,31 @@ class MiniCPMO45Code2Wav(nn.Module):
                         prompt_wav=item.prompt_wav,
                         token2wav=next_state,
                     )
+                )
+
+        for item in sentinels:
+            if item.last_chunk:
+                totals = self._debug_stream_totals.pop(
+                    item.state_id,
+                    {
+                        "chunks": 0,
+                        "new_codec_frames": 0,
+                        "payload_frames": 0,
+                        "left_context_frames": 0,
+                        "audio_samples": 0,
+                    },
+                )
+                logger.info(
+                    "MiniCPM-o Code2Wav complete: request_id=%s epoch=%d chunks=%d "
+                    "new_codec_frames=%d payload_frames=%d left_context_frames=%d "
+                    "audio_samples=%d sample_rate=24000",
+                    item.request_id,
+                    item.cache_epoch,
+                    totals["chunks"],
+                    totals["new_codec_frames"],
+                    totals["payload_frames"],
+                    totals["left_context_frames"],
+                    totals["audio_samples"],
                 )
 
         self._commit_runtime_prompt_owners(items)
@@ -703,6 +813,7 @@ class MiniCPMO45Code2Wav(nn.Module):
         for request_id in finished_req_ids:
             state_id = str(request_id)
             self._states.pop(state_id, None)
+            self._debug_stream_totals.pop(state_id, None)
             self._release_request_prompt(state_id)
 
     def make_omni_output(self, model_outputs: Any, **_: Any) -> OmniOutput:

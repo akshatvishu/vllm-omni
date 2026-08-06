@@ -32,9 +32,7 @@ from vllm_omni.platforms import current_omni_platform
 logger = init_logger(__name__)
 
 _REPETITION_WINDOW = 16
-_MIN_AUDIO_TOKENS = 64
-_MAX_AUDIO_TOKENS = 2048
-_AUDIO_TOKENS_PER_TEXT_TOKEN = 10
+_TALKER_CONTEXT_LENGTH = 4096
 # Codec-token sampling happens inside the model; vLLM sampling parameters
 # only choose the Talker's binary continue/stop row.
 _CODEC_SEED = 42
@@ -46,18 +44,20 @@ _CODEC_MIN_TOKENS = 50
 _DUPLEX_CODEC_TOKENS_PER_CHUNK = 26
 
 
-def _max_audio_tokens(condition_tokens: int) -> int:
-    """Bound codec generation with a conservative text-length estimate.
-
-    EOS is masked for the first 50 steps, so a direct ``text_tokens * 10``
-    limit can terminate short responses before EOS is eligible. The 2048
-    ceiling matches the checkpoint's native generation default and keeps the
-    sequence within the Talker's 4096-position context.
-    """
-    return max(
-        _MIN_AUDIO_TOKENS,
-        min(_MAX_AUDIO_TOKENS, condition_tokens * _AUDIO_TOKENS_PER_TEXT_TOKEN),
-    )
+def _max_audio_tokens(
+    condition_len: int,
+    max_position_embeddings: int = _TALKER_CONTEXT_LENGTH,
+) -> int:
+    """Reserve the Talker's unused context for codec generation."""
+    condition_len = max(0, int(condition_len))
+    max_position_embeddings = int(max_position_embeddings)
+    available = max_position_embeddings - condition_len
+    if available <= 0:
+        raise ValueError(
+            "MiniCPM-o Talker conditioning leaves no room for codec generation: "
+            f"condition_len={condition_len}, max_position_embeddings={max_position_embeddings}"
+        )
+    return available
 
 
 def _restore_weight_norm_weight(weight_g: torch.Tensor, weight_v: torch.Tensor) -> torch.Tensor:
@@ -318,16 +318,35 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             duplex_boundary = isinstance(meta, dict) and (
                 bool(meta.get("turn_start", False)) or bool(meta.get("turn_end", False))
             )
+            max_position_embeddings = -1
             if native_duplex:
                 max_tokens = _DUPLEX_CODEC_TOKENS_PER_CHUNK
                 min_tokens = 0 if duplex_boundary else _DUPLEX_CODEC_TOKENS_PER_CHUNK
             else:
-                max_tokens = _max_audio_tokens(int(token_ids.numel()))
+                tts_context = getattr(self, "_tts_config", None)
+                max_position_embeddings = int(
+                    getattr(tts_context, "max_position_embeddings", _TALKER_CONTEXT_LENGTH)
+                )
+                max_tokens = _max_audio_tokens(
+                    int(full_embeds.shape[0]),
+                    max_position_embeddings=max_position_embeddings,
+                )
                 min_tokens = self._codec_min_tokens
+            logger.info(
+                "MiniCPM-o Talker start: request_id=%s condition_len=%d "
+                "max_position_embeddings=%d max_codec_tokens=%d min_codec_tokens=%d native_duplex=%s",
+                request_id,
+                int(full_embeds.shape[0]),
+                int(max_position_embeddings),
+                int(max_tokens),
+                int(min_tokens),
+                native_duplex,
+            )
             state = {
                 "step": 0,
                 "max_tokens": max_tokens,
                 "min_tokens": min_tokens,
+                "emitted_codec_tokens": 0,
                 "finished": empty_condition,
             }
             request_states = getattr(self, "_request_audio_states", None)
@@ -525,7 +544,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             sampled_id = int(sampled.item())
             is_eos = sampled_id == self._num_audio_tokens - 1
             state["step"] = int(state.get("step", 0)) + 1
-            reached_limit = int(state["step"]) >= int(state.get("max_tokens", 2048))
+            reached_limit = int(state["step"]) >= int(state.get("max_tokens", _TALKER_CONTEXT_LENGTH))
             finished = is_eos or reached_limit
             state["finished"] = finished
             # MiniCPMTTS.generate_chunk consumes the boundary sample but
@@ -535,6 +554,7 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
                 delta = sampled.reshape(1, 1)
             else:
                 delta = empty_delta
+            state["emitted_codec_tokens"] = int(state.get("emitted_codec_tokens", 0)) + int(delta.numel())
             state["codes"] = codes
             info["audio_state"] = state
             info["audio_codes"] = {
@@ -543,6 +563,16 @@ class MiniCPMO45OmniTTSForConditionalGeneration(nn.Module, SupportsPP):
             }
             codec_deltas.append(delta)
             terminal_flags.append(torch.tensor(finished, dtype=torch.bool))
+            if finished:
+                logger.info(
+                    "MiniCPM-o Talker done: request_id=%s emitted_codec_tokens=%d "
+                    "sampled_steps=%d max_codec_tokens=%d stop_reason=%s",
+                    request_id,
+                    int(state["emitted_codec_tokens"]),
+                    int(state["step"]),
+                    int(state.get("max_tokens", _TALKER_CONTEXT_LENGTH)),
+                    "eos" if is_eos else "max_tokens",
+                )
             stop_rows.append(hidden.new_tensor([float("-inf"), 0.0] if finished else [0.0, float("-inf")]))
 
         self._batch_stop_logits = torch.stack(stop_rows, dim=0) if stop_rows else hidden.new_empty((0, 2))

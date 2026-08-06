@@ -11,6 +11,9 @@ from typing import Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from vllm.logger import init_logger
+
+logger = init_logger(__name__)
 
 _SILENCE_TOKEN = 4218
 
@@ -473,6 +476,23 @@ class BatchedToken2Wav(nn.Module):
             "speech": speech[..., -self.source_cache_len :].detach(),
         }
         emitted = speech if last_chunk else speech[..., : -self.source_cache_len]
+        logger.debug(
+            "MiniCPM-o Token2Wav decode: batch_size=%d input_codec_frames=%d "
+            "last_chunk=%s old_mel_frames=%d chunk_mel_frames=%d "
+            "old_speech_cache_samples=%d raw_speech_samples=%d emitted_samples=%d "
+            "withheld_samples=%d source_cache_samples=%d next_speech_cache_samples=%d",
+            batch_size,
+            int(tokens.shape[1]),
+            last_chunk,
+            int(old_mel.shape[-1]),
+            int(chunk_mel.shape[-1]),
+            int(old_speech.shape[-1]),
+            int(speech.shape[-1]),
+            int(emitted.shape[-1]),
+            int(speech.shape[-1] - emitted.shape[-1]),
+            int(self.source_cache_len),
+            int(next_hift["speech"].shape[-1]),
+        )
         next_states = [
             BatchedToken2WavState(
                 flow_cache=new_flow[row],

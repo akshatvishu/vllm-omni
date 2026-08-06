@@ -2705,6 +2705,7 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
         # when the pipeline produced no audio for this request.
         mm_output = getattr(final_res.outputs[0], "multimodal_output", None) or {}
         audio_data = mm_output.get("audio")
+        audio_chunk_count = len(audio_data) if isinstance(audio_data, list) else int(audio_data is not None)
         if isinstance(audio_data, list):
             if not audio_data:
                 audio_tensor = None
@@ -2751,6 +2752,15 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
             sample_rate = int(sr_raw.item())
         else:
             sample_rate = int(sr_raw)
+
+        logger.info(
+            "Audio response assembled: request_id=%s stream=%s chunks=%d samples=%d sample_rate=%d",
+            getattr(omni_outputs, "request_id", ""),
+            stream,
+            audio_chunk_count,
+            int(audio_tensor.size),
+            sample_rate,
+        )
 
         audio_format = self._resolve_audio_format(request)
         if isinstance(audio_format, ErrorResponse):

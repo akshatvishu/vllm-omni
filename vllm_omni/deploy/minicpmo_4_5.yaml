@@ -54,7 +54,7 @@ stages:
       top_p: 1.0
       top_k: -1
       min_tokens: 50
-      max_tokens: 2048
+      max_tokens: 4096
       stop_token_ids: [1]
       seed: 42
       detokenize: false

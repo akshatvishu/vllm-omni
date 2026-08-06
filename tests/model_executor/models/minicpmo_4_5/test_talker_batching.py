@@ -74,14 +74,19 @@ def _routed(output, index: int):
 
 
 @pytest.mark.parametrize(
-    ("condition_tokens", "expected"),
-    [(3, 64), (100, 1000), (1000, 2048)],
+    ("condition_len", "expected"),
+    [(3, 4093), (100, 3996), (1000, 3096)],
 )
-def test_audio_token_limit_scales_with_condition_length(
-    condition_tokens: int,
+def test_audio_token_limit_uses_talker_context_headroom(
+    condition_len: int,
     expected: int,
 ) -> None:
-    assert _max_audio_tokens(condition_tokens) == expected
+    assert _max_audio_tokens(condition_len) == expected
+
+
+def test_audio_token_limit_rejects_a_full_talker_context() -> None:
+    with pytest.raises(ValueError, match="leaves no room"):
+        _max_audio_tokens(4096)
 
 
 def test_weight_norm_restore_matches_checkpoint_parametrization_in_bfloat16() -> None:
@@ -374,7 +379,7 @@ def test_chunked_prefill_tail_aligns_condition_with_prompt_length(mocker) -> Non
     assert torch.equal(embeds, condition)
     state = talker._request_audio_states["req-chunked-prefill"]
     assert state["min_tokens"] == 50
-    assert state["max_tokens"] == 64
+    assert state["max_tokens"] == 4028
 
 
 @pytest.mark.parametrize(

@@ -271,8 +271,15 @@ def tts2code2wav_async_chunk(
             "segment_text_recorded": False,
             "left_context": [],
             "codec_end": 0,
+            "chunks_emitted": 0,
+            "new_codec_frames": 0,
+            "payload_frames": 0,
+            "left_context_frames": 0,
         }
         container[_MINICPMO45_ASYNC_STATE] = state
+
+    for key in ("chunks_emitted", "new_codec_frames", "payload_frames", "left_context_frames"):
+        state.setdefault(key, 0)
 
     pending = state["pending"]
     pending.extend(_extract_codec_delta(multimodal_output, request_id))
@@ -320,6 +327,10 @@ def tts2code2wav_async_chunk(
         output_codes = []
     state["codec_end"] = codec_end
     code_flat_numel = len(output_codes)
+    state["chunks_emitted"] = int(state["chunks_emitted"]) + 1
+    state["new_codec_frames"] = int(state["new_codec_frames"]) + new_token_count
+    state["payload_frames"] = int(state["payload_frames"]) + code_flat_numel
+    state["left_context_frames"] = int(state["left_context_frames"]) + len(context)
     if native_duplex and code_flat_numel > 0:
         segment_text_utf8 = torch.tensor(pending_text_utf8, dtype=torch.uint8)
         pending_text_utf8.clear()
@@ -337,6 +348,39 @@ def tts2code2wav_async_chunk(
 
     chunk_seq = int(record["chunk_seq"])
     record["chunk_seq"] = chunk_seq + 1
+    logger.debug(
+        "MiniCPM-o stage1->stage2 chunk: request_id=%s epoch=%d chunk_seq=%d "
+        "new_codec_frames=%d codec_range=[%d,%d) pending_frames=%d "
+        "payload_frames=%d left_context_frames=%d last_chunk=%s "
+        "tts_is_last_chunk=%s cumulative_new_codec_frames=%d cumulative_payload_frames=%d",
+        request_id,
+        int(record["cache_epoch"]),
+        chunk_seq,
+        new_token_count,
+        codec_start,
+        codec_end,
+        len(pending),
+        code_flat_numel,
+        len(context),
+        last_chunk,
+        flush_pending,
+        int(state["new_codec_frames"]),
+        int(state["payload_frames"]),
+    )
+    if last_chunk:
+        logger.info(
+            "MiniCPM-o stage1->stage2 complete: request_id=%s epoch=%d chunks=%d "
+            "new_codec_frames=%d payload_frames=%d left_context_frames=%d "
+            "codec_end=%d pending_frames=%d",
+            request_id,
+            int(record["cache_epoch"]),
+            int(state["chunks_emitted"]),
+            int(state["new_codec_frames"]),
+            int(state["payload_frames"]),
+            int(state["left_context_frames"]),
+            int(state["codec_end"]),
+            len(pending),
+        )
     ref_audio = None
     ref_audio_sr = None
     if int(record["cache_epoch"]) == 0 and chunk_seq == 0:
