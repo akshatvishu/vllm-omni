@@ -987,15 +987,41 @@ def llm2tts(
             model_intermediate_buffer.setdefault("meta", {})["turn_end"] = True
 
         if handoff_ids is not None and handoff_hidden is not None:
-            condition_suffix_length = 1 if is_native_duplex_handoff else 2
-            condition_length = max(len(handoff_ids), len(handoff_hidden)) + condition_suffix_length
-            scheduler_prompt_token_ids = [0] * condition_length
+            handoff_length = max(len(handoff_ids), len(handoff_hidden))
             handoff_meta = model_intermediate_buffer.setdefault("meta", {})
-            handoff_meta["next_stage_prompt_len"] = condition_length
-            # Native duplex resumes one Talker request within a turn, but a new
-            # assistant turn must discard the previous turn's prompt and KV.
-            if not is_native_duplex_handoff or native_turn_start:
+            if is_native_duplex_handoff:
+                condition_length = handoff_length + 1
+                # Native duplex resumes one Talker request within a turn, but a
+                # new assistant turn must discard the previous prompt and KV.
+                if native_turn_start:
+                    handoff_meta["replace_streaming_prompt"] = True
+                condition_count = 1
+                total_condition_length = condition_length
+            else:
+                # HF streaming_generate sends ten text tokens per condition.
+                # Every condition has audio BOS; only the final condition also
+                # has text EOS. Later conditions are injected by Talker state.
+                condition_count = max(1, (handoff_length + 9) // 10)
+                condition_length = min(handoff_length, 10) + 1
+                if handoff_length <= 10:
+                    condition_length += 1
+                total_condition_length = handoff_length + condition_count + 1
                 handoff_meta["replace_streaming_prompt"] = True
+            scheduler_prompt_token_ids = [0] * condition_length
+            handoff_meta["next_stage_prompt_len"] = condition_length
+            logger.info(
+                "[MiniCPM-o][Stage0->Stage1][handoff] request_id=%s mode=%s "
+                "handoff_tokens=%s hidden_rows=%s condition_count=%s initial_prompt_len=%s "
+                "total_condition_tokens=%s replace_streaming_prompt=%s",
+                llm_output.request_id,
+                "native_duplex" if is_native_duplex_handoff else "full_attention",
+                handoff_length,
+                int(tts_hidden_slice.shape[0]) if isinstance(tts_hidden_slice, torch.Tensor) else 0,
+                condition_count,
+                condition_length,
+                total_condition_length,
+                bool(handoff_meta.get("replace_streaming_prompt", False)),
+            )
         else:
             scheduler_prompt_token_ids = _build_tts_scheduler_prompt_token_ids(
                 tts_token_ids_slice,

@@ -8,7 +8,7 @@ Covers ``vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.llm2t
   - latent fallback to ``hidden_states`` when ``multimodal_output`` is empty
   - both inputs missing -> raises
   - structured model_intermediate_buffer carries the thinker ids and text
-  - scheduler prompt tokens follow the selected TTS region or output tokens
+  - scheduler prompt tokens reserve only the first Talker condition chunk
   - MiniCPM-o 4.5 TTS region detection on 151703 / 151704 tokens
   - plain chat without TTS markers conditions on the generated assistant span
   - prompt arg is normalized to a list and ``multi_modal_data`` is gated by
@@ -171,6 +171,20 @@ class TestBasicShape:
         )
         assert out[0]["prompt_token_ids"] == [0, 0, 0]
         assert "stream_output" not in out[0]["model_intermediate_buffer"]
+
+    def test_long_handoff_reserves_first_talker_chunk_and_resets_once(self) -> None:
+        output_ids = list(range(23))
+        hidden = torch.zeros((1 + len(output_ids), _HIDDEN_DIM))
+
+        out = llm2tts(
+            [_make_thinker_output(prompt_token_ids=[10], output_token_ids=output_ids, hidden_states=hidden)],
+            prompt=None,
+        )[0]
+
+        assert len(out["prompt_token_ids"]) == 11
+        meta = out["model_intermediate_buffer"]["meta"]
+        assert meta["next_stage_prompt_len"] == 11
+        assert meta["replace_streaming_prompt"] is True
 
     def test_model_intermediate_buffer_carries_thinker_outputs(self) -> None:
         prompt_ids = [10, 11, 12]

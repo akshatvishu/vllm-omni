@@ -47,13 +47,12 @@ stages:
     devices: "0"
     output_connectors:
       to_stage_2: connector_of_shared_memory
-    # Codec sampling comes from the checkpoint's tts_config. These parameters
-    # govern only vLLM's binary continue/stop token.
+    # Codec sampling is owned by the Talker. These parameters govern only
+    # vLLM's binary continue/stop token.
     default_sampling_params:
       temperature: 0.0
       top_p: 1.0
       top_k: -1
-      min_tokens: 50
       max_tokens: 4096
       stop_token_ids: [1]
       seed: 42
