@@ -41,7 +41,7 @@ def pipeline() -> pipeline_omnivoice.OmniVoicePipeline:
     model = pipeline_omnivoice.OmniVoicePipeline.__new__(pipeline_omnivoice.OmniVoicePipeline)
     torch.nn.Module.__init__(model)
     model.device = torch.device("cpu")
-    model._load_asr_on_init = False
+    model._load_asr_on_startup = False
     model._asr_model_name = pipeline_omnivoice._ASR_MODEL_NAME
     model._asr_device = "cpu"
     model._asr_pipeline = None
@@ -156,13 +156,13 @@ def test_asr_device_placement_failure_includes_checkpoint_and_device(pipeline, m
     [
         ({}, (False, pipeline_omnivoice._ASR_MODEL_NAME, None)),
         (
-            {"omnivoice_asr": {"load_asr": False, "asr_device": None}},
+            {"omnivoice_asr": {"load_asr_on_startup": False, "asr_device": None}},
             (False, pipeline_omnivoice._ASR_MODEL_NAME, None),
         ),
         (
             {
                 "omnivoice_asr": {
-                    "load_asr": True,
+                    "load_asr_on_startup": True,
                     "asr_model_name": "local/whisper",
                     "asr_device": "cuda:1",
                 }
@@ -178,7 +178,7 @@ def test_asr_config_defaults_and_values(additional_config, expected):
 @pytest.mark.parametrize(
     "additional_config",
     [
-        {"omnivoice_asr": {"load_asr": "true"}},
+        {"omnivoice_asr": {"load_asr_on_startup": "true"}},
         {"omnivoice_asr": {"asr_model_name": "  "}},
         {"omnivoice_asr": {"asr_device": ""}},
         {"omnivoice_asr": []},
@@ -220,14 +220,14 @@ def test_eager_asr_is_loaded_during_initialization(monkeypatch):
     model._initialize_asr(
         {
             "omnivoice_asr": {
-                "load_asr": True,
+                "load_asr_on_startup": True,
                 "asr_model_name": "local/whisper",
                 "asr_device": "cpu",
             }
         }
     )
 
-    assert model._load_asr_on_init is True
+    assert model._load_asr_on_startup is True
     assert load_calls == [("local/whisper", "cpu")]
 
 
@@ -241,9 +241,9 @@ def test_lazy_asr_is_not_loaded_during_initialization(monkeypatch):
 
     monkeypatch.setattr(pipeline_omnivoice.OmniVoicePipeline, "_load_asr_pipeline", load_asr)
 
-    model._initialize_asr({"omnivoice_asr": {"load_asr": False}})
+    model._initialize_asr({"omnivoice_asr": {"load_asr_on_startup": False}})
 
-    assert model._load_asr_on_init is False
+    assert model._load_asr_on_startup is False
     assert load_calls == []
 
 

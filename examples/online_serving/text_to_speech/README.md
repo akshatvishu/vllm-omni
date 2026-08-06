@@ -393,7 +393,7 @@ OmniVoice creates speech in more than 600 languages. It supports text-to-speech 
 ```bash
 huggingface-cli download k2-fsa/OmniVoice
 ```
-Voice cloning needs `transformers>=5.3.0`. The default OmniVoice deploy config loads `openai/whisper-large-v3-turbo` lazily on the worker device when `ref_text` is missing. Set `load_asr: true` in `additional_config.omnivoice_asr` to load it during worker startup. Set `asr_device: "cuda:0"` or `asr_device: "cpu"` in the same block to override the worker device.
+Voice cloning needs `transformers>=5.3.0`. The default OmniVoice deploy config loads `openai/whisper-large-v3-turbo` lazily on the worker device when `ref_text` is missing. Set `load_asr_on_startup: true` in `additional_config.omnivoice_asr` to load it during worker startup. Set `asr_device: "cuda:0"` or `asr_device: "cpu"` in the same block to override the worker device.
 
 ### Launch
 ```bash
@@ -435,7 +435,7 @@ The client supports `--api-base`, `--model`, `--text`, `--response-format`, `--l
 
 ### Reference audio and output processing
 
-The explicit `--ref-text` path avoids Whisper. With the default config, missing `ref_text` loads `openai/whisper-large-v3-turbo` on the worker device during the first request that needs transcription. Set `load_asr: true` in `additional_config.omnivoice_asr` to move that load to worker startup. Set `asr_device` in the same block to choose another GPU or the CPU.
+The explicit `--ref-text` path avoids Whisper. With the default config, missing `ref_text` loads `openai/whisper-large-v3-turbo` on the worker device during the first request that needs transcription. Set `load_asr_on_startup: true` in `additional_config.omnivoice_asr` to move that load to worker startup. Set `asr_device` in the same block to choose another GPU or the CPU.
 
 OmniVoice prepares the reference clip before it transcribes the clip or builds the voice cloning input. It performs these steps:
 

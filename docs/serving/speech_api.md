@@ -728,7 +728,7 @@ Fish Speech uses `ref_audio` and `ref_text` for voice cloning (no `task_type` ne
 |-------|-------------|
 | `k2-fsa/OmniVoice` | OmniVoice generates mono speech at 24 kHz. It supports text-to-speech without a reference clip, voice cloning with `ref_audio` and optional `ref_text`, and voice design. It has no built-in voice presets. |
 
-For voice cloning, send `ref_audio`. If `ref_text` is missing or blank, the default deploy config leaves Whisper unloaded until the first such request, then loads `openai/whisper-large-v3-turbo` on the worker device and transcribes the clip. Set `additional_config.omnivoice_asr.load_asr` to `true` to load it during worker startup. Set `additional_config.omnivoice_asr.asr_device` to `cuda:0` or `cpu` to override the worker device. Sending `ref_text` avoids ASR and uses the supplied transcript.
+For voice cloning, send `ref_audio`. If `ref_text` is missing or blank, the default deploy config leaves Whisper unloaded until the first such request, then loads `openai/whisper-large-v3-turbo` on the worker device and transcribes the clip. Set `additional_config.omnivoice_asr.load_asr_on_startup` to `true` to load it during worker startup. Set `additional_config.omnivoice_asr.asr_device` to `cuda:0` or `cpu` to override the worker device. Sending `ref_text` avoids ASR and uses the supplied transcript.
 
 OmniVoice prepares the reference clip before it builds the voice cloning input. It performs these steps:
 

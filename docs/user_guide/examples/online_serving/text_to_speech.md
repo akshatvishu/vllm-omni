@@ -281,7 +281,7 @@ OmniVoice creates speech in more than 600 languages. It supports text-to-speech 
 ```bash
 huggingface-cli download k2-fsa/OmniVoice
 ```
-Voice cloning needs `transformers>=5.3.0`. When `ref_text` is omitted, OmniVoice loads `openai/whisper-large-v3-turbo` on the worker device to transcribe the reference audio. Set `additional_config.omnivoice_asr.asr_device` to use another GPU or the CPU.
+Voice cloning needs `transformers>=5.3.0`. When `ref_text` is omitted, OmniVoice loads `openai/whisper-large-v3-turbo` on the worker device to transcribe the reference audio. Set `additional_config.omnivoice_asr.load_asr_on_startup` to `true` to load Whisper during worker startup, or set `additional_config.omnivoice_asr.asr_device` to use another GPU or the CPU.
 
 ### Launch
 ```bash
@@ -304,7 +304,10 @@ The client supports `--api-base`, `--model`, `--text`, `--response-format`,
 
 ### Notes
 - The explicit `--ref-text` path is faster because it does not load Whisper.
-- The first request with reference audio and no reference text loads `openai/whisper-large-v3-turbo` on the worker device, which adds latency and device memory use. Generated audio is mono at 24 kHz.
+- By default, the first request with reference audio and no reference text loads
+  `openai/whisper-large-v3-turbo` on the worker device, which adds latency and
+  device memory use. Set `additional_config.omnivoice_asr.load_asr_on_startup` to
+  `true` to move that load to worker startup. Generated audio is mono at 24 kHz.
 
 ### Reference audio and output processing
 

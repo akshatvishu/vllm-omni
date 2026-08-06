@@ -70,9 +70,9 @@ def _parse_asr_config(additional_config: Mapping[str, object] | None) -> tuple[b
     if not isinstance(raw_config, Mapping):
         raise TypeError(f"additional_config['omnivoice_asr'] must be a mapping, got {type(raw_config)!r}")
 
-    load_asr = raw_config.get("load_asr", False)
-    if not isinstance(load_asr, bool):
-        raise TypeError("additional_config['omnivoice_asr']['load_asr'] must be a bool")
+    load_asr_on_startup = raw_config.get("load_asr_on_startup", False)
+    if not isinstance(load_asr_on_startup, bool):
+        raise TypeError("additional_config['omnivoice_asr']['load_asr_on_startup'] must be a bool")
 
     model_name = raw_config.get("asr_model_name", _ASR_MODEL_NAME)
     if not isinstance(model_name, str) or not model_name.strip():
@@ -82,7 +82,7 @@ def _parse_asr_config(additional_config: Mapping[str, object] | None) -> tuple[b
     if asr_device is not None and (not isinstance(asr_device, str) or not asr_device.strip()):
         raise ValueError("additional_config['omnivoice_asr']['asr_device'] must be a non-empty string")
 
-    return load_asr, model_name.strip(), asr_device.strip() if asr_device is not None else None
+    return load_asr_on_startup, model_name.strip(), asr_device.strip() if asr_device is not None else None
 
 
 def get_omnivoice_post_process_func(od_config: OmniDiffusionConfig):
@@ -230,9 +230,9 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
         self.sample_rate = self.config.sample_rate
 
     def _initialize_asr(self, additional_config: Mapping[str, object] | None) -> None:
-        self._load_asr_on_init, self._asr_model_name, self._asr_device = _parse_asr_config(additional_config)
+        self._load_asr_on_startup, self._asr_model_name, self._asr_device = _parse_asr_config(additional_config)
         self._asr_pipeline = None
-        if self._load_asr_on_init:
+        if self._load_asr_on_startup:
             self._load_asr_pipeline()
 
     def _load_asr_pipeline(self):

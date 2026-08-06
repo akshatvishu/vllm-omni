@@ -218,7 +218,7 @@ python examples/offline_inference/text_to_speech/omnivoice/end2end.py \
     --ref-text  "This is the reference transcription."
 ```
 
-If `--ref-text` is omitted, OmniVoice loads `openai/whisper-large-v3-turbo` on the worker device and transcribes the reference audio after it prepares the waveform. The first request downloads and loads Whisper, so it takes longer and uses more device memory. Set `additional_config.omnivoice_asr.asr_device` to use another GPU or the CPU.
+If `--ref-text` is omitted, OmniVoice loads `openai/whisper-large-v3-turbo` on the worker device and transcribes the reference audio after it prepares the waveform. The first request downloads and loads Whisper, so it takes longer and uses more device memory. Set `additional_config.omnivoice_asr.load_asr_on_startup` to `true` to load Whisper during worker startup, or set `additional_config.omnivoice_asr.asr_device` to use another GPU or the CPU.
 
 ```bash
 python examples/offline_inference/text_to_speech/omnivoice/end2end.py \
@@ -261,8 +261,10 @@ python examples/offline_inference/text_to_speech/omnivoice/end2end.py \
 ### Notes
 - Stage 0 (Generator): Qwen3-0.6B with 32-step iterative unmasking.
 - Stage 1 (Decoder): HiggsAudioV2 RVQ + DAC at 24 kHz.
-- The first request with reference audio and no `--ref-text` downloads and loads
-  `openai/whisper-large-v3-turbo`, so it has extra latency and GPU memory use.
+- By default, the first request with reference audio and no `--ref-text` downloads
+  and loads `openai/whisper-large-v3-turbo`, so it has extra latency and GPU
+  memory use. Set `additional_config.omnivoice_asr.load_asr_on_startup` to `true`
+  to move that load to worker startup.
 - Generated audio remains mono at 24 kHz.
 
 ---
