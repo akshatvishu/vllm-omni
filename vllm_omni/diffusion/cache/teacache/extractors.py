@@ -416,7 +416,8 @@ def extract_zimage_context(
             "patch_size": patch_size,
             "f_patch_size": f_patch_size,
         },
-=======
+    )
+
     # TODO (Alex) - Refactor TeaCache extractors to more tightly integrate with .forward
     from diffusers.models.modeling_outputs import Transformer2DModelOutput
 
@@ -491,7 +492,6 @@ def extract_zimage_context(
         temb=temb,
         run_transformer_blocks=run_transformer_blocks,
         postprocess=postprocess,
->>>>>>> 250ba628 (migrate zimage)
     )
 
 
@@ -503,7 +503,6 @@ def extract_zimage_context(
 # on the transformer module and multiple pipelines can share the same transformer.
 EXTRACTOR_REGISTRY: dict[str, Callable] = {
     "Bagel": extract_bagel_context,
-    "StableAudioDiTModel": extract_stable_audio_context,
     "LongCatImageTransformer2DModel": extract_longcat_context,
     # Future models:
     # "CogVideoXTransformer3DModel": extract_cogvideox_context,

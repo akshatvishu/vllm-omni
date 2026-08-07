@@ -127,6 +127,7 @@ def _make_native_tiny_model(
     monkeypatch.setattr(hunyuan, "get_pp_group", lambda: FakePPGroup())
     monkeypatch.setattr(hunyuan, "get_sequence_parallel_rank", lambda: 0)
     monkeypatch.setattr(hunyuan, "get_sequence_parallel_world_size", lambda: 1)
+    monkeypatch.setattr(hunyuan, "get_allgather_parallel_world_size", lambda: 1)
     monkeypatch.setattr(hunyuan, "get_tensor_model_parallel_world_size", lambda: 1)
     monkeypatch.setattr(hunyuan, "make_layers", native_make_layers)
     monkeypatch.setattr(hunyuan, "VocabParallelEmbedding", fake_embedding)
