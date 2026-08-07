@@ -3,6 +3,7 @@
 """Patch ``initialize_model`` to replace VAE GroupNorm with AITER GroupNorm on ROCm."""
 
 import torch.nn as nn
+from vllm import envs
 from vllm.logger import init_logger
 
 import vllm_omni.diffusion.registry as _registry_mod
@@ -41,7 +42,7 @@ def _replace_groupnorm_with_aiter(vae: nn.Module) -> bool:
 def _patched_initialize_model(od_config):
     model = _original_initialize_model(od_config)
 
-    if hasattr(model, "vae"):
+    if hasattr(model, "vae") and envs.VLLM_ROCM_USE_AITER:
         try:
             from vllm._aiter_ops import is_aiter_found_and_supported
 
