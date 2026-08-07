@@ -8,6 +8,7 @@ import pathlib
 
 import pytest
 
+from vllm_omni.diffusion.models.hunyuan_image3 import hunyuan_image3_tokenizer
 from vllm_omni.diffusion.models.hunyuan_image3.prompt_utils import (
     _TASK_PRESETS,
     HUNYUAN_IMAGE3_SPECIAL_TOKEN_IDS,
@@ -53,6 +54,33 @@ def test_available_tasks_covers_all_modalities():
 
 def test_available_bot_tasks_covers_all_modes():
     assert set(available_bot_tasks()) == {None, "think", "recaption", "think_recaption", "vanilla"}
+
+
+def test_tokenizer_wrapper_trusts_remote_code(monkeypatch: pytest.MonkeyPatch):
+    calls = {}
+
+    class StubTokenizer:
+        bos_token_id = 1
+        eos_token_id = 2
+        pad_token_id = 3
+        added_tokens_encoder = {}
+
+        @staticmethod
+        def convert_tokens_to_ids(token: str) -> int:
+            return len(token)
+
+    def fake_from_pretrained(model: str, **kwargs):
+        calls.update(model=model, kwargs=kwargs)
+        return StubTokenizer()
+
+    monkeypatch.setattr(hunyuan_image3_tokenizer.AutoTokenizer, "from_pretrained", fake_from_pretrained)
+
+    hunyuan_image3_tokenizer.TokenizerWrapper("tencent/HunyuanImage-3.0-Instruct")
+
+    assert calls == {
+        "model": "tencent/HunyuanImage-3.0-Instruct",
+        "kwargs": {"trust_remote_code": True},
+    }
 
 
 def test_legacy_task_presets_still_available():
