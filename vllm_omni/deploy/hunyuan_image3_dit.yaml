@@ -4,6 +4,7 @@
 # diffusion stage with stage_id 0 and does not depend on the AR stage.
 pipeline: hunyuan_image3_dit
 async_chunk: false
+trust_remote_code: true
 
 stages:
   - stage_id: 0
