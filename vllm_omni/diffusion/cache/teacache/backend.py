@@ -1,12 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-"""
-TeaCache backend implementation.
-
-This module provides the TeaCache backend that implements the CacheBackend
-interface using the hooks-based TeaCache system.
-"""
+"""TeaCache backend implementation."""
 
 from typing import Any
 
@@ -16,7 +11,8 @@ from vllm.logger import init_logger
 from vllm_omni.diffusion.cache.base import CacheBackend
 from vllm_omni.diffusion.cache.teacache.config import TeaCacheConfig
 from vllm_omni.diffusion.cache.teacache.hook import TeaCacheHook, apply_teacache_hook
-from vllm_omni.diffusion.cache.teacache.protocol import SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.interface import supports_teacache
+from vllm_omni.diffusion.cache.teacache.runtime import TeaCacheRuntime
 from vllm_omni.diffusion.data import DiffusionCacheConfig
 
 logger = init_logger(__name__)
@@ -25,31 +21,14 @@ logger = init_logger(__name__)
 def _resolve_coefficients(
     transformer: nn.Module,
     config: DiffusionCacheConfig,
-) -> list[float]:
-    """User override, otherwise model provides its own."""
-    if not isinstance(transformer, SupportsTeaCache):
-        raise TypeError(f"{type(transformer).__name__} does not implement SupportsTeaCache")
+) -> tuple[float, ...]:
+    """Resolve user coefficients or the model's coefficients."""
     if config.coefficients is not None:
-        return config.coefficients
-    return transformer.get_teacache_coefficients()
-
-
-def enable_hunyuan_image3_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
-    """
-    Enable TeaCache for HunyuanImage3 model.
-
-    HunyuanImage3 uses a GPT-based architecture with KV cache, which is incompatible
-    with the standard hook-based TeaCache approach. Instead, we store the TeaCacheConfig
-    on the pipeline so the denoising loop can implement caching directly.
-    """
-    teacache_config = TeaCacheConfig(
-        transformer_type="HunyuanImage3Pipeline",
-        rel_l1_thresh=config.rel_l1_thresh,
-        coefficients=config.coefficients,
-    )
-    pipeline._tea_cache_config = teacache_config
-
-    logger.info(f"TeaCache enabled for HunyuanImage3 with rel_l1_thresh={teacache_config.rel_l1_thresh}")
+        return tuple(float(coefficient) for coefficient in config.coefficients)
+    getter = getattr(transformer, "get_teacache_coefficients", None)
+    if not callable(getter):
+        raise TypeError(f"{type(transformer).__name__} does not implement SupportsTeaCache")
+    return tuple(float(coefficient) for coefficient in getter())
 
 
 def enable_bagel_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
@@ -85,96 +64,63 @@ def enable_sensenova_u1_teacache(pipeline: Any, config: DiffusionCacheConfig) ->
 
 CUSTOM_TEACACHE_ENABLERS = {
     "BagelPipeline": enable_bagel_teacache,
-    "HunyuanImage3Pipeline": enable_hunyuan_image3_teacache,
     "SenseNovaU1Pipeline": enable_sensenova_u1_teacache,
 }
 
 
 class TeaCacheBackend(CacheBackend):
-    """
-    TeaCache implementation using hooks.
+    """Install native TeaCache runtimes, with legacy hook fallback."""
 
-    TeaCache (Timestep Embedding Aware Cache) is an adaptive caching technique
-    that speeds up diffusion inference by reusing transformer block computations
-    when consecutive timestep embeddings are similar.
-
-    The backend applies TeaCache hooks to the transformer which intercept the
-    forward pass and implement the caching logic transparently.
-
-    Example:
-        >>> from vllm_omni.diffusion.data import DiffusionCacheConfig
-        >>> backend = TeaCacheBackend(DiffusionCacheConfig(rel_l1_thresh=0.2))
-        >>> backend.enable(pipeline)
-        >>> # Generate with cache enabled
-        >>> backend.refresh(pipeline, num_inference_steps=50)  # Refresh before each generation
-        >>> # Access config attributes: backend.config.rel_l1_thresh
-    """
+    def __init__(self, config: DiffusionCacheConfig) -> None:
+        super().__init__(config)
+        self._installed_runtimes: list[TeaCacheRuntime] = []
 
     def enable(self, pipeline: Any) -> None:
-        """
-        Enable TeaCache on transformer using hooks.
-
-        This creates a TeaCacheConfig from the backend's DiffusionCacheConfig
-        and applies the TeaCache hook to the transformer.
-
-        Args:
-            pipeline: Diffusion pipeline instance. Extracts transformer and transformer_type:
-                     - transformer: pipeline.transformer
-                     - transformer_type: pipeline.transformer.__class__.__name__
-        """
-        # Helper to get pipeline class name
+        self._installed_runtimes.clear()
         pipeline_type = pipeline.__class__.__name__
+        transformer = getattr(pipeline, "transformer", None)
 
-        # Check for pipeline-level custom enablers
         if pipeline_type in CUSTOM_TEACACHE_ENABLERS:
-            logger.info(f"Using custom TeaCache enabler for model: {pipeline_type}")
+            logger.info(f"Using legacy custom TeaCache enabler for model: {pipeline_type}")
             CUSTOM_TEACACHE_ENABLERS[pipeline_type](pipeline, self.config)
+        elif transformer is None:
+            raise TypeError("Pipeline does not expose a transformer for TeaCache")
+        elif supports_teacache(transformer):
+            teacache_config = TeaCacheConfig(
+                transformer_type=transformer.tea_cache_model_key,
+                rel_l1_thresh=self.config.rel_l1_thresh,
+                coefficients=_resolve_coefficients(transformer, self.config),
+            )
+            runtime = TeaCacheRuntime(teacache_config)
+            transformer.tea_cache_executor = runtime
+            self._installed_runtimes.append(runtime)
+            logger.info(
+                f"TeaCache applied with rel_l1_thresh={teacache_config.rel_l1_thresh}, "
+                f"transformer_class={teacache_config.transformer_type}"
+            )
         else:
-            transformer = pipeline.transformer
             transformer_type = transformer.__class__.__name__
-
             teacache_config = TeaCacheConfig(
                 transformer_type=transformer_type,
                 rel_l1_thresh=self.config.rel_l1_thresh,
                 coefficients=_resolve_coefficients(transformer, self.config),
             )
-
-            # Apply hook to transformer
             apply_teacache_hook(transformer, teacache_config)
-
             logger.info(
-                f"TeaCache applied with rel_l1_thresh={teacache_config.rel_l1_thresh}, "
+                f"Legacy TeaCache hook applied with rel_l1_thresh={teacache_config.rel_l1_thresh}, "
                 f"transformer_class={teacache_config.transformer_type}"
             )
 
-        # Mark as enabled
         self.enabled = True
 
     def refresh(self, pipeline: Any, num_inference_steps: int, verbose: bool = True) -> None:
-        """
-        Refresh TeaCache state for new generation.
-
-        Clears all cached residuals and resets counters/accumulators.
-        Should be called before each generation to ensure clean state.
-
-        Args:
-            pipeline: Diffusion pipeline instance. Extracts transformer via pipeline.transformer.
-            num_inference_steps: Number of inference steps for the current generation.
-                                Currently not used by TeaCache but accepted for interface consistency.
-            verbose: Whether to log refresh operations (default: True)
-        """
-        # HunyuanImage3: tea cache state is managed inside the denoising loop,
-        # so refresh is a no-op (state is re-initialized every __call__).
-        if (
-            hasattr(pipeline, "_tea_cache_config")
-            and isinstance(pipeline._tea_cache_config, TeaCacheConfig)
-            and pipeline.__class__.__name__ == "HunyuanImage3Pipeline"
-        ):
+        if self._installed_runtimes:
+            for runtime in self._installed_runtimes:
+                runtime.reset()
             if verbose:
-                logger.debug(f"TeaCache state refreshed for HunyuanImage3 (num_inference_steps={num_inference_steps})")
+                logger.debug(f"TeaCache state refreshed (num_inference_steps={num_inference_steps})")
             return
 
-        # Extract transformer from pipeline
         transformer = pipeline.transformer
         if not hasattr(transformer, "_hook_registry") and hasattr(pipeline, "denoising_transformer"):
             transformer = pipeline.denoising_transformer
@@ -185,9 +131,7 @@ class TeaCacheBackend(CacheBackend):
                 transformer._hook_registry.reset_hook(TeaCacheHook._HOOK_NAME)
                 if verbose:
                     logger.debug(f"TeaCache state refreshed (num_inference_steps={num_inference_steps})")
-            else:
-                if verbose:
-                    logger.warning("TeaCache hook not found, nothing to refresh")
-        else:
-            if verbose:
-                logger.warning("Transformer has no hook registry, TeaCache may not be applied")
+            elif verbose:
+                logger.warning("TeaCache hook not found, nothing to refresh")
+        elif verbose:
+            logger.warning("Transformer has no hook registry, TeaCache may not be applied")

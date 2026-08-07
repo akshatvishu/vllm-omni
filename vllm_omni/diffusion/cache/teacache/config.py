@@ -1,63 +1,36 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from __future__ import annotations
+
+import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-# Model-specific polynomial coefficients for rescaling L1 distances
-# These coefficients account for model-specific characteristics in how embeddings change
-# Source: TeaCache paper and ComfyUI-TeaCache empirical tuning
 
-# TODO - need to move hunyuan image out of this path and onto the hook approach
-_MODEL_COEFFICIENTS = {
-    "HunyuanImage3Pipeline": [
-        1.04117826e02,
-        -1.26848482e02,
-        5.68168652e01,
-        -1.04182570e01,
-        6.78098549e-01,
-    ],
-}
-
-
-@dataclass
+@dataclass(frozen=True)
 class TeaCacheConfig:
-    """
-    Configuration for TeaCache applied to transformer models.
+    """Configuration for a native TeaCache block executor."""
 
-    TeaCache (Timestep Embedding Aware Cache) is an adaptive caching technique that speeds up
-    diffusion model inference by reusing transformer block computations when consecutive
-    timestep embeddings are similar.
-
-    Args:
-        rel_l1_thresh: Threshold for accumulated relative L1 distance. When below threshold,
-            cached residual is reused. Values in [0.1, 0.3] work best:
-            - 0.2: ~1.5x speedup with minimal quality loss
-            - 0.4: ~1.8x speedup with slight quality loss
-            - 0.6: ~2.0x speedup with noticeable quality loss
-        coefficients: Polynomial coefficients for rescaling L1 distance. If None, uses
-            model-specific defaults based on transformer_type.
-        transformer_type: Transformer class name (e.g., "QwenImageTransformer2DModel").
-            Auto-detected from pipeline.transformer.__class__.__name__ in backend.
-            Defaults to "QwenImageTransformer2DModel".
-    """
-
+    coefficients: tuple[float, ...]
     rel_l1_thresh: float = 0.2
-    coefficients: list[float] | None = None
     transformer_type: str = "QwenImageTransformer2DModel"
 
-    def __post_init__(self) -> None:
-        """Validate and set default coefficients."""
-        if self.rel_l1_thresh <= 0:
-            raise ValueError(f"rel_l1_thresh must be positive, got {self.rel_l1_thresh}")
+    def __init__(
+        self,
+        coefficients: Sequence[float],
+        rel_l1_thresh: float = 0.2,
+        transformer_type: str = "QwenImageTransformer2DModel",
+    ) -> None:
+        if not math.isfinite(rel_l1_thresh) or rel_l1_thresh <= 0:
+            raise ValueError(f"rel_l1_thresh must be positive, got {rel_l1_thresh}")
 
-        if self.coefficients is None:
-            # Use model-specific coefficients, explicitly check if the type exists or not
-            if self.transformer_type not in _MODEL_COEFFICIENTS:
-                raise KeyError(
-                    f"Cannot find coefficients for {self.transformer_type}. "
-                    f"Supported: {list(_MODEL_COEFFICIENTS.keys())}"
-                )
-            self.coefficients = _MODEL_COEFFICIENTS[self.transformer_type]
+        coefficients_tuple = tuple(float(coefficient) for coefficient in coefficients)
+        if len(coefficients_tuple) != 5:
+            raise ValueError(f"coefficients must contain exactly 5 elements, got {len(coefficients_tuple)}")
+        if not all(math.isfinite(coefficient) for coefficient in coefficients_tuple):
+            raise ValueError("coefficients must contain only finite values")
 
-        if len(self.coefficients) != 5:
-            raise ValueError(f"coefficients must contain exactly 5 elements, got {len(self.coefficients)}")
+        object.__setattr__(self, "coefficients", coefficients_tuple)
+        object.__setattr__(self, "rel_l1_thresh", rel_l1_thresh)
+        object.__setattr__(self, "transformer_type", transformer_type)

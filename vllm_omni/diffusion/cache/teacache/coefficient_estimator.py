@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import os
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -10,6 +11,7 @@ from vllm.config import LoadConfig
 from vllm.transformers_utils.config import get_hf_file_to_dict
 
 from vllm_omni.diffusion.cache.teacache.extractors import get_extractor
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor
 from vllm_omni.diffusion.data import OmniDiffusionConfig, TransformerConfig
 from vllm_omni.diffusion.hooks import HookRegistry, ModelHook
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
@@ -138,6 +140,34 @@ _MODEL_ADAPTERS: dict[str, type] = {
     "Flux2": Flux2Adapter,
     "LongCat": LongCatAdapter,
 }
+
+
+class DataCollectionExecutor(TeaCacheBlockExecutor):
+    """Collect samples at the native TeaCache block boundary."""
+
+    def __init__(self) -> None:
+        self.current_trajectory: list[tuple[np.ndarray, np.ndarray]] = []
+
+    def run(
+        self,
+        *,
+        modulated_input: torch.Tensor,
+        residual_inputs: tuple[torch.Tensor, ...],
+        compute_fn: Callable[[], tuple[torch.Tensor, ...]],
+        do_true_cfg: bool = False,
+    ) -> tuple[torch.Tensor, ...]:
+        modulated_input_cpu = modulated_input.detach().float().cpu().numpy()
+        outputs = compute_fn()
+        model_output_cpu = outputs[0].detach().float().cpu().numpy()
+        self.current_trajectory.append((modulated_input_cpu, model_output_cpu))
+        return outputs
+
+    def start_collection(self) -> None:
+        self.current_trajectory = []
+
+    def stop_collection(self) -> list[tuple[np.ndarray, np.ndarray]]:
+        return list(self.current_trajectory)
+
 
 _EPSILON = 1e-6
 

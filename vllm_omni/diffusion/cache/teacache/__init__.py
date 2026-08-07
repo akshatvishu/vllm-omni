@@ -4,12 +4,9 @@
 """
 TeaCache: Timestep Embedding Aware Cache for diffusion model acceleration.
 
-TeaCache speeds up diffusion inference by reusing transformer block computations
-when consecutive timestep embeddings are similar.
-
-This implementation uses a hooks-based approach that requires zero changes to
-model code. Model developers only need to add an extractor function to support
-new models.
+TeaCache reuses transformer block residuals when consecutive timestep embeddings
+are similar. Migrated models expose a native block boundary; legacy models still
+use the hook integration until they are migrated.
 
 Usage:
     from vllm_omni import Omni
@@ -32,20 +29,26 @@ from vllm_omni.diffusion.cache.teacache.extractors import (
     register_extractor,
 )
 from vllm_omni.diffusion.cache.teacache.hook import TeaCacheHook, apply_teacache_hook
-from vllm_omni.diffusion.cache.teacache.protocol import (
-    ForwardState,
+from vllm_omni.diffusion.cache.teacache.interface import (
     SupportsTeaCache,
+    TeaCacheBlockExecutor,
+    supports_teacache,
 )
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState
+from vllm_omni.diffusion.cache.teacache.runtime import TeaCacheRuntime
 from vllm_omni.diffusion.cache.teacache.state import TeaCacheState
 
 __all__ = [
     "CacheContext",
     "SupportsTeaCache",
     "TeaCacheBackend",
+    "TeaCacheBlockExecutor",
     "TeaCacheConfig",
     "ForwardState",
     "TeaCacheHook",
     "TeaCacheState",
+    "TeaCacheRuntime",
     "apply_teacache_hook",
     "register_extractor",
+    "supports_teacache",
 ]

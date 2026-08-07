@@ -7,6 +7,7 @@
 - [Quick Start](#quick-start)
 - [Example Script](#example-script)
 - [Configuration Parameters](#configuration-parameters)
+- [Native Model Boundaries](#native-model-boundaries)
 - [Best Practices](#best-practices)
 - [Troubleshooting](#troubleshooting)
 - [Summary](#summary)
@@ -15,7 +16,9 @@
 
 ## Overview
 
-TeaCache accelerates diffusion model inference by caching transformer computations when consecutive timesteps are similar, providing **1.5x-2.0x speedup** with minimal quality loss. It dynamically decides whether to reuse cached outputs based on input similarity, making it ideal for production deployments where inference speed matters without sacrificing generation quality.
+TeaCache can skip a model-declared transformer block region when consecutive timestep embeddings are similar. It stores the detached residual from that region and applies it to the next boundary input. Speed, memory use, and output quality depend on the model, threshold, dtype, and boundary shape and must be measured for each model.
+
+Native integrations expose the block boundary through `TeaCacheBlockExecutor`. Models that have not migrated still use the legacy hook integration. Hunyuan Image 3 uses the native boundary around its decoder layers and measures the timestep embedding already passed to `patch_embed`.
 
 See supported models list in [Supported Models](../../diffusion_features.md#supported-models).
 
@@ -50,7 +53,7 @@ omni = Omni(
     model="Qwen/Qwen-Image",
     cache_backend="tea_cache",
     cache_config={
-        "rel_l1_thresh": 0.2,  # Controls speed/quality tradeoff
+        "rel_l1_thresh": 0.2,
     },
 )
 ```
@@ -119,26 +122,35 @@ In `OmniDiffusionConfig`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `rel_l1_thresh` | float | `0.2` | Similarity threshold for cache reuse. Lower values prioritize quality (less caching), higher values prioritize speed (more caching). Suggested range: 0.1-0.8 |
-| `coefficients` | list[float] \| None | `None` | Polynomial coefficients for rescaling L1 distance. Must contain exactly 5 elements if provided. If `None`, uses model-specific defaults based on transformer type. |
+| `rel_l1_thresh` | float | `0.2` | Threshold for accumulated rescaled distance. Select it from an uncached baseline and a cached comparison. |
+| `coefficients` | list[float] \| None | `None` | Polynomial coefficients for rescaling L1 distance. Must contain exactly 5 finite elements if provided. If `None`, the backend calls the selected transformer's coefficient getter. |
 
-Users can find the default model coefficients in [`vllm_omni/diffusion/cache/teacache/config.py`](https://github.com/vllm-project/vllm-omni/blob/main/vllm_omni/diffusion/cache/teacache/config.py), for example:
+When `coefficients` is omitted, the backend asks the selected transformer for its coefficients. A custom list must contain exactly five finite values:
 
 ```python
-_MODEL_COEFFICIENTS = {
-    # Qwen-Image transformer coefficients from ComfyUI-TeaCache
-    # Tuned specifically for Qwen's dual-stream transformer architecture
-    # Used for all Qwen-Image Family pipelines, in general
-    "QwenImageTransformer2DModel": [
-        -4.50000000e02,
-        2.80000000e02,
-        -4.50000000e01,
-        3.20000000e00,
-        -2.00000000e-02,
-    ],
-    ...
+cache_config={
+    "rel_l1_thresh": 0.2,
+    "coefficients": [a4, a3, a2, a1, a0],
 }
 ```
+
+---
+
+## Native Model Boundaries
+
+For Hunyuan Image 3, TeaCache is active only for later `gen_image` steps when `use_cache=False`. The first image step seeds the stable image-only shape and always executes the decoder layers. Text generation, unconditional CFG prefill, attention or hidden-state collection, `use_cache=True`, and a changed boundary shape also execute the layers.
+
+The Hunyuan implementation caches decoder-layer residuals, not final diffusion predictions. The backend refreshes this state before a new generation. The current Hunyuan coefficient tuple is a provisional model default; it is not evidence of image quality or speed.
+
+The CPU validation suite uses a tiny Hunyuan configuration and counting decoder layers:
+
+```bash
+./.venv/bin/pytest --run-level core_model -q \
+  tests/diffusion/cache/test_teacache_unit.py \
+  tests/diffusion/models/hunyuan_image3/test_hunyuan_image3_teacache.py
+```
+
+Use `--run-level advanced_model` only for real-weight Hunyuan quality and performance checks after the CPU boundary tests pass.
 
 ---
 
@@ -148,14 +160,14 @@ _MODEL_COEFFICIENTS = {
 
 **Good for:**
 
-- Production deployments requiring faster inference, tolerant of minimal quality loss
-- Scenarios where 1.5-2x speedup is valuable
-- Useful for single-card acceleration
+- Workloads where measured transformer-block reuse improves latency
+- Experiments that compare cached and uncached outputs with the same seed
+- Models with a stable, explicitly declared cache boundary
 
 **Not for:**
 
 - Maximum quality requirements where no degradation is acceptable
-- Very short inference runs (< 20 steps) where caching overhead may outweigh benefits
+- Very short inference runs where cache overhead has not been measured
 
 
 ---
@@ -175,20 +187,19 @@ cache_config={"rel_l1_thresh": 0.1}
 
 ### Common Issue 2: Limited Speedup
 
-**Symptoms**: Actual speedup is less than expected (< 1.3x)
+**Symptoms**: The measured latency improvement is smaller than expected
 
 **Solutions**:
 1. Increase the threshold to enable more aggressive caching:
    ```python
    cache_config={"rel_l1_thresh": 0.8}
    ```
-2. Ensure you're using sufficient inference steps (35+ recommended)
-3. Check that your model architecture is supported (see Supported Models section)
+2. Check that your model architecture is supported (see Supported Models section)
 
 ---
 
 
 ## Summary
 
-1. ✅ **Enable TeaCache** - Set `cache_backend="tea_cache"` to get 1.5x-2.0x speedup with optimized defaults
+1. ✅ **Enable TeaCache** - Set `cache_backend="tea_cache"` and validate the selected model's boundary
 2. ✅ **(Optional) Customize** - Adjust thresholds and polynomial coefficients for specific speed/quality trade-offs
