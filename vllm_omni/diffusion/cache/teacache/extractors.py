@@ -21,6 +21,8 @@ import torch
 import torch.nn as nn
 from vllm.logger import init_logger
 
+from vllm_omni.diffusion.forward_context import get_forward_context
+
 logger = init_logger(__name__)
 
 
@@ -237,20 +239,6 @@ def extract_bagel_context(
     )
 
 
-def extract_longcat_context(
-    module: nn.Module,  # LongCatImageTransformer2DModel
-    hidden_states,
-    timestep,
-    guidance,
-    encoder_hidden_states,
-    txt_ids,
-    img_ids,
-    **kwargs,
-) -> CacheContext:
-    """Extract the cache context for LongCat Image."""
-    pass
-
-
 def extract_zimage_context(
     module: nn.Module,
     x: list[torch.Tensor],
@@ -418,6 +406,17 @@ def extract_zimage_context(
         },
     )
 
+
+def extract_longcat_context(
+    module: nn.Module,
+    hidden_states: torch.Tensor,
+    timestep: torch.Tensor,
+    guidance: torch.Tensor,
+    encoder_hidden_states: torch.Tensor,
+    txt_ids: torch.Tensor,
+    img_ids: torch.Tensor,
+    **kwargs: Any,
+) -> CacheContext:
     # TODO (Alex) - Refactor TeaCache extractors to more tightly integrate with .forward
     from diffusers.models.modeling_outputs import Transformer2DModelOutput
 

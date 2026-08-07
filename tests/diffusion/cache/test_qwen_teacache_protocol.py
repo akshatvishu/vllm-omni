@@ -4,6 +4,7 @@
 import inspect
 from types import SimpleNamespace
 
+import pytest
 import torch
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 
@@ -12,6 +13,8 @@ from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import (
     QwenImageState,
     QwenImageTransformer2DModel,
 )
+
+pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
 
 def _make_state(return_dict: bool, *, zero_cond_t: bool = False) -> ForwardState[QwenImageState]:
