@@ -1746,8 +1746,9 @@ class HunyuanImage3Pipeline(
                 inputs_embeds = self.instantiate_timestep_tokens(inputs_embeds, timestep, gen_timestep_scatter_index)
             else:
                 t_emb = self.time_embed(timestep)
-                tea_cache_modulated_input = t_emb
                 image_emb, token_h, token_w = self.patch_embed(images, t_emb)
+                # TeaCache compares the timestep-modulated image input, not the standalone timestep embedding.
+                tea_cache_modulated_input = image_emb
                 timestep_emb = self.timestep_emb(timestep).reshape(bsz, -1, n_embd)
                 inputs_embeds = torch.cat([timestep_emb, image_emb], dim=1)
 

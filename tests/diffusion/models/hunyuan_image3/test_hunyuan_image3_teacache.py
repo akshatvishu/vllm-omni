@@ -326,10 +326,11 @@ def test_tiny_hunyuan_metric_miss_and_shape_change_recompute(monkeypatch: pytest
     assert output.last_hidden_state.shape == (1, 3, 4)
 
 
-def test_forward_call_passes_patch_timestep_embedding_to_teacache_metric(
+def test_forward_call_passes_time_conditioned_image_embedding_to_teacache_metric(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    metric = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+    timestep_embedding = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+    image_embedding = torch.tensor([[[5.0, 6.0, 7.0, 8.0]]])
     captured: dict[str, object] = {}
 
     class FakeOutputs:
@@ -348,8 +349,8 @@ def test_forward_call_passes_patch_timestep_embedding_to_teacache_metric(
 
     def fake_patch_embed(images, t_emb):
         del images
-        captured["patch_metric"] = t_emb
-        return torch.zeros(1, 1, 4), 1, 1
+        captured["patch_timestep_embedding"] = t_emb
+        return image_embedding, 1, 1
 
     @contextmanager
     def fake_forward_context(*args, **kwargs):
@@ -362,7 +363,7 @@ def test_forward_call_passes_patch_timestep_embedding_to_teacache_metric(
         model=FakeModel(),
         vllm_config=None,
         get_pos_emb=lambda custom_pos_emb, position_ids: custom_pos_emb,
-        time_embed=lambda timestep: metric,
+        time_embed=lambda timestep: timestep_embedding,
         patch_embed=fake_patch_embed,
         timestep_emb=lambda timestep: torch.zeros(timestep.shape[0], 4),
         ragged_final_layer=lambda *args: torch.zeros(1, 2, 4),
@@ -383,5 +384,5 @@ def test_forward_call_passes_patch_timestep_embedding_to_teacache_metric(
         return_dict=True,
     )
 
-    assert captured["patch_metric"] is metric
-    assert captured["tea_cache_modulated_input"] is metric
+    assert captured["patch_timestep_embedding"] is timestep_embedding
+    assert captured["tea_cache_modulated_input"] is image_embedding
