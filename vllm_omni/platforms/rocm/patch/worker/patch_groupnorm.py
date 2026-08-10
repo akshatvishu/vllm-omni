@@ -30,8 +30,22 @@ class _AiterGroupNormAutocastMixin:
 
         with torch.amp.autocast(device_type, enabled=False):
             if input.dtype != self.weight.dtype or input.dtype != self.bias.dtype:
-                return F.group_norm(input, self.num_groups, weight, bias, self.eps)
-            return super().forward(input)
+                output = F.group_norm(input, self.num_groups, weight, bias, self.eps)
+                logger.info_once(
+                    "PyTorch GroupNorm fallback completed successfully for input dtype %s, "
+                    "weight dtype %s, and bias dtype %s.",
+                    input.dtype,
+                    self.weight.dtype,
+                    self.bias.dtype,
+                )
+                return output
+
+            output = super().forward(input)
+            logger.info_once(
+                "AITER GroupNorm kernel completed successfully with input dtype %s.",
+                input.dtype,
+            )
+            return output
 
 
 def _replace_groupnorm_with_aiter(vae: nn.Module) -> bool:

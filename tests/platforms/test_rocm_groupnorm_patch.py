@@ -51,20 +51,30 @@ def test_groupnorm_autocast_casts_kernel_input_to_fp32(monkeypatch):
 def test_groupnorm_same_dtype_uses_aiter(monkeypatch):
     expected = torch.randn(1, 8, 2, 2)
     calls = []
+    logs = []
     _install_fake_aiter(monkeypatch, calls, output=expected)
     monkeypatch.setattr(torch, "is_autocast_enabled", lambda _: False)
+    monkeypatch.setattr(patch_groupnorm.logger, "info_once", lambda *args: logs.append(args))
 
     vae = nn.Sequential(nn.GroupNorm(4, 8))
     assert patch_groupnorm._replace_groupnorm_with_aiter(vae)
 
     assert vae(torch.randn(1, 8, 2, 2)) is expected
     assert len(calls) == 1
+    assert logs == [
+        (
+            "AITER GroupNorm kernel completed successfully with input dtype %s.",
+            torch.float32,
+        )
+    ]
 
 
 def test_groupnorm_mixed_dtype_without_autocast_uses_torch(monkeypatch):
     monkeypatch.setattr(torch, "is_autocast_enabled", lambda _: False)
     calls = []
+    logs = []
     _install_fake_aiter(monkeypatch, calls)
+    monkeypatch.setattr(patch_groupnorm.logger, "info_once", lambda *args: logs.append(args))
 
     input = torch.randn(1, 8, 2, 2, dtype=torch.float16)
     vae = nn.Sequential(nn.GroupNorm(4, 8, dtype=torch.float32))
@@ -78,6 +88,14 @@ def test_groupnorm_mixed_dtype_without_autocast_uses_torch(monkeypatch):
 
     torch.testing.assert_close(actual, expected)
     assert not calls
+    assert logs == [
+        (
+            "PyTorch GroupNorm fallback completed successfully for input dtype %s, weight dtype %s, and bias dtype %s.",
+            torch.float16,
+            torch.float32,
+            torch.float32,
+        )
+    ]
 
 
 def test_replace_groupnorm_preserves_parameters(monkeypatch):
