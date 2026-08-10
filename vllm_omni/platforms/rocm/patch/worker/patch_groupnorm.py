@@ -2,7 +2,9 @@
 
 """Patch ``initialize_model`` to replace VAE GroupNorm with AITER GroupNorm on ROCm."""
 
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from vllm.logger import init_logger
 
 import vllm_omni.diffusion.registry as _registry_mod
@@ -12,8 +14,31 @@ logger = init_logger(__name__)
 _original_initialize_model = _registry_mod.initialize_model
 
 
+class _AiterGroupNormAutocastMixin:
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        assert self.weight is not None and self.bias is not None
+        device_type = input.device.type
+        if torch.is_autocast_enabled(device_type):
+            # PyTorch registers GroupNorm as an FP32 autocast op. AITER bypasses
+            # that dispatcher rule, so preserve it before entering the HIP kernel.
+            input = input.float()
+            weight = self.weight.float()
+            bias = self.bias.float()
+        else:
+            weight = self.weight
+            bias = self.bias
+
+        with torch.amp.autocast(device_type, enabled=False):
+            if input.dtype != self.weight.dtype or input.dtype != self.bias.dtype:
+                return F.group_norm(input, self.num_groups, weight, bias, self.eps)
+            return super().forward(input)
+
+
 def _replace_groupnorm_with_aiter(vae: nn.Module) -> bool:
     from aiter.ops.groupnorm import GroupNorm as AiterGroupNorm
+
+    class AutocastAwareAiterGroupNorm(_AiterGroupNormAutocastMixin, AiterGroupNorm):
+        pass
 
     targets = [
         (parent, name, child)
@@ -23,7 +48,7 @@ def _replace_groupnorm_with_aiter(vae: nn.Module) -> bool:
     ]
 
     for parent, name, child in targets:
-        new_group_norm = AiterGroupNorm(
+        new_group_norm = AutocastAwareAiterGroupNorm(
             num_groups=child.num_groups,
             num_channels=child.num_channels,
             eps=child.eps,
