@@ -20,8 +20,11 @@ from vllm_omni.diffusion.cache.prompt_embed_cache import (
 )
 from vllm_omni.diffusion.cache.teacache import (
     CacheContext,
+    TeaCacheBlockExecutor,
     TeaCacheConfig,
+    TeaCacheRuntime,
     apply_teacache_hook,
+    supports_teacache,
 )
 from vllm_omni.diffusion.cache.teacache.backend import TeaCacheBackend
 
@@ -29,10 +32,13 @@ __all__ = [
     "CacheBackend",
     "CacheContext",
     "TeaCacheBackend",
+    "TeaCacheBlockExecutor",
     "TeaCacheConfig",
+    "TeaCacheRuntime",
     "apply_teacache_hook",
     "PromptEmbedCache",
     "install_prompt_embed_cache",
     "resolve_prompt_embed_cache_config",
+    "supports_teacache",
     "uninstall_prompt_embed_cache",
 ]

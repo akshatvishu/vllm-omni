@@ -393,7 +393,7 @@ class DiffusionCacheConfig:
     """
 
     # TeaCache parameters [tea_cache only]
-    # Default: 0.2 provides ~1.5x speedup with minimal quality loss (optimal balance)
+    # Choose the threshold from model-specific quality and latency measurements.
     rel_l1_thresh: float = 0.2
     coefficients: list[float] | None = None  # Uses model-specific defaults if None
 

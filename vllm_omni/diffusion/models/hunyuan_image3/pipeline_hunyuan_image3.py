@@ -1492,6 +1492,8 @@ class HunyuanImage3Pipeline(
             "custom_pos_emb": model_kwargs["custom_pos_emb"],
             "num_image_tokens": model_kwargs["num_image_tokens"],
         }
+        if "use_cache" in model_kwargs:
+            updated_model_kwargs["use_cache"] = model_kwargs["use_cache"]
         if "full_attn_spans" in model_kwargs:
             updated_model_kwargs["full_attn_spans"] = model_kwargs["full_attn_spans"]
 
@@ -1641,6 +1643,7 @@ class HunyuanImage3Pipeline(
         uncond_cfg_prefill: bool = False,
         ar_kv_reuse_len: int = 0,
         full_attn_spans: list[list[tuple[int, int]]] | None = None,
+        tea_cache_do_true_cfg: bool = False,
     ) -> tuple | CausalMMOutputWithPast:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         # Sanity Check of Inputs
@@ -1688,6 +1691,8 @@ class HunyuanImage3Pipeline(
             seq_len = 0
             n_embd = self.config.hidden_size
 
+        tea_cache_modulated_input = None
+
         # Instantiate placeholder tokens: <timestep>, <img> for the gen image
         if mode == "gen_text":
             # For gen_text, make sure gen_timestep_scatter_index is None
@@ -1705,6 +1710,8 @@ class HunyuanImage3Pipeline(
             else:
                 t_emb = self.time_embed(timestep)
                 image_emb, token_h, token_w = self.patch_embed(images, t_emb)
+                # TeaCache compares the timestep-modulated image input, not the standalone timestep embedding.
+                tea_cache_modulated_input = image_emb
                 timestep_emb = self.timestep_emb(timestep).reshape(bsz, -1, n_embd)
                 inputs_embeds = torch.cat([timestep_emb, image_emb], dim=1)
 
@@ -1746,6 +1753,8 @@ class HunyuanImage3Pipeline(
                 uncond_cfg_prefill=uncond_cfg_prefill,
                 ar_kv_reuse_len=ar_kv_reuse_len,
                 full_attn_spans=full_attn_spans,
+                tea_cache_modulated_input=tea_cache_modulated_input,
+                tea_cache_do_true_cfg=tea_cache_do_true_cfg,
             )
         hidden_states = outputs[0]
 

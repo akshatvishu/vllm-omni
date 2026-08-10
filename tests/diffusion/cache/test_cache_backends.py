@@ -6,7 +6,7 @@ Unit tests for cache backends (cache-dit and teacache).
 
 This module tests the cache backend implementations:
 - CacheDiTBackend: cache-dit acceleration backend
-- TeaCacheBackend: TeaCache hook-based backend
+- TeaCacheBackend: native TeaCache backend with legacy hook fallback
 - Cache selector function: get_cache_backend
 - DiffusionCacheConfig: configuration dataclass
 """
@@ -279,7 +279,7 @@ class TestTeaCacheBackend:
         mock_transformer.__class__.__name__ = "QwenImageTransformer2DModel"
         mock_pipeline.transformer = mock_transformer
 
-        config = DiffusionCacheConfig(rel_l1_thresh=0.3)
+        config = DiffusionCacheConfig(rel_l1_thresh=0.3, coefficients=[1.0, 0.5, 0.2, 0.1, 0.05])
         backend = TeaCacheBackend(config)
         backend.enable(mock_pipeline)
 
@@ -319,7 +319,7 @@ class TestTeaCacheBackend:
         mock_registry.reset_hook = Mock()
         mock_transformer._hook_registry = mock_registry
 
-        config = DiffusionCacheConfig()
+        config = DiffusionCacheConfig(coefficients=[1.0, 0.5, 0.2, 0.1, 0.05])
         backend = TeaCacheBackend(config)
         backend.enable(mock_pipeline)
 

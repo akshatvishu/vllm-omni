@@ -7,6 +7,7 @@ This section describes how to add TeaCache to a diffusion transformer model. We 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Hunyuan Image 3](#hunyuan-image-3)
 - [Step-by-Step Implementation](#step-by-step-implementation)
 - [Customization](#customization)
 - [Testing](#testing)
@@ -43,6 +44,14 @@ The hook handles all caching logic automatically, including:
 - L1 distance computation with polynomial rescaling
 - Residual caching and reuse
 
+
+---
+
+## Hunyuan Image 3
+
+Hunyuan Image 3 uses a native TeaCache boundary instead of an extractor. `TeaCacheBackend` installs a `TeaCacheRuntime` on the transformer, and `HunyuanImage3Model.forward` uses it around the decoder-layer loop. The cache metric is the time-conditioned image embedding returned by `patch_embed`.
+
+TeaCache is bypassed for the first image step, text generation, unconditional CFG prefill, attention or hidden-state collection, `use_cache=True`, and incompatible cached tensor shapes. The current Hunyuan coefficient tuple is provisional and must be fitted at this native boundary before making image-quality or performance claims.
 
 ---
 

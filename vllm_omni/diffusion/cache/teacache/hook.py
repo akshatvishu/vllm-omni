@@ -1,14 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-"""
-Hook-based TeaCache implementation for vLLM-Omni.
-
-This module implements a diffusers-style hook system that completely intercepts
-the transformer forward pass, eliminating the need for any TeaCache-specific
-code in model definitions. Model developers only need to add an extractor function
-to support new models.
-"""
+"""Legacy hook-based TeaCache implementation for vLLM-Omni."""
 
 from __future__ import annotations
 
@@ -233,8 +226,9 @@ def apply_teacache_hook(module: torch.nn.Module, config: TeaCacheConfig) -> None
         module: Transformer model to optimize (e.g., QwenImageTransformer2DModel)
         config: TeaCacheConfig specifying caching parameters
 
-    Example:
+        Example:
         >>> config = TeaCacheConfig(
+        ...     coefficients=[-450.0, 280.0, -45.0, 3.2, -0.02],
         ...     rel_l1_thresh=0.2,
         ...     transformer_type="QwenImageTransformer2DModel"
         ... )

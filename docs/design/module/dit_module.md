@@ -713,28 +713,32 @@ class CacheBackend(ABC):
 
 **Location**: `vllm_omni/diffusion/cache/teacache/backend.py`
 
+Migrated diffusion transformers advertise the native TeaCache boundary and
+receive a `TeaCacheRuntime`. Models still on the legacy hook path use the
+fallback shown below.
+
 ```python
 class TeaCacheBackend(CacheBackend):
     def enable(self, pipeline: Any):
-        # Extract transformer from pipeline
         transformer = pipeline.transformer
-        transformer_type = transformer.__class__.__name__
-
-        # Create TeaCacheConfig from DiffusionCacheConfig
-        teacache_config = TeaCacheConfig(
-            transformer_type=transformer_type,
-            rel_l1_thresh=self.config.rel_l1_thresh,
-            coefficients=self.config.coefficients,
-        )
-
-        # Apply hooks to transformer
-        apply_teacache_hook(transformer, teacache_config)
+        if supports_teacache(transformer):
+            teacache_config = TeaCacheConfig(
+                transformer_type=transformer.tea_cache_model_key,
+                rel_l1_thresh=self.config.rel_l1_thresh,
+                coefficients=_resolve_coefficients(transformer, self.config),
+            )
+            transformer.tea_cache_executor = TeaCacheRuntime(teacache_config)
+        else:
+            teacache_config = TeaCacheConfig(
+                transformer_type=transformer.__class__.__name__,
+                rel_l1_thresh=self.config.rel_l1_thresh,
+                coefficients=_resolve_coefficients(transformer, self.config),
+            )
+            apply_teacache_hook(transformer, teacache_config)
         self.enabled = True
 
     def refresh(self, pipeline: Any, num_inference_steps: int, verbose: bool = True):
-        transformer = pipeline.transformer
-        if hasattr(transformer, "_hook_registry"):
-            transformer._hook_registry.reset_hook(TeaCacheHook._HOOK_NAME)
+        ...
 ```
 
 **TeaCache Features**:
@@ -745,7 +749,9 @@ class TeaCacheBackend(CacheBackend):
 
 - **CFG-aware**: Handles positive/negative branches separately
 
-- **Custom Hook System**: Uses a custom forward interception mechanism (via `HookRegistry`) that wraps the module's `forward` method, allowing transparent integration without modifying model code
+- **Native boundary**: Migrated models own the cached block boundary in their forward method
+
+- **Legacy fallback**: Unmigrated models continue to use the hook integration
 
 **2. Cache-DiT Backend**
 

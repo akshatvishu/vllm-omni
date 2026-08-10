@@ -61,7 +61,7 @@ from vllm_omni.diffusion.attention.backends.abstract import (
 )
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cache_dit_backend import CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.interface import TeaCacheBlockExecutor
 from vllm_omni.diffusion.distributed.parallel_state import (
     get_cfg_group,
     get_classifier_free_guidance_rank,
@@ -920,9 +920,9 @@ class HunYuanRotary2DEmbedder:
         q = self.rope(q.to(torch.float32), cos, sin)
         k = self.rope(k.to(torch.float32), cos, sin)
 
-        # 5. Restore original shape + convert to bfloat16
-        q = q.reshape(hidden_states.shape[0], self.num_heads * self.head_dim).to(torch.bfloat16)
-        k = k.reshape(hidden_states.shape[0], self.num_kv_heads * self.head_dim).to(torch.bfloat16)
+        # 5. Restore the image-attention layout and convert to bfloat16
+        q = q.reshape(hidden_states.shape[0], self.num_heads, self.head_dim).to(torch.bfloat16)
+        k = k.reshape(hidden_states.shape[0], self.num_kv_heads, self.head_dim).to(torch.bfloat16)
         hidden_states = hidden_states.reshape(hidden_states_shape)
         return q, k
 
@@ -2021,7 +2021,11 @@ class HunyuanImagePostprocessor(nn.Module):
         return x
 
 
-class HunyuanImage3Model(nn.Module, SupportsTeaCache):
+class HunyuanImage3Model(nn.Module):
+    supports_teacache = True
+    tea_cache_model_key = "HunyuanImage3Model"
+    tea_cache_executor: TeaCacheBlockExecutor | None = None
+
     _cache_dit_adapter_config = CacheDiTAdapterConfig(
         block_forward_patterns={
             "layers": ForwardPattern.Pattern_4,
@@ -2365,17 +2369,9 @@ class HunyuanImage3Model(nn.Module, SupportsTeaCache):
         image_output = x[:, text_prompt_len:, :].contiguous()
         return text_output, image_output
 
-    # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> BaseModelOutputWithPast:
-        raise NotImplementedError
-
     def get_teacache_coefficients(self) -> list[float]:
+        # Provisional finite fallback; the native decoder-layer boundary still
+        # needs a dedicated coefficient collection run.
         return [1.04117826e02, -1.26848482e02, 5.68168652e01, -1.04182570e01, 6.78098549e-01]
 
     def forward(
@@ -2399,6 +2395,8 @@ class HunyuanImage3Model(nn.Module, SupportsTeaCache):
         uncond_cfg_prefill: bool = False,
         ar_kv_reuse_len: int = 0,
         full_attn_spans: list[list[tuple[int, int]]] | None = None,
+        tea_cache_modulated_input: torch.Tensor | None = None,
+        tea_cache_do_true_cfg: bool = False,
     ) -> tuple | BaseModelOutputWithPast:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -2482,38 +2480,63 @@ class HunyuanImage3Model(nn.Module, SupportsTeaCache):
                 k_pad = attention_mask.new_zeros(B, H, Q + pad, pad)
                 attention_mask = torch.cat((attention_mask, k_pad), dim=3)
 
-        for layer_idx, decoder_layer in enumerate(self.layers):
-            if output_hidden_states:
-                all_hidden_states += (hidden_states,)
+        def run_transformer_blocks() -> tuple[torch.Tensor, ...]:
+            nonlocal all_hidden_states, all_self_attns, hidden_states, next_decoder_cache
 
-            layer_outputs = decoder_layer(
-                positions=None,
-                hidden_states=hidden_states,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                past_key_value=past_key_values,
-                output_attentions=output_attentions,
-                use_cache=use_cache,
-                custom_pos_emb=custom_pos_emb,
-                mode=mode,
-                first_step=first_step,
-                query_lens=query_lens,
-                seq_lens=seq_lens,
-                num_image_tokens=num_image_tokens,
-                gen_timestep_scatter_index=gen_timestep_scatter_index,
-                shard_image_size=shard_image_size,
-                shard_padding_size=shard_padding_size,
-                uncond_cfg_prefill=uncond_cfg_prefill,
-                full_attn_spans=full_attn_spans,
+            for decoder_layer in self.layers:
+                if output_hidden_states:
+                    all_hidden_states += (hidden_states,)
+
+                layer_outputs = decoder_layer(
+                    positions=None,
+                    hidden_states=hidden_states,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_value=past_key_values,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                    custom_pos_emb=custom_pos_emb,
+                    mode=mode,
+                    first_step=first_step,
+                    query_lens=query_lens,
+                    seq_lens=seq_lens,
+                    num_image_tokens=num_image_tokens,
+                    gen_timestep_scatter_index=gen_timestep_scatter_index,
+                    shard_image_size=shard_image_size,
+                    shard_padding_size=shard_padding_size,
+                    uncond_cfg_prefill=uncond_cfg_prefill,
+                    full_attn_spans=full_attn_spans,
+                )
+
+                hidden_states = layer_outputs[0]
+
+                if use_cache:
+                    next_decoder_cache = layer_outputs[2 if output_attentions else 1]
+
+                if output_attentions:
+                    all_self_attns += (layer_outputs[1],)
+
+            return (hidden_states,)
+
+        cacheable = (
+            self.tea_cache_executor is not None
+            and tea_cache_modulated_input is not None
+            and mode == "gen_image"
+            and first_step is False
+            and not uncond_cfg_prefill
+            and not output_attentions
+            and not output_hidden_states
+            and not use_cache
+        )
+        if cacheable:
+            (hidden_states,) = self.tea_cache_executor.run(
+                modulated_input=tea_cache_modulated_input,
+                residual_inputs=(hidden_states,),
+                compute_fn=run_transformer_blocks,
+                do_true_cfg=tea_cache_do_true_cfg,
             )
-
-            hidden_states = layer_outputs[0]
-
-            if use_cache:
-                next_decoder_cache = layer_outputs[2 if output_attentions else 1]
-
-            if output_attentions:
-                all_self_attns += (layer_outputs[1],)
+        else:
+            (hidden_states,) = run_transformer_blocks()
 
         # add hidden states from the last decoder layer
         if output_hidden_states:
@@ -3128,18 +3151,15 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
         # Store ar_kv_reuse_len in model_kwargs for use in forward method (SP mode)
         model_kwargs["ar_kv_reuse_len"] = ar_kv_reuse_len
 
+        # Native TeaCache does not preserve decoder KV outputs. The image
+        # denoising path already manages prompt KV reuse separately, so make
+        # the cache policy explicit when a native executor is installed.
+        if getattr(self.model.transformer, "tea_cache_executor", None) is not None:
+            model_kwargs["use_cache"] = False
+
         # Sampling loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
-
-        # ---- TeaCache initialization ----
-        tea_cache_config = getattr(self.model, "_tea_cache_config", None)
-        if tea_cache_config is not None:
-            tc_rescale = np.poly1d(tea_cache_config.coefficients)
-            tc_acc_dist = 0.0
-            tc_prev_mod = None
-            tc_prev_pred = None
-            tc_cnt = 0
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -3153,42 +3173,21 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
 
                 t_expand = t.repeat(latent_model_input.shape[0])
 
-                # ---- TeaCache: decide whether to compute or reuse ----
-                should_compute = True
-                if tea_cache_config is not None:
-                    with torch.no_grad():
-                        # Use timestep embedding as the modulated input for cache decision
-                        cur_mod = self.model.time_embed(t.unsqueeze(0))
-                    if tc_cnt > 0 and tc_prev_mod is not None:
-                        rel_dist = (
-                            ((cur_mod - tc_prev_mod).abs().mean() / (tc_prev_mod.abs().mean() + 1e-8)).cpu().item()
-                        )
-                        rescaled = float(tc_rescale(rel_dist))
-                        tc_acc_dist += abs(rescaled)
-                        if tc_acc_dist < tea_cache_config.rel_l1_thresh:
-                            should_compute = False
-                        else:
-                            tc_acc_dist = 0.0
-                    tc_prev_mod = cur_mod.detach()
+                model_inputs = self.model.prepare_inputs_for_generation(
+                    input_ids,
+                    images=latent_model_input,
+                    timestep=t_expand,
+                    **model_kwargs,
+                )
 
-                if should_compute:
-                    model_inputs = self.model.prepare_inputs_for_generation(
-                        input_ids,
-                        images=latent_model_input,
-                        timestep=t_expand,
-                        **model_kwargs,
+                with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, enabled=True):
+                    model_output = self.model.forward_call(
+                        **model_inputs,
+                        first_step=(i == 0),
+                        tea_cache_do_true_cfg=cfg_parallel_ready,
                     )
-
-                    with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, enabled=True):
-                        model_output = self.model.forward_call(**model_inputs, first_step=(i == 0))
-                        pred = model_output["diffusion_prediction"]
-                    pred = pred.to(dtype=torch.float32)
-
-                    if tea_cache_config is not None:
-                        tc_prev_pred = pred.clone()
-                else:
-                    # TeaCache fast path: reuse previous prediction
-                    pred = tc_prev_pred
+                    pred = model_output["diffusion_prediction"]
+                pred = pred.to(dtype=torch.float32)
 
                 # Perform guidance
                 if cfg_parallel_ready:
@@ -3201,7 +3200,7 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
 
                 # Scheduler step (all ranks compute locally in CFG parallel)
                 latents = self.scheduler.step(pred, t, latents, **_scheduler_step_extra_kwargs, return_dict=False)[0]
-                if i != len(timesteps) - 1 and should_compute:
+                if i != len(timesteps) - 1:
                     model_kwargs = self.model._update_model_kwargs_for_generation(  # noqa
                         model_output,
                         model_kwargs,
@@ -3213,9 +3212,6 @@ class HunyuanImage3Text2ImagePipeline(DiffusionPipeline):
                     seq_lens = [seq_len] * b
                     model_kwargs["query_lens"] = query_lens
                     model_kwargs["seq_lens"] = seq_lens
-
-                if tea_cache_config is not None:
-                    tc_cnt += 1
 
                 if callback_on_step_end is not None:
                     callback_kwargs = {}
