@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLAN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$PLAN_ROOT/.." && pwd)"
-PYTHON_BIN="${PYTHON_BIN:-$REPO_ROOT/.venv/bin/python}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 if [[ -z "${RUN_ROOT:-}" ]]; then
     RUN_ROOT="$PLAN_ROOT/results/$(date -u +%Y%m%dT%H%M%SZ)"
@@ -13,8 +13,13 @@ fi
 export RUN_ROOT
 
 require_workspace() {
-    if [[ ! -x "$PYTHON_BIN" ]]; then
-        echo "Expected the workspace virtual environment interpreter at $PYTHON_BIN" >&2
+    if [[ "$PYTHON_BIN" == */* ]]; then
+        if [[ ! -x "$PYTHON_BIN" ]]; then
+            echo "Python interpreter is not executable: $PYTHON_BIN" >&2
+            return 1
+        fi
+    elif ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+        echo "Python command was not found in PATH: $PYTHON_BIN" >&2
         return 1
     fi
     if [[ ! -d "$REPO_ROOT/vllm_omni" ]]; then

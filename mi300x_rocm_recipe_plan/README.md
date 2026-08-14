@@ -46,7 +46,7 @@ Results are written under `mi300x_rocm_recipe_plan/results/<timestamp>/`. Each m
 
 The current repository installation guide validates ROCm on `gfx942`, which is the MI300X architecture. It currently documents the vLLM `0.26.0+rocm723` wheel and the `vllm/vllm-omni-rocm:v0.26.0` image. It also requires replacing `onnxruntime` with `onnxruntime-rocm` for Qwen3 TTS. Use those versions or record the exact newer versions used for the run. The preflight rejects a CUDA PyTorch build and records the available ONNX Runtime providers.
 
-The scripts require the workspace `.venv/bin/python` by default. Set `PYTHON_BIN` only when the MI300X workspace uses another project virtual environment that already contains the ROCm build. Do not point it at a system Python interpreter.
+The scripts use `python3` from the container `PATH` by default. Set `PYTHON_BIN` only when the ROCm environment exposes another Python command or interpreter path.
 
 ## What can be claimed now
 
