@@ -16,6 +16,7 @@ MODELS=(
 
 if [[ "${1:-}" == "--list" ]]; then
     printf '%s\n' "${MODELS[@]}"
+    echo "qwen3_tts_compare, optional eager versus MIOpen FAST graph comparison"
     echo "ming_flash_tts, optional and disabled by default"
     exit 0
 fi

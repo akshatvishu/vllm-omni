@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 usage() {
-    echo "Usage: $0 {ming_omni_tts|qwen3_tts|sensenova|stable_audio|mammoth_preview|omnivoice|ming_flash_tts}"
+    echo "Usage: $0 {ming_omni_tts|qwen3_tts|qwen3_tts_compare|sensenova|stable_audio|mammoth_preview|omnivoice|ming_flash_tts}"
 }
 
 if [[ $# -ne 1 ]]; then
@@ -39,29 +39,117 @@ run_ming_omni_tts() {
     validate_outputs "$name" audio "$output_dir/*.wav" --expected-sample-rate 44100
 }
 
+run_qwen3_tts_case() {
+    local query="$1"
+    local name="$2"
+    local deploy_config="$3"
+    shift 3
+    local output_dir="$RUN_ROOT/$name/output"
+    mkdir -p "$output_dir"
+    if ! run_profiled "$name" \
+        "$@" \
+        "$PYTHON_BIN" examples/offline_inference/text_to_speech/qwen3_tts/end2end.py \
+        --query-type "$query" \
+        --deploy-config "$deploy_config" \
+        --output-dir "$output_dir" \
+        --num-prompts 1 \
+        --batch-size 1 \
+        --log-stats \
+        --log-dir "$RUN_ROOT/$name/logs"; then
+        return 1
+    fi
+    validate_outputs "$name" audio "$output_dir/*.wav" --expected-sample-rate 24000
+}
+
 run_qwen3_tts() {
-    local query name output_dir
+    local query name
     local status=0
     for query in CustomVoice VoiceDesign Base; do
         name="qwen3_tts_${query,,}"
-        output_dir="$RUN_ROOT/$name/output"
-        mkdir -p "$output_dir"
-        if ! run_profiled "$name" \
-            "$PYTHON_BIN" examples/offline_inference/text_to_speech/qwen3_tts/end2end.py \
-            --query-type "$query" \
-            --deploy-config vllm_omni/deploy/qwen3_tts.yaml \
-            --output-dir "$output_dir" \
-            --num-prompts 1 \
-            --batch-size 1 \
-            --log-stats \
-            --log-dir "$RUN_ROOT/$name/logs"; then
-            status=1
-            continue
-        fi
-        if ! validate_outputs "$name" audio "$output_dir/*.wav" --expected-sample-rate 24000; then
+        if ! run_qwen3_tts_case \
+            "$query" \
+            "$name" \
+            vllm_omni/deploy/qwen3_tts.yaml; then
             status=1
         fi
     done
+    return "$status"
+}
+
+qwen3_tts_log_stat_ms() {
+    local log_file="$1"
+    local stat_name="$2"
+    awk -F '|' -v stat_name="$stat_name" '
+        {
+            name = $2
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+            if (name == stat_name) {
+                value = $3
+                gsub(/[[:space:],]/, "", value)
+                result = value
+            }
+        }
+        END { print result }
+    ' "$log_file"
+}
+
+append_qwen3_tts_comparison() {
+    local summary="$1"
+    local query="$2"
+    local mode="$3"
+    local result="$4"
+    local name="$5"
+    local elapsed=""
+    local e2e_ms=""
+    local stage_1_ms=""
+    local timing_file="$RUN_ROOT/$name/timing.txt"
+    local log_file="$RUN_ROOT/$name/command.log"
+
+    if [[ -f "$timing_file" ]]; then
+        elapsed="$(awk -F '=' '$1 == "elapsed_seconds" { print $2 }' "$timing_file")"
+    fi
+    if [[ -f "$log_file" ]]; then
+        e2e_ms="$(qwen3_tts_log_stat_ms "$log_file" e2e_wall_time_ms)"
+        stage_1_ms="$(qwen3_tts_log_stat_ms "$log_file" e2e_stage_1_wall_time_ms)"
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$query" "$mode" "$result" "$elapsed" "$e2e_ms" "$stage_1_ms" "$name" >>"$summary"
+}
+
+run_qwen3_tts_compare() {
+    local summary="$RUN_ROOT/qwen3_tts_eager_vs_miopen_fast.tsv"
+    local query mode name deploy_config result
+    local status=0
+    local -a env_command
+
+    mkdir -p "$RUN_ROOT"
+    printf 'query\tmode\tstatus\tprocess_elapsed_seconds\te2e_wall_time_ms\tstage_1_wall_time_ms\tresult_dir\n' >"$summary"
+    for query in CustomVoice VoiceDesign Base; do
+        for mode in eager graph_miopen_fast; do
+            if [[ "$mode" == "eager" ]]; then
+                name="qwen3_tts_${query,,}_eager"
+                deploy_config="vllm_omni/deploy/qwen3_tts.yaml"
+                env_command=(env -u MIOPEN_FIND_MODE)
+            else
+                name="qwen3_tts_${query,,}_graph_miopen_fast"
+                deploy_config="mi300x_rocm_recipe_plan/configs/qwen3_tts_rocm_graph.yaml"
+                env_command=(env MIOPEN_FIND_MODE=FAST)
+            fi
+
+            if run_qwen3_tts_case \
+                "$query" \
+                "$name" \
+                "$deploy_config" \
+                "${env_command[@]}"; then
+                result="PASS"
+            else
+                result="FAIL"
+                status=1
+            fi
+            append_qwen3_tts_comparison "$summary" "$query" "$mode" "$result" "$name"
+        done
+    done
+    echo "Qwen3 TTS comparison: $summary"
     return "$status"
 }
 
@@ -155,6 +243,7 @@ run_ming_flash_tts() {
 case "$MODEL_KEY" in
     ming_omni_tts) run_ming_omni_tts ;;
     qwen3_tts) run_qwen3_tts ;;
+    qwen3_tts_compare) run_qwen3_tts_compare ;;
     sensenova) run_sensenova ;;
     stable_audio) run_stable_audio ;;
     mammoth_preview) run_mammoth_preview ;;

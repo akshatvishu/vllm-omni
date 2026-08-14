@@ -34,6 +34,14 @@ Run the standalone Ming Flash TTS candidate separately because its checkpoint do
 RUN_MING_FLASH_TTS=1 ./mi300x_rocm_recipe_plan/scripts/run_one.sh ming_flash_tts
 ```
 
+Run the Qwen3 TTS eager and graph comparison separately:
+
+```bash
+./mi300x_rocm_recipe_plan/scripts/run_one.sh qwen3_tts_compare
+```
+
+The comparison runs CustomVoice, VoiceDesign, and Base in both modes. The eager runs use the checked ROCm override and remove `MIOPEN_FIND_MODE` from the process environment. The graph runs disable stage 1 eager mode and set `MIOPEN_FIND_MODE=FAST`. The script writes request time, stage 1 time, process time, and status to `qwen3_tts_eager_vs_miopen_fast.tsv` under the result directory. The default sequential suite still uses the checked eager mode.
+
 List the suite without starting a model:
 
 ```bash

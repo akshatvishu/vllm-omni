@@ -1,0 +1,8 @@
+base_config: ../../vllm_omni/deploy/qwen3_tts.yaml
+
+platforms:
+  rocm:
+    stages:
+      - stage_id: 1
+        # The comparison runner sets MIOPEN_FIND_MODE=FAST for this process.
+        enforce_eager: false
