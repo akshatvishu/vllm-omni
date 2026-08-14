@@ -15,7 +15,7 @@ The following files contain the checked evidence and the validation plan.
 - `flag_trace.md` traces every environment setting used or considered here to a consumer.
 - `scripts/run_all_sequential.sh` runs all default candidates in sequence.
 - `scripts/run_one.sh MODEL` runs one candidate.
-- `scripts/preflight.sh` checks that the environment is ROCm on one MI300X and records software versions.
+- `scripts/preflight.sh` checks that the environment is ROCm on one MI300X and records software versions. It accepts the `MI300X` device name, or the `gfx942` architecture with 180 to 220 GiB of visible memory when PyTorch returns an empty device name.
 - `scripts/validate_artifact.py` validates generated WAV and image files.
 
 ## Recommended run

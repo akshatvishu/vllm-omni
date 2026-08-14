@@ -57,6 +57,7 @@ if torch.cuda.is_available() and torch.cuda.device_count():
         {
             "index": index,
             "name": torch.cuda.get_device_name(index),
+            "gcn_arch": getattr(torch.cuda.get_device_properties(index), "gcnArchName", None),
             "total_memory_bytes": torch.cuda.get_device_properties(index).total_memory,
         }
         for index in range(torch.cuda.device_count())
