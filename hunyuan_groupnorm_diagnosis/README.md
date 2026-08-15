@@ -12,6 +12,8 @@ The runner performs the bad revision run, fixed revision run, image comparison, 
 ./hunyuan_groupnorm_diagnosis/run_diagnosis.sh
 ```
 
+The overall initialization timeout is 900 seconds in every command. The Hunyuan program at the bad and fixed commits supports `--init-timeout`, but it does not support `--stage-init-timeout`.
+
 The default baseline is `tests/assets/hunyuan/hunyuan_baseline.png`. Pass a known good ROCm image and an optional run ID when available:
 
 ```bash
@@ -130,6 +132,7 @@ python \
   --width 1024 \
   --bot-task none \
   --sys-type en_unified \
+  --init-timeout 900 \
   --enforce-eager \
   2>&1 | tee hunyuan_groupnorm_diagnosis/artifacts/bad/run.log
 ```
@@ -160,6 +163,7 @@ python \
   --width 1024 \
   --bot-task none \
   --sys-type en_unified \
+  --init-timeout 900 \
   --enforce-eager \
   2>&1 | tee hunyuan_groupnorm_diagnosis/artifacts/fixed/run.log
 ```
@@ -240,6 +244,7 @@ python \
   --width 1024 \
   --bot-task none \
   --sys-type en_unified \
+  --init-timeout 900 \
   --enforce-eager \
   2>&1 | tee hunyuan_groupnorm_diagnosis/artifacts/probe/run.log
 

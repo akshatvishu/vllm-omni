@@ -99,6 +99,7 @@ diagnosis_run_hunyuan() {
         --width 1024 \
         --bot-task none \
         --sys-type en_unified \
+        --init-timeout 900 \
         --enforce-eager \
         2>&1 | tee "${diagnosis_log_path}"
 }
@@ -209,6 +210,7 @@ python \
     --width 1024 \
     --bot-task none \
     --sys-type en_unified \
+    --init-timeout 900 \
     --enforce-eager \
     2>&1 | tee "${diagnosis_artifact_dir}/probe/run.log"
 diagnosis_probe_status="${PIPESTATUS[0]}"
