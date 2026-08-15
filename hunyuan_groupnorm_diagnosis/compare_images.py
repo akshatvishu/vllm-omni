@@ -71,39 +71,40 @@ def print_metrics(label: str, values: dict[str, float]) -> None:
     )
 
 
+def passes_thresholds(values: dict[str, float]) -> bool:
+    return values["mean"] <= 0.03 and values["p99"] <= 0.3 and values["ssim"] >= 0.97 and values["psnr"] >= 30
+
+
 def main() -> None:
     args = parse_args()
     baseline = Image.open(args.baseline).convert("RGB")
-    bad = Image.open(args.bad).convert("RGB")
-    fixed = Image.open(args.fixed).convert("RGB")
+    bad = Image.open(args.bad).convert("RGB") if args.bad.is_file() else None
+    fixed = Image.open(args.fixed).convert("RGB") if args.fixed.is_file() else None
 
-    bad_metrics = metrics(bad, baseline)
-    fixed_metrics = metrics(fixed, baseline)
-    revision_metrics = metrics(bad, fixed)
+    bad_metrics = metrics(bad, baseline) if bad is not None else None
+    fixed_metrics = metrics(fixed, baseline) if fixed is not None else None
 
-    print_metrics("bad_vs_baseline", bad_metrics)
-    print_metrics("fixed_vs_baseline", fixed_metrics)
-    print_metrics("bad_vs_fixed", revision_metrics)
+    if bad_metrics is not None:
+        print_metrics("bad_vs_baseline", bad_metrics)
+        print("bad_passes", passes_thresholds(bad_metrics))
+    else:
+        print("bad_image_missing", args.bad)
+
+    if fixed_metrics is not None:
+        print_metrics("fixed_vs_baseline", fixed_metrics)
+        print("fixed_passes", passes_thresholds(fixed_metrics))
+    else:
+        print("fixed_image_missing", args.fixed)
+
+    if bad is not None and fixed is not None:
+        print_metrics("bad_vs_fixed", metrics(bad, fixed))
+
     print(
         "repository_thresholds",
         "mean<=0.03",
         "p99<=0.3",
         "ssim>=0.97",
         "psnr>=30",
-    )
-    print(
-        "bad_passes",
-        bad_metrics["mean"] <= 0.03
-        and bad_metrics["p99"] <= 0.3
-        and bad_metrics["ssim"] >= 0.97
-        and bad_metrics["psnr"] >= 30,
-    )
-    print(
-        "fixed_passes",
-        fixed_metrics["mean"] <= 0.03
-        and fixed_metrics["p99"] <= 0.3
-        and fixed_metrics["ssim"] >= 0.97
-        and fixed_metrics["psnr"] >= 30,
     )
 
 

@@ -6,7 +6,7 @@ Every generated log, image, tensor dump, patch record, and comparison result is 
 
 ## Run the complete diagnosis
 
-The runner performs the bad revision run, fixed revision run, image comparison, live GroupNorm probe, and tensor replay:
+The runner runs the fixed revision first, then runs the live GroupNorm probe on the bad revision. The probe saves its input before it calls AITER, so the tensor dump remains available if the HIP process dies from a memory access fault. The uninstrumented bad run is skipped when the probe already fails.
 
 ```bash
 ./hunyuan_groupnorm_diagnosis/run_diagnosis.sh
@@ -35,12 +35,18 @@ Each invocation creates `hunyuan_groupnorm_diagnosis/artifacts/runs/<run-id>`. T
 
 GroupNorm is the cause only if both checks pass.
 
-1. The bad revision fails image accuracy and the GroupNorm fix restores image accuracy.
-2. AITER and PyTorch differ on the same live tensor used by Hunyuan GroupNorm.
+1. The fixed revision completes while the bad revision fails or produces an inaccurate image.
+2. The live probe fails after `GROUPNORM_AITER_CALL`, or AITER and PyTorch differ on the saved GroupNorm tensor.
 
 The existing `aiter_grp_log` and `no_aiter_grp_log` cannot confirm the cause because one run uses 50 steps and the other uses 1 step.
 
 Do not use `VLLM_ROCM_USE_AITER=0` as a GroupNorm control. The GroupNorm patch calls `is_aiter_found_and_supported()`, which does not read that flag.
+
+## Observed SSH failure
+
+The bad revision was run with PyTorch `2.11.0`, HIP `7.2.53211`, and `amd-aiter 0.1.16.post3`. All four diffusion workers loaded the model and entered the startup dummy run. After the one-step progress bar completed, every GPU reported a memory access fault and the workers exited.
+
+VAE decoding occurs near this part of startup, and the patched GroupNorm is used there. However, an asynchronous GPU fault can be reported after an earlier kernel has returned. The `GROUPNORM_AITER_CALL` boundary in the live probe is required before assigning the crash to AITER GroupNorm.
 
 ## Record the environment
 
@@ -254,7 +260,7 @@ printf "probe_exit_status=%s\n" "${groupnorm_probe_status}" \
 set -e
 ```
 
-A nonzero exit is expected when the probe finds a mismatch. The log line beginning with `GROUPNORM_PROBE` records the live tensor shape and dtypes. The exception records the output dtypes and numerical error.
+A nonzero exit is expected when the probe finds a mismatch. `GROUPNORM_PROBE` records the live tensor shape and dtypes. `GROUPNORM_PRECALL_DUMP` confirms that the input was saved and all earlier GPU work is synchronized next. `GROUPNORM_AITER_CALL` is printed only after that synchronization and immediately before the AITER GroupNorm call. A memory access fault after `GROUPNORM_AITER_CALL` identifies the AITER GroupNorm call as the failing operation.
 
 ## Replay the saved tensor
 
@@ -274,6 +280,7 @@ Use this decision rule:
 | Result | Conclusion |
 | --- | --- |
 | Bad image fails, fixed image passes, and the live probe differs | GroupNorm is confirmed as the regression cause. |
+| Fixed run passes and the probe has a memory access fault after `GROUPNORM_AITER_CALL` | AITER GroupNorm is confirmed as the crashing operation. |
 | The live AITER and PyTorch outputs match | The proposed GroupNorm numerical cause is false in that environment. |
 | AITER raises on the live input | AITER does not support the input contract. Keep the saved dump and stack trace. |
 | Only the output dtype differs | Autocast behavior differs. The image comparison determines whether it causes the regression. |

@@ -78,6 +78,10 @@ def _replace_groupnorm_with_aiter(vae: nn.Module) -> bool:
                 self.bias,
                 self.eps,
             )
+            pre_call_dump_path = self._dump_case(input, expected, None)
+            print("GROUPNORM_PRECALL_DUMP", pre_call_dump_path, flush=True)
+            torch.accelerator.synchronize()
+            print("GROUPNORM_AITER_CALL", pre_call_dump_path, flush=True)
             try:
                 actual = super().forward(input)
                 torch.accelerator.synchronize()

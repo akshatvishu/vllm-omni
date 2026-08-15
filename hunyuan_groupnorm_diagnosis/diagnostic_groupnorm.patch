@@ -13,7 +13,7 @@
  from vllm.logger import init_logger
 
  import vllm_omni.diffusion.registry as _registry_mod
-@@ -15,6 +20,103 @@
+@@ -15,6 +20,107 @@
  def _replace_groupnorm_with_aiter(vae: nn.Module) -> bool:
      from aiter.ops.groupnorm import GroupNorm as AiterGroupNorm
 
@@ -75,6 +75,10 @@
 +                self.bias,
 +                self.eps,
 +            )
++            pre_call_dump_path = self._dump_case(input, expected, None)
++            print("GROUPNORM_PRECALL_DUMP", pre_call_dump_path, flush=True)
++            torch.accelerator.synchronize()
++            print("GROUPNORM_AITER_CALL", pre_call_dump_path, flush=True)
 +            try:
 +                actual = super().forward(input)
 +                torch.accelerator.synchronize()
@@ -117,7 +121,7 @@
      targets = [
          (parent, name, child)
          for parent in vae.modules()
-@@ -23,7 +125,7 @@
+@@ -23,7 +129,7 @@
      ]
 
      for parent, name, child in targets:

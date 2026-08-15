@@ -149,27 +149,17 @@ echo "Exporting the bad and fixed source snapshots."
     diagnosis_export_source "${diagnosis_fixed_source}" "${diagnosis_fixed_commit}"
 } | tee "${diagnosis_artifact_dir}/source_setup.log"
 
-echo "Running the bad revision."
-diagnosis_run_hunyuan \
-    "${diagnosis_bad_source}" \
-    "${diagnosis_artifact_dir}/bad/images" \
-    "${diagnosis_artifact_dir}/bad/run.log" \
-    50
-
-echo "Running the fixed revision."
+echo "Running the fixed revision before the expected bad-kernel fault."
+set +e
 diagnosis_run_hunyuan \
     "${diagnosis_fixed_source}" \
     "${diagnosis_artifact_dir}/fixed/images" \
     "${diagnosis_artifact_dir}/fixed/run.log" \
     50
-
-echo "Comparing both images with the baseline."
-MPLCONFIGDIR="${diagnosis_root}/artifacts/matplotlib_cache" \
-python "${diagnosis_root}/compare_images.py" \
-    --baseline "${diagnosis_baseline}" \
-    --bad "${diagnosis_artifact_dir}/bad/images/output_0_0.png" \
-    --fixed "${diagnosis_artifact_dir}/fixed/images/output_0_0.png" \
-    2>&1 | tee "${diagnosis_artifact_dir}/image_comparison.txt"
+diagnosis_fixed_status="$?"
+set -e
+printf "fixed_exit_status=%s\n" "${diagnosis_fixed_status}" \
+    | tee "${diagnosis_artifact_dir}/fixed/status.txt"
 
 echo "Exporting a separate source snapshot for the live GroupNorm probe."
 {
@@ -218,6 +208,31 @@ set -e
 printf "probe_exit_status=%s\n" "${diagnosis_probe_status}" \
     | tee "${diagnosis_artifact_dir}/probe/status.txt"
 
+diagnosis_bad_status="skipped_after_probe_failure"
+if (( diagnosis_probe_status == 0 )); then
+    echo "The live probe passed. Running the uninstrumented bad revision."
+    set +e
+    diagnosis_run_hunyuan \
+        "${diagnosis_bad_source}" \
+        "${diagnosis_artifact_dir}/bad/images" \
+        "${diagnosis_artifact_dir}/bad/run.log" \
+        50
+    diagnosis_bad_status="$?"
+    set -e
+else
+    echo "The live probe failed. Skipping the redundant uninstrumented bad run."
+fi
+printf "bad_exit_status=%s\n" "${diagnosis_bad_status}" \
+    | tee "${diagnosis_artifact_dir}/bad/status.txt"
+
+echo "Comparing every available image with the baseline."
+MPLCONFIGDIR="${diagnosis_root}/artifacts/matplotlib_cache" \
+python "${diagnosis_root}/compare_images.py" \
+    --baseline "${diagnosis_baseline}" \
+    --bad "${diagnosis_artifact_dir}/bad/images/output_0_0.png" \
+    --fixed "${diagnosis_artifact_dir}/fixed/images/output_0_0.png" \
+    2>&1 | tee "${diagnosis_artifact_dir}/image_comparison.txt"
+
 shopt -s nullglob
 diagnosis_dump_files=("${diagnosis_tensor_dir}"/groupnorm-mismatch-*.pt)
 shopt -u nullglob
@@ -241,7 +256,9 @@ fi
 {
     printf "run_id=%s\n" "${diagnosis_run_id}"
     printf "artifact_dir=%s\n" "${diagnosis_artifact_dir}"
+    printf "fixed_exit_status=%s\n" "${diagnosis_fixed_status}"
     printf "probe_exit_status=%s\n" "${diagnosis_probe_status}"
+    printf "bad_exit_status=%s\n" "${diagnosis_bad_status}"
     printf "replay_exit_status=%s\n" "${diagnosis_replay_status}"
     printf "tensor_dump_count=%s\n" "${#diagnosis_dump_files[@]}"
 } | tee "${diagnosis_artifact_dir}/summary.txt"
