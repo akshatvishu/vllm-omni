@@ -1,18 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
-import os
+import math
 from pathlib import Path
-
-os.environ.setdefault(
-    "MPLCONFIGDIR",
-    "hunyuan_groupnorm_diagnosis/artifacts/matplotlib_cache",
-)
 
 import numpy as np
 import torch
 from PIL import Image
-from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
+from torch.nn import functional as F
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,28 +26,42 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def structural_similarity(first: torch.Tensor, second: torch.Tensor) -> float:
+    channels = first.shape[1]
+    coordinates = torch.arange(-5, 6, dtype=first.dtype)
+    gaussian = torch.exp(-0.5 * (coordinates / 1.5).square())
+    gaussian /= gaussian.sum()
+    kernel = torch.outer(gaussian, gaussian).expand(channels, 1, 11, 11)
+
+    first = F.pad(first, (5, 5, 5, 5), mode="reflect")
+    second = F.pad(second, (5, 5, 5, 5), mode="reflect")
+    inputs = torch.cat((first, second, first.square(), second.square(), first * second))
+    means = F.conv2d(inputs, kernel, groups=channels).split(first.shape[0])
+
+    first_mean_squared = means[0].square()
+    second_mean_squared = means[1].square()
+    mean_product = means[0] * means[1]
+    first_variance = torch.clamp(means[2] - first_mean_squared, min=0.0)
+    second_variance = torch.clamp(means[3] - second_mean_squared, min=0.0)
+    covariance = means[4] - mean_product
+    score = ((2 * mean_product + 0.01**2) * (2 * covariance + 0.03**2)) / (
+        (first_mean_squared + second_mean_squared + 0.01**2) * (first_variance + second_variance + 0.03**2)
+    )
+    return float(score.mean().item())
+
+
 def metrics(first: Image.Image, second: Image.Image) -> dict[str, float]:
     first_array = np.asarray(first.convert("RGB"), dtype=np.float32) / 255.0
     second_array = np.asarray(second.convert("RGB"), dtype=np.float32) / 255.0
     error = np.abs(first_array - second_array)
     first_tensor = torch.from_numpy(first_array).permute(2, 0, 1).unsqueeze(0)
     second_tensor = torch.from_numpy(second_array).permute(2, 0, 1).unsqueeze(0)
-    ssim = float(
-        StructuralSimilarityIndexMeasure(data_range=1.0)(
-            first_tensor,
-            second_tensor,
-        ).item()
-    )
-    psnr = float(
-        PeakSignalNoiseRatio(data_range=1.0)(
-            first_tensor,
-            second_tensor,
-        ).item()
-    )
+    mean_squared_error = float(torch.mean((first_tensor - second_tensor).square()).item())
+    psnr = math.inf if mean_squared_error == 0 else -10 * math.log10(mean_squared_error)
     return {
         "mean": float(error.mean()),
         "p99": float(np.quantile(error, 0.99)),
-        "ssim": ssim,
+        "ssim": structural_similarity(first_tensor, second_tensor),
         "psnr": psnr,
     }
 

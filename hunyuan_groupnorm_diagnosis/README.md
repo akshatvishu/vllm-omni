@@ -4,6 +4,8 @@ Run every command from the vLLM Omni repository root on the ROCm machine. The co
 
 Every generated log, image, tensor dump, patch record, and comparison result is written under `hunyuan_groupnorm_diagnosis/artifacts`.
 
+The complete console output is saved to `hunyuan_groupnorm_diagnosis/artifacts/runs/<run-id>/runner.log`. Each model invocation also has its own `run.log` under `fixed`, `probe`, or `bad`.
+
 ## Run the complete diagnosis
 
 The runner runs the fixed revision first, then runs the live GroupNorm probe on the bad revision. The probe saves its input before it calls AITER, so the tensor dump remains available if the HIP process dies from a memory access fault. The uninstrumented bad run is skipped when the probe already fails.
@@ -42,11 +44,26 @@ The existing `aiter_grp_log` and `no_aiter_grp_log` cannot confirm the cause bec
 
 Do not use `VLLM_ROCM_USE_AITER=0` as a GroupNorm control. The GroupNorm patch calls `is_aiter_found_and_supported()`, which does not read that flag.
 
-## Observed SSH failure
+## Confirmed SSH result
 
-The bad revision was run with PyTorch `2.11.0`, HIP `7.2.53211`, and `amd-aiter 0.1.16.post3`. All four diffusion workers loaded the model and entered the startup dummy run. After the one-step progress bar completed, every GPU reported a memory access fault and the workers exited.
+The bad revision was run with PyTorch `2.11.0`, HIP `7.2.53211`, and `amd-aiter 0.1.16.post3`. The live probe stopped at the first incorrect GroupNorm call in the conditional-image VAE encoder at `encoder.norm1`.
 
-VAE decoding occurs near this part of startup, and the patched GroupNorm is used there. However, an asynchronous GPU fault can be reported after an earlier kernel has returned. The `GROUPNORM_AITER_CALL` boundary in the live probe is required before assigning the crash to AITER GroupNorm.
+The live input contract and result were:
+
+```text
+shape=(1, 128, 4, 1024, 1024)
+input=torch.float16
+weight=torch.bfloat16
+bias=torch.bfloat16
+expected=torch.float32
+actual=torch.float16
+mean_error=1.0777817964553833
+max_error=6.17850923538208
+```
+
+This confirms the operator mismatch. PyTorch GroupNorm follows its FP32 autocast rule. The vLLM Omni replacement bypasses that rule and calls AITER with an FP16 activation and BF16 affine parameters. AITER returns FP16 output with a large numerical error. The later TCPStore and process-group warnings are cleanup after the diagnostic exception, not the original failure.
+
+The fixed-run status is still required to complete the revision-level control. If `fixed/status.txt` contains `fixed_exit_status=0` and `fixed/images/output_0_0.png` exists, the fixed revision confirms that preserving autocast semantics resolves the Hunyuan regression.
 
 ## Record the environment
 
@@ -184,7 +201,6 @@ Run the comparison:
 
 ```bash
 set -o pipefail
-MPLCONFIGDIR=hunyuan_groupnorm_diagnosis/artifacts/matplotlib_cache \
 python hunyuan_groupnorm_diagnosis/compare_images.py \
   --baseline hunyuan_groupnorm_diagnosis/artifacts/baseline/known_good.png \
   2>&1 | tee hunyuan_groupnorm_diagnosis/artifacts/image_comparison.txt
@@ -194,7 +210,6 @@ Use this command instead when only the checked in baseline is available:
 
 ```bash
 set -o pipefail
-MPLCONFIGDIR=hunyuan_groupnorm_diagnosis/artifacts/matplotlib_cache \
 python hunyuan_groupnorm_diagnosis/compare_images.py \
   --baseline tests/assets/hunyuan/hunyuan_baseline.png \
   2>&1 | tee hunyuan_groupnorm_diagnosis/artifacts/image_comparison.txt

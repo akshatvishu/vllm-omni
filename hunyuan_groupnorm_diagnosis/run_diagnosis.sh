@@ -226,12 +226,16 @@ printf "bad_exit_status=%s\n" "${diagnosis_bad_status}" \
     | tee "${diagnosis_artifact_dir}/bad/status.txt"
 
 echo "Comparing every available image with the baseline."
-MPLCONFIGDIR="${diagnosis_root}/artifacts/matplotlib_cache" \
+set +e
 python "${diagnosis_root}/compare_images.py" \
     --baseline "${diagnosis_baseline}" \
     --bad "${diagnosis_artifact_dir}/bad/images/output_0_0.png" \
     --fixed "${diagnosis_artifact_dir}/fixed/images/output_0_0.png" \
     2>&1 | tee "${diagnosis_artifact_dir}/image_comparison.txt"
+diagnosis_comparison_status="${PIPESTATUS[0]}"
+set -e
+printf "image_comparison_exit_status=%s\n" "${diagnosis_comparison_status}" \
+    | tee "${diagnosis_artifact_dir}/image_comparison_status.txt"
 
 shopt -s nullglob
 diagnosis_dump_files=("${diagnosis_tensor_dir}"/groupnorm-mismatch-*.pt)
@@ -259,6 +263,7 @@ fi
     printf "fixed_exit_status=%s\n" "${diagnosis_fixed_status}"
     printf "probe_exit_status=%s\n" "${diagnosis_probe_status}"
     printf "bad_exit_status=%s\n" "${diagnosis_bad_status}"
+    printf "image_comparison_exit_status=%s\n" "${diagnosis_comparison_status}"
     printf "replay_exit_status=%s\n" "${diagnosis_replay_status}"
     printf "tensor_dump_count=%s\n" "${#diagnosis_dump_files[@]}"
 } | tee "${diagnosis_artifact_dir}/summary.txt"
