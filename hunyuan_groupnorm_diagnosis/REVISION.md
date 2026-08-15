@@ -6,7 +6,7 @@ The SSH instructions now use:
 
 1. Plain `python`.
 2. Paths relative to the repository root.
-3. Shared source clones inside the diagnosis folder.
+3. Source snapshots inside the diagnosis folder, created without nested Git clones.
 4. Logs, images, tensor dumps, environment details, patch output, and comparison output inside `hunyuan_groupnorm_diagnosis/artifacts`.
 
 The diagnosis folder also contains reusable image comparison and tensor replay scripts. The live GroupNorm probe is stored as an applicable patch.

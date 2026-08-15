@@ -38,9 +38,9 @@ if [[ ! -f "${diagnosis_baseline}" ]]; then
 fi
 
 diagnosis_artifact_dir="${diagnosis_root}/artifacts/runs/${diagnosis_run_id}"
-diagnosis_bad_source="${diagnosis_root}/worktrees/bad"
-diagnosis_fixed_source="${diagnosis_root}/worktrees/fixed"
-diagnosis_probe_source="${diagnosis_root}/worktrees/probe-${diagnosis_run_id}"
+diagnosis_bad_source="${diagnosis_artifact_dir}/sources/bad"
+diagnosis_fixed_source="${diagnosis_artifact_dir}/sources/fixed"
+diagnosis_probe_source="${diagnosis_artifact_dir}/sources/probe"
 diagnosis_tensor_dir="${diagnosis_artifact_dir}/tensor_dumps"
 
 if [[ -e "${diagnosis_artifact_dir}" ]]; then
@@ -56,37 +56,23 @@ mkdir -p \
 
 exec > >(tee "${diagnosis_artifact_dir}/runner.log") 2>&1
 
-diagnosis_ensure_clone() {
-    local diagnosis_clone_path="$1"
-    local diagnosis_clone_commit="$2"
+diagnosis_export_source() {
+    local diagnosis_source_path="$1"
+    local diagnosis_source_commit="$2"
     local diagnosis_expected_commit
-    local diagnosis_actual_commit
 
-    diagnosis_expected_commit="$(git rev-parse "${diagnosis_clone_commit}^{commit}")"
+    diagnosis_expected_commit="$(git rev-parse "${diagnosis_source_commit}^{commit}")"
 
-    if [[ ! -e "${diagnosis_clone_path}" ]]; then
-        git clone --shared --no-checkout . "${diagnosis_clone_path}"
-        git -C "${diagnosis_clone_path}" checkout --detach "${diagnosis_clone_commit}"
-        return
-    fi
-
-    if [[ ! -d "${diagnosis_clone_path}/.git" ]]; then
-        echo "Existing path is not a Git clone: ${diagnosis_clone_path}" >&2
+    if [[ -e "${diagnosis_source_path}" ]]; then
+        echo "Source path already exists: ${diagnosis_source_path}" >&2
         exit 1
     fi
 
-    diagnosis_actual_commit="$(git -C "${diagnosis_clone_path}" rev-parse HEAD)"
-    if [[ "${diagnosis_actual_commit}" != "${diagnosis_expected_commit}" ]]; then
-        echo "Clone has the wrong commit: ${diagnosis_clone_path}" >&2
-        echo "Expected: ${diagnosis_expected_commit}" >&2
-        echo "Actual:   ${diagnosis_actual_commit}" >&2
-        exit 1
-    fi
-
-    if [[ -n "$(git -C "${diagnosis_clone_path}" status --porcelain)" ]]; then
-        echo "Clone has local changes: ${diagnosis_clone_path}" >&2
-        exit 1
-    fi
+    mkdir -p "${diagnosis_source_path}"
+    git archive "${diagnosis_expected_commit}" \
+        | tar -x -C "${diagnosis_source_path}"
+    printf "%s\n" "${diagnosis_expected_commit}" \
+        > "${diagnosis_source_path}/.hunyuan_groupnorm_commit"
 }
 
 diagnosis_run_hunyuan() {
@@ -156,10 +142,10 @@ git diff "${diagnosis_bad_commit}..${diagnosis_fixed_commit}" -- \
     vllm_omni/platforms/rocm/patch/worker/patch_groupnorm.py \
     | tee "${diagnosis_artifact_dir}/groupnorm_runtime.diff"
 
-echo "Preparing the bad and fixed source clones."
+echo "Exporting the bad and fixed source snapshots."
 {
-    diagnosis_ensure_clone "${diagnosis_bad_source}" "${diagnosis_bad_commit}"
-    diagnosis_ensure_clone "${diagnosis_fixed_source}" "${diagnosis_fixed_commit}"
+    diagnosis_export_source "${diagnosis_bad_source}" "${diagnosis_bad_commit}"
+    diagnosis_export_source "${diagnosis_fixed_source}" "${diagnosis_fixed_commit}"
 } | tee "${diagnosis_artifact_dir}/source_setup.log"
 
 echo "Running the bad revision."
@@ -184,15 +170,21 @@ python "${diagnosis_root}/compare_images.py" \
     --fixed "${diagnosis_artifact_dir}/fixed/images/output_0_0.png" \
     2>&1 | tee "${diagnosis_artifact_dir}/image_comparison.txt"
 
-echo "Preparing a separate source clone for the live GroupNorm probe."
+echo "Exporting a separate source snapshot for the live GroupNorm probe."
 {
-    diagnosis_ensure_clone "${diagnosis_probe_source}" "${diagnosis_bad_commit}"
-    git -C "${diagnosis_probe_source}" apply --check \
+    diagnosis_export_source "${diagnosis_probe_source}" "${diagnosis_bad_commit}"
+    git apply --check --directory="${diagnosis_probe_source}" \
         < "${diagnosis_root}/diagnostic_groupnorm.patch"
-    git -C "${diagnosis_probe_source}" apply \
+    git apply --directory="${diagnosis_probe_source}" \
         < "${diagnosis_root}/diagnostic_groupnorm.patch"
-    git -C "${diagnosis_probe_source}" diff -- \
-        vllm_omni/platforms/rocm/patch/worker/patch_groupnorm.py
+    diagnosis_patch_diff_status=0
+    git diff --no-index -- \
+        "${diagnosis_bad_source}/vllm_omni/platforms/rocm/patch/worker/patch_groupnorm.py" \
+        "${diagnosis_probe_source}/vllm_omni/platforms/rocm/patch/worker/patch_groupnorm.py" \
+        || diagnosis_patch_diff_status="$?"
+    if (( diagnosis_patch_diff_status > 1 )); then
+        exit "${diagnosis_patch_diff_status}"
+    fi
 } 2>&1 | tee "${diagnosis_artifact_dir}/probe/applied_patch.log"
 
 echo "Running the live GroupNorm probe."

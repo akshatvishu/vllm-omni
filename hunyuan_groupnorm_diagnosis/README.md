@@ -86,7 +86,7 @@ git diff 422d8fd8f..b01721535 -- \
   | tee hunyuan_groupnorm_diagnosis/artifacts/groupnorm_runtime.diff
 ```
 
-Create two shared clones inside the diagnosis folder:
+Export two source snapshots inside the diagnosis folder. `git archive` reads the commits through the current repository, so Git does not need to trust a nested clone owned by another user.
 
 ```bash
 set -e
@@ -94,15 +94,13 @@ test ! -e hunyuan_groupnorm_diagnosis/worktrees/bad
 test ! -e hunyuan_groupnorm_diagnosis/worktrees/fixed
 
 {
-  git clone --shared --no-checkout . \
-    hunyuan_groupnorm_diagnosis/worktrees/bad
-  git -C hunyuan_groupnorm_diagnosis/worktrees/bad \
-    checkout --detach 422d8fd8f
+  mkdir -p hunyuan_groupnorm_diagnosis/worktrees/bad
+  git archive 422d8fd8f \
+    | tar -x -C hunyuan_groupnorm_diagnosis/worktrees/bad
 
-  git clone --shared --no-checkout . \
-    hunyuan_groupnorm_diagnosis/worktrees/fixed
-  git -C hunyuan_groupnorm_diagnosis/worktrees/fixed \
-    checkout --detach b01721535
+  mkdir -p hunyuan_groupnorm_diagnosis/worktrees/fixed
+  git archive b01721535 \
+    | tar -x -C hunyuan_groupnorm_diagnosis/worktrees/fixed
 } 2>&1 | tee hunyuan_groupnorm_diagnosis/artifacts/source_setup.log
 ```
 
@@ -203,17 +201,17 @@ The repository thresholds are mean error at most `0.03`, p99 error at most `0.3`
 
 ## Find the first wrong GroupNorm call
 
-Apply the included diagnostic patch to the bad clone. The patch runs PyTorch and AITER on the same live GroupNorm input. It stops on the first output or dtype mismatch and saves the input, weight, bias, expected output, actual output, group count, epsilon, and autocast state.
+Apply the included diagnostic patch to the bad source snapshot. The patch runs PyTorch and AITER on the same live GroupNorm input. It stops on the first output or dtype mismatch and saves the input, weight, bias, expected output, actual output, group count, epsilon, and autocast state.
 
 ```bash
 set -e
 {
-  git -C hunyuan_groupnorm_diagnosis/worktrees/bad apply --check \
-    ../../diagnostic_groupnorm.patch
-  git -C hunyuan_groupnorm_diagnosis/worktrees/bad apply \
-    ../../diagnostic_groupnorm.patch
-  git -C hunyuan_groupnorm_diagnosis/worktrees/bad diff -- \
-    vllm_omni/platforms/rocm/patch/worker/patch_groupnorm.py
+  git apply --check \
+    --directory=hunyuan_groupnorm_diagnosis/worktrees/bad \
+    hunyuan_groupnorm_diagnosis/diagnostic_groupnorm.patch
+  git apply \
+    --directory=hunyuan_groupnorm_diagnosis/worktrees/bad \
+    hunyuan_groupnorm_diagnosis/diagnostic_groupnorm.patch
 } 2>&1 | tee hunyuan_groupnorm_diagnosis/artifacts/probe/applied_patch.log
 ```
 

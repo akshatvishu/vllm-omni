@@ -13,7 +13,7 @@
  from vllm.logger import init_logger
 
  import vllm_omni.diffusion.registry as _registry_mod
-@@ -15,6 +20,107 @@
+@@ -15,6 +20,103 @@
  def _replace_groupnorm_with_aiter(vae: nn.Module) -> bool:
      from aiter.ops.groupnorm import GroupNorm as AiterGroupNorm
 
@@ -40,9 +40,7 @@
 +                "expected": expected.detach().cpu(),
 +                "num_groups": self.num_groups,
 +                "eps": self.eps,
-+                "autocast_enabled": torch.is_autocast_enabled(
-+                    input.device.type
-+                ),
++                "autocast_enabled": torch.is_autocast_enabled(input.device.type),
 +            }
 +            if actual is not None:
 +                payload["actual"] = actual.detach().cpu()
@@ -87,9 +85,7 @@
 +                    None,
 +                    error=repr(exc),
 +                )
-+                raise RuntimeError(
-+                    f"AITER GroupNorm raised an exception. dump={dump_path}"
-+                ) from exc
++                raise RuntimeError(f"AITER GroupNorm raised an exception. dump={dump_path}") from exc
 +
 +            expected_fp32 = expected.float()
 +            actual_fp32 = actual.float()
@@ -121,7 +117,7 @@
      targets = [
          (parent, name, child)
          for parent in vae.modules()
-@@ -23,7 +129,7 @@
+@@ -23,7 +125,7 @@
      ]
 
      for parent, name, child in targets:
@@ -130,8 +126,3 @@
              num_groups=child.num_groups,
              num_channels=child.num_channels,
              eps=child.eps,
-@@ -54,3 +160,4 @@
-
-
- _registry_mod.initialize_model = _patched_initialize_model
-+
