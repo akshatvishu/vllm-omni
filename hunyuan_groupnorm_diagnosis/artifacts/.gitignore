@@ -1,0 +1,16 @@
+*
+!.gitignore
+!bad/
+!bad/.gitkeep
+!baseline/
+!baseline/.gitkeep
+!fixed/
+!fixed/.gitkeep
+!matplotlib_cache/
+!matplotlib_cache/.gitkeep
+!probe/
+!probe/.gitkeep
+!runs/
+!runs/.gitkeep
+!tensor_dumps/
+!tensor_dumps/.gitkeep
