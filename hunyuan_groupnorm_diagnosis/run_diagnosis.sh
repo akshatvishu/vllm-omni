@@ -120,12 +120,22 @@ diagnosis_run_hunyuan() {
 echo "Recording the environment."
 {
     HIP_VISIBLE_DEVICES="${diagnosis_devices}" python - <<'PY'
+from importlib.metadata import PackageNotFoundError, distribution
+
 import aiter
 import torch
 
 print("torch", torch.__version__)
 print("hip", torch.version.hip)
 print("aiter", aiter.__file__)
+try:
+    aiter_distribution = distribution("amd-aiter")
+except PackageNotFoundError:
+    print("aiter_version", "unknown")
+    print("aiter_distribution_location", "unknown")
+else:
+    print("aiter_version", aiter_distribution.version)
+    print("aiter_distribution_location", aiter_distribution.locate_file(""))
 print("device_count", torch.cuda.device_count())
 
 if torch.version.hip is None:
@@ -135,8 +145,6 @@ if torch.cuda.device_count() < 4:
 PY
     printf "vllm_omni "
     git rev-parse HEAD
-    printf "aiter "
-    git -C ../aiter rev-parse HEAD
     printf "devices %s\n" "${diagnosis_devices}"
     printf "baseline %s\n" "${diagnosis_baseline}"
 } | tee "${diagnosis_artifact_dir}/environment.txt"

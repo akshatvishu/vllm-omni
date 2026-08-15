@@ -46,22 +46,30 @@ Do not use `VLLM_ROCM_USE_AITER=0` as a GroupNorm control. The GroupNorm patch c
 set -o pipefail
 {
   python - <<'PY'
+from importlib.metadata import PackageNotFoundError, distribution
+
 import aiter
 import torch
 
 print("torch", torch.__version__)
 print("hip", torch.version.hip)
 print("aiter", aiter.__file__)
+try:
+  aiter_distribution = distribution("amd-aiter")
+except PackageNotFoundError:
+  print("aiter_version", "unknown")
+  print("aiter_distribution_location", "unknown")
+else:
+  print("aiter_version", aiter_distribution.version)
+  print("aiter_distribution_location", aiter_distribution.locate_file(""))
 print("device_count", torch.cuda.device_count())
 PY
   printf "vllm_omni "
   git rev-parse HEAD
-  printf "aiter "
-  git -C ../aiter rev-parse HEAD
 } 2>&1 | tee hunyuan_groupnorm_diagnosis/artifacts/environment.txt
 ```
 
-The environment record must show a nonempty HIP version and the intended AITER installation.
+The environment record must show a nonempty HIP version and the intended installed AITER package. An AITER source checkout is not required.
 
 ## Create isolated source copies
 
