@@ -108,7 +108,7 @@ def collect_metadata(args: argparse.Namespace) -> dict[str, Any]:
             "seeds": args.seeds,
             "concurrencies": args.concurrencies,
             "batch_size": 1,
-            "vllm_peak_memory_measured": False,
+            "vllm_peak_memory_measured": True,
         },
     }
     fingerprint = hashlib.sha256(json.dumps(metadata, sort_keys=True).encode("utf-8")).hexdigest()

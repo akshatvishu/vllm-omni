@@ -317,6 +317,7 @@ def test_serving_summary_keeps_each_mode_and_length_bucket() -> None:
             "audio_duration_s": float(count) / 2,
             "latency_s": float(count),
             "rtf": 1.0,
+            "peak_reserved_gib": float(count) / 100,
         }
         for mode in ("one_shot", "chunked")
         for bucket, count in (
@@ -335,6 +336,7 @@ def test_serving_summary_keeps_each_mode_and_length_bucket() -> None:
     assert summary["latency_s"]["p99"] >= summary["latency_s"]["p90"]
     assert summary["throughput_audio_s_per_s"] == pytest.approx(112.0)
     assert summary["rtf"]["p50"] == 1.0
+    assert summary["peak_reserved_gib"]["max"] == 5.0
     assert {(cell["mode"], cell["bucket"]) for cell in summary["cells"]} == {
         (mode, bucket)
         for mode in ("one_shot", "chunked")
@@ -377,6 +379,7 @@ def test_sweep_summary_reports_successful_throughput(capsys) -> None:
             "audio_duration_s": 10.0,
             "latency_s": 2.0,
             "rtf": 0.2,
+            "peak_reserved_gib": 4.0,
         },
         {
             "mode": "chunked",
@@ -395,6 +398,7 @@ def test_sweep_summary_reports_successful_throughput(capsys) -> None:
     assert "1/2 requests succeeded (1 failed)" in output
     assert "request throughput: 0.500 requests/s" in output
     assert "median latency: 2.00s, median RTF: 0.200" in output
+    assert "peak reserved GPU memory: 4.00 GiB" in output
 
 
 def test_warmups_cover_every_mode_and_bucket_and_fill_concurrency(tmp_path: Path) -> None:
@@ -493,6 +497,7 @@ def test_evaluation_summary_preserves_generation_and_transcription_failures() ->
             "wer": 0.1,
             "latency_s": 2.0,
             "rtf": 0.2,
+            "peak_reserved_gib": 3.0,
         },
         {
             **common,
@@ -505,6 +510,7 @@ def test_evaluation_summary_preserves_generation_and_transcription_failures() ->
             "evaluation_status": "transcription_error",
             "latency_s": 3.0,
             "rtf": 0.3,
+            "peak_reserved_gib": 5.0,
         },
     ]
 
@@ -515,6 +521,7 @@ def test_evaluation_summary_preserves_generation_and_transcription_failures() ->
     assert summary["generation_failures"] == 1
     assert summary["transcription_failures"] == 1
     assert summary["failure_rate"] == pytest.approx(2 / 3)
+    assert summary["peak_reserved_gib"]["mean"] == 4.0
 
 
 def test_whisper_processor_does_not_truncate_long_audio() -> None:
@@ -585,7 +592,11 @@ async def test_vllm_request_sends_seed_and_chunk_settings(tmp_path: Path) -> Non
         assert payload["seed"] == 42
         assert payload["extra_params"] == chunking_args("chunked")
         assert payload["language"] == "English"
-        return httpx.Response(200, content=audio.getvalue())
+        return httpx.Response(
+            200,
+            content=audio.getvalue(),
+            headers={"X-Peak-Memory-MB": "2048"},
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         row = await _generate_case(
@@ -599,7 +610,30 @@ async def test_vllm_request_sends_seed_and_chunk_settings(tmp_path: Path) -> Non
 
     assert row["backend"] == "vllm-omni"
     assert row["audio_duration_s"] == pytest.approx(0.1)
+    assert row["peak_reserved_gib"] == 2.0
     assert Path(row["audio_path"]).is_file()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header", [None, "invalid", "0", "nan"])
+async def test_vllm_request_rejects_missing_or_invalid_peak_memory(header: str | None) -> None:
+    audio = io.BytesIO()
+    sf.write(audio, np.zeros(2400, dtype=np.float32), 24000, format="WAV")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        headers = {"X-Peak-Memory-MB": header} if header is not None else None
+        return httpx.Response(200, content=audio.getvalue(), headers=headers)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(RuntimeError, match="X-Peak-Memory-MB"):
+            await _generate_case(
+                client,
+                "http://test/v1/audio/speech",
+                "k2-fsa/OmniVoice",
+                _generation_case(),
+                asyncio.Semaphore(1),
+                output_dir=None,
+            )
 
 
 @pytest.mark.asyncio

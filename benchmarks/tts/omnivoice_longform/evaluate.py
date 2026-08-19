@@ -110,6 +110,7 @@ def _aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for (backend, mode, bucket), group in sorted(grouped.items()):
         scored = [row for row in group if row.get("evaluation_status") == "success"]
         generated = [row for row in group if row.get("status", "success") == "success"]
+        peak_memory = [row["peak_reserved_gib"] for row in generated if row.get("peak_reserved_gib") is not None]
         generation_failures = sum(row.get("evaluation_status") == "generation_error" for row in group)
         transcription_failures = sum(row.get("evaluation_status") == "transcription_error" for row in group)
         summaries.append(
@@ -131,6 +132,7 @@ def _aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "wer": mean_and_stddev([row["wer"] for row in scored]) if scored else None,
                 "latency_s": mean_and_stddev([row["latency_s"] for row in generated]) if generated else None,
                 "rtf": mean_and_stddev([row["rtf"] for row in generated]) if generated else None,
+                "peak_reserved_gib": mean_and_stddev(peak_memory) if peak_memory else None,
             }
         )
     return summaries
@@ -143,25 +145,28 @@ def _summary_markdown(summaries: list[dict[str, Any]]) -> str:
         "Coverage is `1 - (substitutions + deletions) / reference words`. Insertions are included in WER.",
         "",
         "| Backend | Mode | Bucket | Words min/mean/max | Scored/total | Failures | Coverage mean "
-        "| Coverage stddev | WER mean | Latency mean (s) | RTF mean |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Coverage stddev | WER mean | Latency mean (s) | RTF mean | Peak reserved GPU memory mean (GiB) |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in summaries:
         coverage = row["coverage"]
         wer = row["wer"]
         latency = row["latency_s"]
         rtf = row["rtf"]
+        peak_memory = row["peak_reserved_gib"]
         coverage_mean = f"{100 * coverage['mean']:.2f}%" if coverage else "N/A"
         coverage_stddev = f"{100 * coverage['stddev']:.2f}%" if coverage else "N/A"
         wer_mean = f"{wer['mean']:.4f}" if wer else "N/A"
         latency_mean = f"{latency['mean']:.2f}" if latency else "N/A"
         rtf_mean = f"{rtf['mean']:.3f}" if rtf else "N/A"
+        peak_memory_mean = f"{peak_memory['mean']:.2f}" if peak_memory else "N/A"
         lines.append(
             f"| {row['backend']} | {row['mode']} | {row['bucket']} "
             f"| {row['word_count']['min']}/{row['word_count']['mean']:.1f}/{row['word_count']['max']} "
             f"| {row['scored_samples']}/{row['samples']} "
             f"| {row['generation_failures'] + row['transcription_failures']} "
-            f"| {coverage_mean} | {coverage_stddev} | {wer_mean} | {latency_mean} | {rtf_mean} |"
+            f"| {coverage_mean} | {coverage_stddev} | {wer_mean} | {latency_mean} | {rtf_mean} "
+            f"| {peak_memory_mean} |"
         )
     return "\n".join(lines) + "\n"
 

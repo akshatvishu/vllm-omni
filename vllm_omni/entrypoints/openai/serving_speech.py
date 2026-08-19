@@ -3466,7 +3466,13 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 base64_encode=False,
             )
             audio_response: AudioResponse = self.create_audio(audio_obj)
-            return Response(content=audio_response.audio_data, media_type=audio_response.media_type)
+            peak_memory_mb = float(final_output.peak_memory_mb or 0.0)
+            headers = {"X-Peak-Memory-MB": f"{peak_memory_mb:.3f}"} if peak_memory_mb > 0 else None
+            return Response(
+                content=audio_response.audio_data,
+                media_type=audio_response.media_type,
+                headers=headers,
+            )
 
         except asyncio.CancelledError:
             return self._diffusion_error_response("Client disconnected")

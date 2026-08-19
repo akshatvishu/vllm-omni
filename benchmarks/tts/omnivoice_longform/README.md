@@ -1,51 +1,24 @@
 # OmniVoice long form benchmark
 
-The benchmark compares the reference OmniVoice implementation with vLLM-Omni for long English text. It measures speech coverage, word error rate, generation latency, real time factor, and vLLM serving throughput.
+The benchmark compares the official OmniVoice package with the vLLM-Omni implementation on long English text. It measures how much of the input text appears in the generated speech, word error rate, generation time, real time factor, and vLLM serving throughput.
 
-The benchmark runs the reference model first. It then starts one vLLM-Omni server and tests concurrency 1 by default. After the server exits, Whisper transcribes the saved concurrency 1 audio on the GPU.
+## Quick start
 
-## Test matrix
-
-The quality comparison contains 400 measured outputs:
-
-| Dimension | Values |
-| --- | --- |
-| Backends | Reference OmniVoice and vLLM-Omni |
-| Prompt distribution | 25 near 120 words, 25 near 200, 25 near 300, and 25 from 400 to 600 words |
-| Generation modes | One shot and 15 second chunks |
-| Seeds | 42 |
-| Batch size | 1 |
-| Concurrency | 1 |
-
-At concurrency 1, both backends warm all eight mode and length cells before their measured requests. Each additional vLLM serving sweep also warms all eight cells and sends at least one full concurrency wave. OmniVoice uses batch size 1, so concurrency 2 and 4 measure queueing and saturation rather than request batching.
-
-## Prompt source
-
-The benchmark uses the `long_tts_eval_en` split of Hugging Face [`wcy1122/Long-TTS-Eval`](https://huggingface.co/datasets/wcy1122/Long-TTS-Eval), pinned to revision `fccd057bd96982e13e59c509d2921538e00a17d1`. It deterministically selects 25 source rows across the dataset's content categories. Each source row produces four nested prefixes ending at sentence boundaries. This creates 100 prompts while controlling for topic and opening context across the length buckets.
-
-The selection rules are checked in as [selection.toml](selection.toml). The script downloads and resolves the dataset before model generation starts, then saves the exact prompts and hashes as `prompts.json` in the result directory. Dataset download time is not included in generation latency.
-
-## Requirements
-
-Run the benchmark inside a container that already has ROCm PyTorch and vLLM-Omni. The script installs `omnivoice==0.2.1` and the packages needed for scoring with `--no-deps`, so it does not replace the container's PyTorch.
-
-## Run
-
-Run the full comparison from the repository root with one command:
+Run the full benchmark from the repository root inside a container that has ROCm PyTorch and vLLM-Omni installed:
 
 ```bash
 bash benchmarks/tts/omnivoice_longform/run_benchmark.sh
 ```
 
-The script uses the container's `python` and `vllm` commands. It installs the pinned benchmark packages, downloads the pinned dataset and model revisions, runs both backends, runs Whisper, and saves the result under `benchmarks/tts/omnivoice_longform/results/<timestamp>/`. The script prints the full result path before it starts generation and again when it finishes.
+The default run selects 100 prompts. Each prompt runs in one shot mode and chunked mode with both backends, which produces 400 measured generation cases at concurrency 1.
 
-Use the small run to select 10 prompts from each word bucket. The small run has 40 prompts. It makes 80 reference requests and 80 vLLM requests at each concurrency because every prompt runs in one-shot and chunked modes.
+Use `--small` for 10 prompts in each word count group. The small run selects 40 prompts and produces 160 measured generation cases at concurrency 1.
 
 ```bash
 bash benchmarks/tts/omnivoice_longform/run_benchmark.sh --small
 ```
 
-Concurrency 1 is always included because its audio is used for the quality comparison. Repeat `--concurrency` to add more serving sweeps.
+Concurrency 1 is always included because Whisper uses its saved audio for the quality comparison. Repeat `--concurrency` to add vLLM serving sweeps at other concurrency levels.
 
 ```bash
 bash benchmarks/tts/omnivoice_longform/run_benchmark.sh \
@@ -53,61 +26,151 @@ bash benchmarks/tts/omnivoice_longform/run_benchmark.sh \
     --concurrency 4
 ```
 
-The defaults use GPU 0, float32 generation for both implementations, Whisper large v3 in float32, seed 42, and serving concurrency 1. The OmniVoice and Whisper model revisions are pinned so rerunning the benchmark does not silently change either model.
+The script prints the result directory before generation starts and after the benchmark finishes. By default, results are saved under `benchmarks/tts/omnivoice_longform/results/<timestamp>/`.
 
-The following environment variables change the run:
+## What the script runs
+
+The script runs each stage in this order:
+
+1. It installs `omnivoice==0.2.1`, `jiwer==4.0.0`, and `pydub==0.25.1` with `--no-deps`.
+2. It downloads the pinned Long TTS Eval data and saves the selected prompts and their hashes.
+3. It runs the official OmniVoice package and saves its audio.
+4. It starts one vLLM-Omni server, runs every requested concurrency sweep, and then stops the server.
+5. It loads Whisper on the GPU, transcribes the saved concurrency 1 audio, and writes the quality summary.
+
+The official implementation and the vLLM-Omni server do not run at the same time. Whisper starts only after the vLLM-Omni server has stopped, so Whisper memory does not affect generation measurements.
+
+## Requirements
+
+Run the benchmark in a container that already provides ROCm PyTorch, torchaudio, vLLM, vLLM-Omni, and the OmniVoice runtime dependencies. The script uses the container's `python` and `vllm` commands. It installs the pinned benchmark packages with `--no-deps`, so it does not replace the container's PyTorch packages.
+
+The run also needs `bash`, `curl`, internet access to Hugging Face, and enough disk space for the models, dataset, audio, and JSON results. One MI300X with 192 GB of VRAM is sufficient for the default concurrency 1 run.
+
+## Command options
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--small` | Off | Select 10 source rows instead of 25. Each row produces one prompt in each of the four word count groups. |
+| `--concurrency N` | Concurrency 1 only | Add concurrency `N` to the vLLM serving sweeps. The option can be repeated. |
+| `-h`, `--help` | | Print the command usage. |
+
+The script rejects zero, negative, missing, and repeated concurrency values.
+
+## Environment variables
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `GPU_INDEX` | `0` | GPU exposed through `HIP_VISIBLE_DEVICES` and `CUDA_VISIBLE_DEVICES`. |
+| `PORT` | `8091` | Port used by the temporary vLLM-Omni server. |
+| `MODEL` | `k2-fsa/OmniVoice` | Hugging Face model name or local model directory. |
+| `MODEL_REVISION` | `c5fdb5ccb189668d56333f77ba2629f4cd7535f4` | Pinned OmniVoice model revision. |
+| `WHISPER_MODEL` | `openai/whisper-large-v3` | Whisper model used for transcription. |
+| `WHISPER_REVISION` | `06f233fe06e710322aca913c1bc4249a0d71fce1` | Pinned Whisper model revision. |
+| `WHISPER_DTYPE` | `float32` | Whisper data type. Accepted values are `float32`, `float16`, and `bfloat16`. |
+| `SEEDS` | `42` | Space separated generation seeds, such as `"42 123"`. |
+| `OUTPUT_DIR` | `results/<timestamp>` | Directory used for audio and result files. |
+| `BENCH_PYTHON` | `python` | Python command used by the script. |
+| `VLLM_BIN` | `vllm` | vLLM command used by the script. |
+
+Example:
 
 ```bash
 GPU_INDEX=0 \
-MODEL_REVISION=c5fdb5ccb189668d56333f77ba2629f4cd7535f4 \
-WHISPER_DTYPE=float32 \
-WHISPER_REVISION=06f233fe06e710322aca913c1bc4249a0d71fce1 \
+PORT=8095 \
 SEEDS="42" \
 OUTPUT_DIR=/path/to/results \
-bash benchmarks/tts/omnivoice_longform/run_benchmark.sh --concurrency 4
+bash benchmarks/tts/omnivoice_longform/run_benchmark.sh --small --concurrency 2
 ```
 
-Set `BENCH_PYTHON` or `VLLM_BIN` only when the container uses different command names or paths.
+## Test matrix
 
-Rerun the same command with the same `OUTPUT_DIR` to resume. Reference generation and Whisper evaluation checkpoint after every case. vLLM-Omni checkpoints after every completed concurrency sweep. Failed cases are preserved in the output instead of discarding the rest of the run. The resolved prompt manifest and fingerprinted run metadata are immutable, so a changed model revision, Whisper revision, dependency set, repository state, or manifest is rejected instead of mixed with existing results.
+The default quality comparison contains 400 measured outputs:
+
+| Dimension | Values |
+| --- | --- |
+| Backends | Official OmniVoice package and vLLM-Omni |
+| Prompt distribution | 25 near 120 words, 25 near 200 words, 25 near 300 words, and 25 from 400 to 600 words |
+| Generation modes | One shot and 15 second chunks |
+| Seeds | 42 |
+| Batch size | 1 |
+| Concurrency used for quality | 1 |
+
+Each backend warms one representative request from all eight generation mode and word count combinations before measuring concurrency 1. Each extra vLLM serving sweep repeats that coverage and sends at least one full concurrency wave before measurement.
+
+OmniVoice uses batch size 1. Concurrency 2 and higher measure request queueing and server saturation, not model request batching.
+
+With the default seed, each backend receives 200 measured requests at concurrency 1. Each extra vLLM concurrency sweep receives another 200 measured requests. The small run uses 80 measured requests per backend or vLLM concurrency sweep. Extra seeds multiply these counts.
+
+## Prompt source
+
+The benchmark uses the `long_tts_eval_en` split of Hugging Face [`wcy1122/Long-TTS-Eval`](https://huggingface.co/datasets/wcy1122/Long-TTS-Eval), pinned to revision `fccd057bd96982e13e59c509d2921538e00a17d1`.
+
+The selector chooses 25 source rows across the dataset categories. Each source row produces four prefixes that end at sentence boundaries, with one prefix near each target length. The four prompts from one row share the same topic and opening text, so the comparison changes length without changing the start of the passage.
+
+The selection rules are stored in [selection.toml](selection.toml). Dataset download and prompt selection happen before model generation, so their time is not included in generation latency. The exact prompts, source row IDs, word counts, and text hashes are saved in `prompts.json`.
 
 ## Generation modes
 
-One shot generation uses `audio_chunk_threshold=1000000`. The large finite value disables chunking without relying on infinity conversion.
+One shot mode sets `audio_chunk_threshold=1000000`. The large finite value disables chunking without using infinity.
 
-Chunked generation uses `audio_chunk_threshold=0` and `audio_chunk_duration=15`. The same values are passed to both implementations.
+Chunked mode sets `audio_chunk_threshold=0` and `audio_chunk_duration=15`. Both implementations receive the same values.
 
-## Whisper and scoring
+## Metrics
 
-The evaluator uses `openai/whisper-large-v3`, 16 kHz mono audio, English transcription, and timestamp based sequential long form generation. The processor receives `truncation=False`, so it does not discard audio after Whisper's 30 second input window.
-
-The evaluator reports these metrics:
+Whisper transcripts each successful audio file and compares the transcript with the source text. The quality summary reports the following values for every backend, generation mode, and word count group:
 
 ```text
 WER = (substitutions + deletions + insertions) / reference words
 coverage = 1 - (substitutions + deletions) / reference words
+RTF = generation time / generated audio duration
 ```
 
-Insertions increase WER but do not reduce coverage. The evaluator uses sequence alignment from `jiwer`, so repeated words are counted correctly.
+Insertions increase WER but do not reduce coverage. The evaluator uses word sequence alignment from `jiwer`, so repeated words are counted by their position instead of by set membership. A lower WER and RTF are better, while a higher coverage is better. An RTF below 1 means generation was faster than the audio duration.
 
-## Outputs
+The serving summary also records successful and failed request counts, request throughput, generated audio throughput, latency percentiles, and RTF percentiles. Failed requests do not count toward successful request or audio throughput.
 
-Each run creates these files under the selected output directory:
+## Whisper transcription
+
+The evaluator uses `openai/whisper-large-v3`, 16 kHz mono audio, English transcription, and timestamp based long audio generation. It passes `truncation=False`, so audio after Whisper's 30 second input window is not discarded.
+
+The evaluator prints when Whisper is loading, when transcription starts, and one progress line for every restored, successful, or failed case.
+
+## Resume an interrupted run
+
+Set `OUTPUT_DIR` to the same directory and rerun the same command. Reference generation and Whisper transcription save progress after every case. The vLLM benchmark saves progress after every completed concurrency sweep. Failed cases remain in the result files instead of causing the completed work to be discarded.
+
+The benchmark rejects a resume when the model revision, Whisper revision, dependency versions, repository contents, run settings, or prompt manifest do not match the original run. The check prevents results from different code or model versions from being combined in one summary.
+
+## Output files
+
+Each run creates the following files:
 
 ```text
-reference/generation.jsonl
-reference/summary.json
-prompts.json
-run_metadata.json
-vllm-omni/generation.jsonl
-vllm-omni/serving.jsonl
-vllm-omni/serving_summary.json
-vllm-omni/server.log
-evaluation/evaluated.jsonl
-evaluation/summary.json
-evaluation/summary.md
+results/<timestamp>/
+├── prompts.json
+├── run_metadata.json
+├── reference/
+│   ├── generation.jsonl
+│   ├── summary.json
+│   └── *.wav
+├── vllm-omni/
+│   ├── generation.jsonl
+│   ├── serving.jsonl
+│   ├── serving_summary.json
+│   ├── server.log
+│   └── *.wav
+└── evaluation/
+    ├── evaluated.jsonl
+    ├── summary.json
+    └── summary.md
 ```
 
-The reference and concurrency 1 vLLM directories also contain one WAV file per case. Whisper runs only after both generation processes have exited, so ASR memory use does not affect generation measurements.
+`generation.jsonl` contains one row for every measured case. `serving.jsonl` contains every vLLM concurrency sweep, while `vllm-omni/generation.jsonl` contains the concurrency 1 rows used for quality evaluation. `evaluation/summary.md` is the main quality table, and `vllm-omni/serving_summary.json` contains the serving metrics.
 
-`run_metadata.json` records the source revisions, package versions, GPU identity, manifest hash, and run settings. Reference peak memory is recorded per request. vLLM server peak memory is not measured by this script because ROCm monitoring commands differ across container images. Validate the vLLM memory benefit separately on the MI300X with the container's ROCm monitoring tool.
+`run_metadata.json` records the pinned model revisions, package versions, GPU identity, prompt manifest hash, repository state, and run settings.
+
+## GPU memory measurement
+
+The benchmark records the peak GPU memory reserved by PyTorch for every successful generation request. The official OmniVoice runner reads the value in its process. The vLLM-Omni server returns the value in the `X-Peak-Memory-MB` response header, and the benchmark converts it to GiB. PyTorch uses the same API with the ROCm backend, so the measurement does not depend on an `amd-smi` command being present in the container.
+
+The value includes PyTorch's reserved memory pool. It does not include GPU memory allocated outside PyTorch.

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+import math
 import statistics
 import time
 from collections import defaultdict
@@ -37,6 +38,34 @@ def _response_error(response: httpx.Response) -> RuntimeError:
     return RuntimeError(f"speech request failed with HTTP {response.status_code}: {detail}")
 
 
+def _peak_reserved_gib(response: httpx.Response) -> float:
+    value = response.headers.get("X-Peak-Memory-MB")
+    if value is None:
+        raise RuntimeError("speech response is missing the X-Peak-Memory-MB header")
+    try:
+        peak_memory_mb = float(value)
+    except ValueError as error:
+        raise RuntimeError(f"invalid X-Peak-Memory-MB header: {value!r}") from error
+    if not math.isfinite(peak_memory_mb) or peak_memory_mb <= 0:
+        raise RuntimeError(f"invalid X-Peak-Memory-MB header: {value!r}")
+    return peak_memory_mb / 1024
+
+
+def _peak_memory_summary(rows: list[dict[str, Any]]) -> dict[str, float] | None:
+    values = [
+        row["peak_reserved_gib"]
+        for row in rows
+        if row.get("status", "success") == "success" and row.get("peak_reserved_gib") is not None
+    ]
+    if not values:
+        return None
+    return {
+        "mean": statistics.fmean(values),
+        "median": statistics.median(values),
+        "max": max(values),
+    }
+
+
 async def _generate_case(
     client: httpx.AsyncClient,
     api_url: str,
@@ -60,6 +89,7 @@ async def _generate_case(
 
     if response.status_code != 200:
         raise _response_error(response)
+    peak_reserved_gib = _peak_reserved_gib(response)
 
     try:
         audio_info = sf.info(io.BytesIO(response.content))
@@ -82,6 +112,7 @@ async def _generate_case(
         "audio_duration_s": duration_s,
         "latency_s": latency_s,
         "rtf": latency_s / duration_s,
+        "peak_reserved_gib": peak_reserved_gib,
     }
 
 
@@ -115,6 +146,7 @@ async def _generate_case_record(
             "audio_duration_s": None,
             "latency_s": None,
             "rtf": None,
+            "peak_reserved_gib": None,
             "error_type": type(error).__name__,
             "error": str(error),
         }
@@ -171,6 +203,7 @@ def _summarize_rows(
         "throughput_audio_s_per_s": sum(row["audio_duration_s"] for row in successful_rows) / wall_time_s,
         "latency_s": latency_summary([row["latency_s"] for row in successful_rows]),
         "rtf": latency_summary([row["rtf"] for row in successful_rows]),
+        "peak_reserved_gib": _peak_memory_summary(successful_rows),
     }
     by_mode: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -187,6 +220,7 @@ def _summarize_rows(
                 if any(row.get("status", "success") == "success" for row in mode_rows)
                 else None
             ),
+            "peak_reserved_gib": _peak_memory_summary(mode_rows),
         }
         for mode, mode_rows in by_mode.items()
     }
@@ -212,6 +246,7 @@ def _summarize_rows(
                 if any(row.get("status", "success") == "success" for row in cell_rows)
                 else None
             ),
+            "peak_reserved_gib": _peak_memory_summary(cell_rows),
         }
         for (mode, bucket), cell_rows in sorted(by_cell.items())
     ]
@@ -230,6 +265,8 @@ def _print_sweep_summary(summary: dict[str, Any]) -> None:
     )
     if summary["latency_s"] is not None:
         print(f"  median latency: {summary['latency_s']['p50']:.2f}s, median RTF: {summary['rtf']['p50']:.3f}")
+    if summary["peak_reserved_gib"] is not None:
+        print(f"  peak reserved GPU memory: {summary['peak_reserved_gib']['max']:.2f} GiB")
 
 
 async def run(args: argparse.Namespace) -> None:
