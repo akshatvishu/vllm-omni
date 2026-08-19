@@ -2,7 +2,7 @@
 
 The benchmark compares the reference OmniVoice implementation with vLLM-Omni for long English text. It measures speech coverage, word error rate, generation latency, real time factor, and vLLM serving throughput.
 
-The benchmark runs the reference model first. It then starts one vLLM-Omni server and tests concurrency 1, 2, and 4. After the server exits, Whisper transcribes the saved concurrency 1 audio on the GPU.
+The benchmark runs the reference model first. It then starts one vLLM-Omni server and tests concurrency 1 by default. After the server exits, Whisper transcribes the saved concurrency 1 audio on the GPU.
 
 ## Test matrix
 
@@ -17,7 +17,7 @@ The quality comparison contains 400 measured outputs:
 | Batch size | 1 |
 | Concurrency | 1 |
 
-The reference backend warms both generation modes. Each vLLM serving sweep warms all eight mode and length cells and sends at least one full concurrency wave before its 200 measured requests. OmniVoice uses batch size 1, so concurrency 2 and 4 measure queueing and saturation rather than request batching.
+The reference backend warms both generation modes. Each vLLM serving sweep warms all eight mode and length cells and sends at least one full concurrency wave before its measured requests. OmniVoice uses batch size 1, so concurrency 2 and 4 measure queueing and saturation rather than request batching.
 
 ## Prompt source
 
@@ -45,7 +45,15 @@ Use the small run to select 10 prompts from each word bucket. The small run has 
 bash benchmarks/tts/omnivoice_longform/run_benchmark.sh --small
 ```
 
-The defaults use GPU 0, float32 generation for both implementations, Whisper large v3 in float32, seed 42, and serving concurrency 1, 2, and 4. The OmniVoice and Whisper model revisions are pinned so rerunning the benchmark does not silently change either model.
+Concurrency 1 is always included because its audio is used for the quality comparison. Repeat `--concurrency` to add more serving sweeps.
+
+```bash
+bash benchmarks/tts/omnivoice_longform/run_benchmark.sh \
+    --concurrency 2 \
+    --concurrency 4
+```
+
+The defaults use GPU 0, float32 generation for both implementations, Whisper large v3 in float32, seed 42, and serving concurrency 1. The OmniVoice and Whisper model revisions are pinned so rerunning the benchmark does not silently change either model.
 
 The following environment variables change the run:
 
@@ -55,9 +63,8 @@ MODEL_REVISION=c5fdb5ccb189668d56333f77ba2629f4cd7535f4 \
 WHISPER_DTYPE=float32 \
 WHISPER_REVISION=06f233fe06e710322aca913c1bc4249a0d71fce1 \
 SEEDS="42" \
-CONCURRENCIES="1 2 4" \
 OUTPUT_DIR=/path/to/results \
-bash benchmarks/tts/omnivoice_longform/run_benchmark.sh
+bash benchmarks/tts/omnivoice_longform/run_benchmark.sh --concurrency 4
 ```
 
 Set `BENCH_PYTHON` or `VLLM_BIN` only when the container uses different command names or paths.

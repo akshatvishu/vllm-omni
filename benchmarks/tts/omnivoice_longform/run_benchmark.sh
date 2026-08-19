@@ -18,25 +18,39 @@ WHISPER_REVISION="${WHISPER_REVISION:-06f233fe06e710322aca913c1bc4249a0d71fce1}"
 OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/results/$(date +%Y%m%d-%H%M%S)}"
 SELECTION="$SCRIPT_DIR/selection.toml"
 read -r -a SEED_VALUES <<< "${SEEDS:-42}"
-read -r -a CONCURRENCY_VALUES <<< "${CONCURRENCIES:-1 2 4}"
+CONCURRENCY_VALUES=(1)
 PREPARE_DATASET_ARGS=()
 
-if [[ $# -gt 1 ]]; then
-    echo "Usage: $0 [--small]" >&2
-    exit 2
-fi
-case "${1:-}" in
-    "") ;;
-    --small) PREPARE_DATASET_ARGS=(--source-examples 10) ;;
-    -h|--help)
-        echo "Usage: $0 [--small]"
-        exit 0
-        ;;
-    *)
-        echo "Usage: $0 [--small]" >&2
-        exit 2
-        ;;
-esac
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --small)
+            PREPARE_DATASET_ARGS=(--source-examples 10)
+            shift
+            ;;
+        --concurrency)
+            if [[ $# -lt 2 || ! "$2" =~ ^[1-9][0-9]*$ ]]; then
+                echo "--concurrency requires a positive integer" >&2
+                exit 2
+            fi
+            for concurrency in "${CONCURRENCY_VALUES[@]}"; do
+                if [[ "$concurrency" == "$2" ]]; then
+                    echo "Duplicate concurrency: $2" >&2
+                    exit 2
+                fi
+            done
+            CONCURRENCY_VALUES+=("$2")
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: $0 [--small] [--concurrency N]..."
+            exit 0
+            ;;
+        *)
+            echo "Usage: $0 [--small] [--concurrency N]..." >&2
+            exit 2
+            ;;
+    esac
+done
 
 if ! BENCH_PYTHON="$(command -v "$PYTHON_COMMAND")"; then
     echo "Python executable not found: $PYTHON_COMMAND" >&2

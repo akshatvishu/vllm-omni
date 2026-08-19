@@ -146,7 +146,7 @@ def test_small_dataset_selection_produces_ten_prompts_per_bucket() -> None:
     }
 
 
-def test_runner_uses_pinned_reference_package_without_checkout() -> None:
+def test_runner_defaults_and_pinned_packages() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
 
     assert '"omnivoice==0.2.1"' in runner
@@ -155,7 +155,32 @@ def test_runner_uses_pinned_reference_package_without_checkout() -> None:
     assert "REFERENCE_REPO" not in runner
     assert 'OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/results/' in runner
     assert 'OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"' in runner
-    assert "--small) PREPARE_DATASET_ARGS=(--source-examples 10)" in runner
+    assert "--small)" in runner
+    assert "PREPARE_DATASET_ARGS=(--source-examples 10)" in runner
+    assert "CONCURRENCY_VALUES=(1)" in runner
+    assert 'CONCURRENCY_VALUES+=("$2")' in runner
+    assert "CONCURRENCIES" not in runner
+
+
+@pytest.mark.parametrize(
+    ("arguments", "error"),
+    [
+        (["--concurrency"], "requires a positive integer"),
+        (["--concurrency", "0"], "requires a positive integer"),
+        (["--concurrency", "1"], "Duplicate concurrency: 1"),
+        (["--unknown"], "Usage:"),
+    ],
+)
+def test_runner_rejects_invalid_arguments(arguments: list[str], error: str) -> None:
+    result = subprocess.run(
+        ["bash", str(RUNNER), *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert error in result.stderr
 
 
 def test_dataset_selection_rejects_nonpositive_source_examples() -> None:
