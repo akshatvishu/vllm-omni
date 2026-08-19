@@ -199,6 +199,7 @@ def join_audio_chunks(
         return chunks[0]
 
     boundary_samples = int(silence_duration_seconds * sample_rate) // 3
+    # Work on copies so changing each chunk's start and end does not change the input audio.
     joined_parts = [chunks[0].clone()]
     for chunk in chunks[1:]:
         previous_chunk = joined_parts[-1]

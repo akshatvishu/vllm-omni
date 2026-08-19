@@ -143,6 +143,7 @@ def test_join_audio_chunks_fades_boundaries_and_inserts_silence():
 
 def test_join_audio_chunks_fades_both_edges_of_middle_chunks():
     chunks = [torch.full((1, 1, 4), value) for value in (1.0, 2.0, 3.0)]
+    original_chunks = [chunk.clone() for chunk in chunks]
 
     joined = join_audio_chunks(chunks, sample_rate=20)
 
@@ -150,6 +151,8 @@ def test_join_audio_chunks_fades_both_edges_of_middle_chunks():
         1, 1, -1
     )
     torch.testing.assert_close(joined, expected)
+    for chunk, original_chunk in zip(chunks, original_chunks, strict=True):
+        torch.testing.assert_close(chunk, original_chunk)
 
 
 def test_copy_audio_to_cpu_does_not_copy_cpu_input():

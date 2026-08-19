@@ -304,16 +304,13 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
             conditional_ids = torch.cat([text_ids, target_ids], dim=1)
         conditional_length = conditional_ids.shape[1]
 
-        unconditional_ids = target_ids.clone()
         max_length = max(conditional_length, target_length)
-        if target_length < max_length:
-            padding = torch.full(
-                (num_codebooks, max_length - target_length),
-                mask_id,
-                dtype=torch.long,
-                device=device,
-            )
-            unconditional_ids = torch.cat([unconditional_ids, padding], dim=1)
+        unconditional_ids = torch.full(
+            (num_codebooks, max_length),
+            mask_id,
+            dtype=torch.long,
+            device=device,
+        )
 
         batch_input_ids = torch.stack([conditional_ids, unconditional_ids])
         batch_audio_mask = torch.zeros(2, max_length, dtype=torch.bool, device=device)
