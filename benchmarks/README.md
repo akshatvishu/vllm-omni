@@ -11,6 +11,7 @@ Model-agnostic serving benchmarks for TTS models, including Qwen3-TTS and VoxCPM
 - **Layout**: `tts/bench_tts.py` (serving benchmark driver), `tts/model_configs.yaml` (model registry), `tts/plot_results.py` (result plotting)
 - **Dataset**: Seed-TTS full or text-only datasets, plus bundled smoke/design prompts under `build_dataset/`
 - **Key metrics**: TTFP (time to first audio packet), E2E latency, RTF (real-time factor), throughput (audio seconds / wall-clock second)
+- **OmniVoice long text**: `tts/omnivoice_longform/` compares the original implementation with vLLM-Omni and measures speech coverage after one shot and 15 second chunked generation.
 
 ### [Diffusion](diffusion/README.md) — Image and Video Generation
 

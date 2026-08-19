@@ -1,0 +1,33 @@
+dataset = "wcy1122/Long-TTS-Eval"
+revision = "fccd057bd96982e13e59c509d2921538e00a17d1"
+config = "default"
+split = "long_tts_eval_en"
+filename = "jsonl/long_tts_eval_en.jsonl"
+text_field = "text_norm"
+license = "Apache-2.0"
+selection_seed = 6333
+source_examples = 25
+
+[[buckets]]
+name = "words_120"
+target_words = 120
+min_words = 100
+max_words = 140
+
+[[buckets]]
+name = "words_200"
+target_words = 200
+min_words = 180
+max_words = 220
+
+[[buckets]]
+name = "words_300"
+target_words = 300
+min_words = 275
+max_words = 325
+
+[[buckets]]
+name = "words_400_plus"
+target_words = 500
+min_words = 400
+max_words = 600
