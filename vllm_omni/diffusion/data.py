@@ -1442,6 +1442,7 @@ class DiffusionOutput:
 
     # memory usage info
     peak_memory_mb: float = 0.0
+    peak_memory_allocated_mb: float = 0.0
 
     # When True, move tensor fields to CPU at construction time. Useful when
     # the output is shipped across process boundaries (e.g. step-execution

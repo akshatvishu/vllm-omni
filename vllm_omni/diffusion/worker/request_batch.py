@@ -47,6 +47,7 @@ def split_diffusion_output_by_request(
             finished=result.finished,
             stage_durations=result.stage_durations,
             peak_memory_mb=result.peak_memory_mb,
+            peak_memory_allocated_mb=result.peak_memory_allocated_mb,
             chunk_index=result.chunk_index,
             total_chunks=result.total_chunks,
             started_event_ids=result.started_event_ids,

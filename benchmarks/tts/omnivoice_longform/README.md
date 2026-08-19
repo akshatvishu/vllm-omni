@@ -171,9 +171,9 @@ results/<timestamp>/
 
 ## GPU memory measurement
 
-The benchmark records the peak GPU memory reserved by PyTorch for every successful generation request. The official OmniVoice runner reads the value in its process. The vLLM-Omni server returns the value in the `X-Peak-Memory-MB` response header, and the benchmark converts it to GiB. PyTorch uses the same API with the ROCm backend, so the measurement does not depend on an `amd-smi` command being present in the container.
+The benchmark records peak allocated and peak reserved PyTorch GPU memory for every successful generation request. The official OmniVoice runner reads both values in its process. The vLLM-Omni server returns them in the `X-Peak-Memory-Allocated-MB` and `X-Peak-Memory-MB` response headers, and the benchmark converts them to GiB. PyTorch uses the same APIs with the ROCm backend, so this does not depend on an `amd-smi` command being present in the container.
 
-The value includes PyTorch's reserved memory pool. It does not include GPU memory allocated outside PyTorch.
+Peak allocated memory measures memory occupied by live tensors and is the primary value for the chunk-retention comparison. Peak reserved memory includes PyTorch's reusable allocator pool, which can remain unchanged after tensors are released. Neither value includes GPU memory allocated outside PyTorch.
 
 ## Compare GPU retention with CPU copies
 
@@ -185,9 +185,9 @@ bash benchmarks/tts/omnivoice_longform/run_memory_ab.sh
 
 The runner tests one Long TTS Eval source row by default. The row produces four nested prompts at about 120, 200, 300, and 500 words, so the longest request exercises the path with the most retained chunks. Each variant warms all four lengths before measurement. PyTorch can keep reserved memory after a warmup, so use the overall maximum to judge GPU memory savings rather than treating each word count row as an independent cold process.
 
-Both variants use the same committed vLLM-Omni revision. The runner uses [prepare_gpu_retention_baseline.py](prepare_gpu_retention_baseline.py) to change the baseline worktree so it keeps decoded chunks on the GPU. The candidate worktree uses the normal code, which copies each decoded chunk to CPU. The runner starts a fresh server for each worktree and runs the variants one after the other on the same GPU.
+Both variants use the same committed vLLM-Omni revision. The runner uses [prepare_gpu_retention_baseline.py](prepare_gpu_retention_baseline.py) to change the baseline worktree so it keeps decoded chunks on the GPU while generating, then copies all chunks to CPU before joining them. The candidate worktree copies each chunk to CPU as soon as it is decoded. Both variants therefore use the same CPU waveform joining code. The runner starts a fresh server for each worktree and runs the variants one after the other on the same GPU.
 
-The A/B run measures only chunked vLLM-Omni requests at concurrency 1. It does not run the official OmniVoice package or Whisper, and it does not save WAV files. It compares the SHA256 hashes of the returned WAV data so the report shows whether both variants produced identical audio. Results are saved under `results/memory-ab/<timestamp>/`. The main report is `comparison.md`, and `comparison.json` contains the same values in a machine readable form.
+The A/B run measures only chunked vLLM-Omni requests at concurrency 1. It does not run the official OmniVoice package or Whisper. It temporarily saves each response inside the disposable worktrees, compares the decoded PCM sample rate, shape, maximum absolute error, RMSE, and signal-to-noise ratio, then removes the audio with the worktrees. The report also includes exact WAV file hashes, but the PCM metrics are the audio-equivalence result. Results are saved under `results/memory-ab/<timestamp>/`. The main report is `comparison.md`, and `comparison.json` contains the same values in a machine readable form.
 
 Use more source rows when you need a more stable latency result:
 

@@ -67,6 +67,7 @@ def test_formatter_preserves_single_video_audio_actions_and_metadata(
             output=None,
             stage_durations={"execute": 1.25},
             peak_memory_mb=321.0,
+            peak_memory_allocated_mb=300.0,
         ),
         output_data={"raw": "output"},
         postprocess_output=postprocess_output,
@@ -90,6 +91,7 @@ def test_formatter_preserves_single_video_audio_actions_and_metadata(
     }
     assert result.stage_durations == {"execute": 1.25}
     assert result.peak_memory_mb == 321.0
+    assert result.peak_memory_allocated_mb == 300.0
     assert result.metrics == {
         "image_num": 1,
         "resolution": 512,

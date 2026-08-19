@@ -296,6 +296,7 @@ def _format_single_prompt_output(
                 final_output_type="text",
                 stage_durations=diffusion_output.stage_durations,
                 peak_memory_mb=diffusion_output.peak_memory_mb,
+                peak_memory_allocated_mb=diffusion_output.peak_memory_allocated_mb,
                 finished=finished,
             ),
         ]
@@ -323,6 +324,7 @@ def _format_single_prompt_output(
                 final_output_type="audio",
                 stage_durations=diffusion_output.stage_durations,
                 peak_memory_mb=diffusion_output.peak_memory_mb,
+                peak_memory_allocated_mb=diffusion_output.peak_memory_allocated_mb,
                 finished=finished,
             ),
         ]
@@ -341,6 +343,7 @@ def _format_single_prompt_output(
             multimodal_output=mm_output,
             stage_durations=diffusion_output.stage_durations,
             peak_memory_mb=diffusion_output.peak_memory_mb,
+            peak_memory_allocated_mb=diffusion_output.peak_memory_allocated_mb,
             finished=finished,
         ),
     ]

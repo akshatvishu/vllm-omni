@@ -98,7 +98,7 @@ class TestFromStageOutput:
         assert out.request_id == "source-id"
 
     def test_passes_control_fields(self):
-        """Control fields (metrics, stage_durations, peak_memory_mb) are set."""
+        """Control fields are set."""
         source = _make_text_request_output()
         out = OmniRequestOutput.from_stage_output(
             source,
@@ -107,11 +107,13 @@ class TestFromStageOutput:
             metrics={"ttft": 0.5},
             stage_durations={"prefill": 0.12},
             peak_memory_mb=1024.0,
+            peak_memory_allocated_mb=900.0,
         )
 
         assert out.metrics == {"ttft": 0.5}
         assert out.stage_durations == {"prefill": 0.12}
         assert out.peak_memory_mb == 1024.0
+        assert out.peak_memory_allocated_mb == 900.0
 
     def test_finished_field_copied(self):
         """The *finished* flag is copied from the source when present."""
@@ -241,6 +243,7 @@ class TestMsgpackRoundTrip:
             "_custom_output": {},
             "stage_durations": {},
             "peak_memory_mb": 0.0,
+            "peak_memory_allocated_mb": 0.0,
             # --- nested request_output key (legacy) ---
             "request_output": {
                 "request_id": "legacy-1",

@@ -197,6 +197,7 @@ run_variant() {
     local worktree="$2"
     local result_dir="$OUTPUT_DIR/$label"
     local log_path="$result_dir/server.log"
+    local audio_dir="$worktree/.omnivoice-memory-ab-audio"
     mkdir -p "$result_dir"
 
     record_metadata "$worktree" "$result_dir"
@@ -223,7 +224,8 @@ run_variant() {
         --seeds "${SEED_VALUES[@]}" \
         --modes chunked \
         --concurrencies 1 \
-        --discard-audio
+        --discard-audio \
+        --temporary-audio-dir "$audio_dir"
     stop_server
     wait_for_port_release
 }

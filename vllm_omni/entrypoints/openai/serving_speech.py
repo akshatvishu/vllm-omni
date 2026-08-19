@@ -3467,11 +3467,16 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             )
             audio_response: AudioResponse = self.create_audio(audio_obj)
             peak_memory_mb = float(final_output.peak_memory_mb or 0.0)
-            headers = {"X-Peak-Memory-MB": f"{peak_memory_mb:.3f}"} if peak_memory_mb > 0 else None
+            peak_memory_allocated_mb = float(final_output.peak_memory_allocated_mb or 0.0)
+            headers = {}
+            if peak_memory_mb > 0:
+                headers["X-Peak-Memory-MB"] = f"{peak_memory_mb:.3f}"
+            if peak_memory_allocated_mb > 0:
+                headers["X-Peak-Memory-Allocated-MB"] = f"{peak_memory_allocated_mb:.3f}"
             return Response(
                 content=audio_response.audio_data,
                 media_type=audio_response.media_type,
-                headers=headers,
+                headers=headers or None,
             )
 
         except asyncio.CancelledError:

@@ -40,25 +40,21 @@ def _response_error(response: httpx.Response) -> RuntimeError:
     return RuntimeError(f"speech request failed with HTTP {response.status_code}: {detail}")
 
 
-def _peak_reserved_gib(response: httpx.Response) -> float:
-    value = response.headers.get("X-Peak-Memory-MB")
+def _peak_memory_gib(response: httpx.Response, header: str) -> float:
+    value = response.headers.get(header)
     if value is None:
-        raise RuntimeError("speech response is missing the X-Peak-Memory-MB header")
+        raise RuntimeError(f"speech response is missing the {header} header")
     try:
         peak_memory_mb = float(value)
     except ValueError as error:
-        raise RuntimeError(f"invalid X-Peak-Memory-MB header: {value!r}") from error
+        raise RuntimeError(f"invalid {header} header: {value!r}") from error
     if not math.isfinite(peak_memory_mb) or peak_memory_mb <= 0:
-        raise RuntimeError(f"invalid X-Peak-Memory-MB header: {value!r}")
+        raise RuntimeError(f"invalid {header} header: {value!r}")
     return peak_memory_mb / 1024
 
 
-def _peak_memory_summary(rows: list[dict[str, Any]]) -> dict[str, float] | None:
-    values = [
-        row["peak_reserved_gib"]
-        for row in rows
-        if row.get("status", "success") == "success" and row.get("peak_reserved_gib") is not None
-    ]
+def _peak_memory_summary(rows: list[dict[str, Any]], key: str) -> dict[str, float] | None:
+    values = [row[key] for row in rows if row.get("status", "success") == "success" and row.get(key) is not None]
     if not values:
         return None
     return {
@@ -91,7 +87,8 @@ async def _generate_case(
 
     if response.status_code != 200:
         raise _response_error(response)
-    peak_reserved_gib = _peak_reserved_gib(response)
+    peak_reserved_gib = _peak_memory_gib(response, "X-Peak-Memory-MB")
+    peak_allocated_gib = _peak_memory_gib(response, "X-Peak-Memory-Allocated-MB")
 
     try:
         audio_info = sf.info(io.BytesIO(response.content))
@@ -116,6 +113,7 @@ async def _generate_case(
         "latency_s": latency_s,
         "rtf": latency_s / duration_s,
         "peak_reserved_gib": peak_reserved_gib,
+        "peak_allocated_gib": peak_allocated_gib,
     }
 
 
@@ -151,6 +149,7 @@ async def _generate_case_record(
             "latency_s": None,
             "rtf": None,
             "peak_reserved_gib": None,
+            "peak_allocated_gib": None,
             "error_type": type(error).__name__,
             "error": str(error),
         }
@@ -207,7 +206,8 @@ def _summarize_rows(
         "throughput_audio_s_per_s": sum(row["audio_duration_s"] for row in successful_rows) / wall_time_s,
         "latency_s": latency_summary([row["latency_s"] for row in successful_rows]),
         "rtf": latency_summary([row["rtf"] for row in successful_rows]),
-        "peak_reserved_gib": _peak_memory_summary(successful_rows),
+        "peak_reserved_gib": _peak_memory_summary(successful_rows, "peak_reserved_gib"),
+        "peak_allocated_gib": _peak_memory_summary(successful_rows, "peak_allocated_gib"),
     }
     by_mode: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -224,7 +224,8 @@ def _summarize_rows(
                 if any(row.get("status", "success") == "success" for row in mode_rows)
                 else None
             ),
-            "peak_reserved_gib": _peak_memory_summary(mode_rows),
+            "peak_reserved_gib": _peak_memory_summary(mode_rows, "peak_reserved_gib"),
+            "peak_allocated_gib": _peak_memory_summary(mode_rows, "peak_allocated_gib"),
         }
         for mode, mode_rows in by_mode.items()
     }
@@ -250,7 +251,8 @@ def _summarize_rows(
                 if any(row.get("status", "success") == "success" for row in cell_rows)
                 else None
             ),
-            "peak_reserved_gib": _peak_memory_summary(cell_rows),
+            "peak_reserved_gib": _peak_memory_summary(cell_rows, "peak_reserved_gib"),
+            "peak_allocated_gib": _peak_memory_summary(cell_rows, "peak_allocated_gib"),
         }
         for (mode, bucket), cell_rows in sorted(by_cell.items())
     ]
@@ -271,6 +273,8 @@ def _print_sweep_summary(summary: dict[str, Any]) -> None:
         print(f"  median latency: {summary['latency_s']['p50']:.2f}s, median RTF: {summary['rtf']['p50']:.3f}")
     if summary["peak_reserved_gib"] is not None:
         print(f"  peak reserved GPU memory: {summary['peak_reserved_gib']['max']:.2f} GiB")
+    if summary["peak_allocated_gib"] is not None:
+        print(f"  peak allocated GPU memory: {summary['peak_allocated_gib']['max']:.2f} GiB")
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -285,6 +289,9 @@ async def run(args: argparse.Namespace) -> None:
     cases = build_generation_cases(prompts, args.seeds, args.modes)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    temporary_audio_dir = Path(args.temporary_audio_dir) if args.temporary_audio_dir else None
+    if temporary_audio_dir is not None:
+        temporary_audio_dir.mkdir(parents=True, exist_ok=True)
     serving_path = output_dir / "serving.jsonl"
     generation_path = output_dir / "generation.jsonl"
     summary_path = output_dir / "serving_summary.json"
@@ -365,7 +372,9 @@ async def run(args: argparse.Namespace) -> None:
                 raise RuntimeError(
                     f"concurrency {concurrency}: {warmup_failures}/{len(warmup_rows)} warmup requests failed"
                 )
-            save_dir = output_dir if concurrency == 1 and not args.discard_audio else None
+            save_dir = None
+            if concurrency == 1:
+                save_dir = temporary_audio_dir or (None if args.discard_audio else output_dir)
             rows, wall_time_s = await _run_cases(
                 client,
                 api_url,
@@ -401,6 +410,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
     parser.add_argument("--concurrencies", type=int, nargs="+", default=[1, 2, 4])
     parser.add_argument("--discard-audio", action="store_true")
+    parser.add_argument("--temporary-audio-dir", type=Path)
     parser.add_argument("--timeout", type=float, default=1200.0)
     return parser.parse_args()
 

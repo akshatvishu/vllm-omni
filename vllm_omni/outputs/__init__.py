@@ -173,6 +173,7 @@ class OmniRequestOutput(RequestOutput):
 
     # memory usage info
     peak_memory_mb: float = 0.0
+    peak_memory_allocated_mb: float = 0.0
 
     # error handling
     error: str | None = None
@@ -185,6 +186,7 @@ class OmniRequestOutput(RequestOutput):
         *source* should be a vLLM ``RequestOutput`` or a subclass such as
         ``OmniRequestOutput``.  Control fields (``stage_id``,
         ``final_output_type``, ``stage_durations``, ``peak_memory_mb``,
+        ``peak_memory_allocated_mb``,
         ``error``, ...) are intentionally not copied.
         """
         # RequestOutput attributes — guaranteed on any RequestOutput.
@@ -225,7 +227,8 @@ class OmniRequestOutput(RequestOutput):
             source: The stage output whose content is copied onto the new object.
             **kwargs: Passed through to the dataclass constructor (``request_id``,
                 ``stage_id``, ``final_output_type``, ``metrics``,
-                ``stage_durations``, ``peak_memory_mb``, ``finished``, etc.).
+                ``stage_durations``, ``peak_memory_mb``,
+                ``peak_memory_allocated_mb``, ``finished``, etc.).
                 Typed as ``Any`` because the exact set of valid keys is the
                 dataclass field list, which is validated by ``cls(**kwargs)``
                 at call time.
@@ -280,6 +283,7 @@ class OmniRequestOutput(RequestOutput):
         final_output_type: str = "image",
         stage_durations: dict[str, float] | None = None,
         peak_memory_mb: float = 0.0,
+        peak_memory_allocated_mb: float = 0.0,
         finished: bool = True,
     ) -> "OmniRequestOutput":
         """Create output from diffusion model.
@@ -297,7 +301,8 @@ class OmniRequestOutput(RequestOutput):
             multimodal_output: Optional multimodal output dict
             custom_output: Optional custom output dict (e.g. prompt embeds)
             stage_durations: Optional stage durations (execution time of each stage) dict
-            peak_memory_mb: Peak memory usage in MB
+            peak_memory_mb: Peak reserved memory usage in MB
+            peak_memory_allocated_mb: Peak allocated memory usage in MB
 
         Returns:
             OmniRequestOutput configured for diffusion mode
@@ -317,6 +322,7 @@ class OmniRequestOutput(RequestOutput):
             _custom_output=custom_output or {},
             stage_durations=stage_durations or {},
             peak_memory_mb=peak_memory_mb,
+            peak_memory_allocated_mb=peak_memory_allocated_mb,
             finished=finished,
         )
 
@@ -405,6 +411,7 @@ class OmniRequestOutput(RequestOutput):
             f"custom_output={self._custom_output}",
             f"stage_durations={self.stage_durations}",
             f"peak_memory_mb={self.peak_memory_mb}",
+            f"peak_memory_allocated_mb={self.peak_memory_allocated_mb}",
         ]
 
         return f"OmniRequestOutput({', '.join(parts)})"

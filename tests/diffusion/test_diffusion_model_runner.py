@@ -755,12 +755,19 @@ def test_split_diffusion_output_by_request_slices_single_and_multi_request_outpu
     reqs[0].request_id = "req-0"
     reqs[1].request_id = "req-1"
     batch = DiffusionRequestBatch(requests=reqs)
-    result = DiffusionOutput(output=["img-0a", "img-0b", "img-1a", "img-1b"], stage_durations={"decode": 1.0})
+    result = DiffusionOutput(
+        output=["img-0a", "img-0b", "img-1a", "img-1b"],
+        stage_durations={"decode": 1.0},
+        peak_memory_mb=1024.0,
+        peak_memory_allocated_mb=900.0,
+    )
 
     outputs = split_diffusion_output_by_request(result, batch, num_outputs_per_prompt=2)
 
     assert [output.output for output in outputs] == [["img-0a", "img-0b"], ["img-1a", "img-1b"]]
     assert [output.stage_durations for output in outputs] == [{"decode": 1.0}, {"decode": 1.0}]
+    assert [output.peak_memory_mb for output in outputs] == [1024.0, 1024.0]
+    assert [output.peak_memory_allocated_mb for output in outputs] == [900.0, 900.0]
 
     single = split_diffusion_output_by_request(
         result, DiffusionRequestBatch(requests=reqs[:1]), num_outputs_per_prompt=2

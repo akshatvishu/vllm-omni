@@ -538,6 +538,7 @@ class OmniBase(PDDisaggregationMixin):
         engine_outputs = result.engine_outputs
         stage_durations = getattr(engine_outputs, "stage_durations", {})
         peak_memory_mb = getattr(engine_outputs, "peak_memory_mb", 0.0)
+        peak_memory_allocated_mb = getattr(engine_outputs, "peak_memory_allocated_mb", 0.0)
 
         # Merge AR stage timing from OrchestratorAggregator.stage_events
         if self._enable_ar_profiler:
@@ -675,6 +676,7 @@ class OmniBase(PDDisaggregationMixin):
             metrics=response_metrics,
             stage_durations=stage_durations,
             peak_memory_mb=peak_memory_mb,
+            peak_memory_allocated_mb=peak_memory_allocated_mb,
         )
 
     def shutdown(self, timeout: float | None = None) -> None:

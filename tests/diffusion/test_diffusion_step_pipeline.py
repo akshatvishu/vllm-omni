@@ -570,6 +570,7 @@ class TestRunner:
         assert output.finished is True
         assert output.result is not None
         assert output.result.peak_memory_mb == 2
+        assert output.result.peak_memory_allocated_mb == 1
         assert output.result.stage_durations == {
             "QwenImagePipeline.text_encoder.forward": 1.0,
             "QwenImagePipeline.diffuse": 4.0,
@@ -594,6 +595,7 @@ class TestRunner:
         assert second_output.finished is True
         assert second_output.result is not None
         assert second_output.result.peak_memory_mb == pytest.approx(1500.0)
+        assert second_output.result.peak_memory_allocated_mb == pytest.approx(1400.0)
 
     def test_rejects_multi_request_step_batch(self):
         runner = _make_runner()

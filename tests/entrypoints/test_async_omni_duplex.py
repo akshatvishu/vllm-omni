@@ -532,6 +532,7 @@ async def test_async_omni_duplex_collect_wraps_raw_response_stage_output():
         outputs=[],
         stage_durations={},
         peak_memory_mb=0.0,
+        peak_memory_allocated_mb=512.0,
         final_output_type="audio",
     )
     await req_state.queue.put(
@@ -556,6 +557,7 @@ async def test_async_omni_duplex_collect_wraps_raw_response_stage_output():
     assert outputs[0].stage_id == 1
     assert outputs[0].final_output_type == "audio"
     assert outputs[0].peak_memory_mb == raw_stage1_output.peak_memory_mb
+    assert outputs[0].peak_memory_allocated_mb == raw_stage1_output.peak_memory_allocated_mb
 
 
 def test_async_omni_duplex_request_info_includes_response_stage():

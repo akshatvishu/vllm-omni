@@ -434,22 +434,23 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
             return None
         return self.prompt_embed_cache.stats()
 
-    def _sample_peak_memory_mb(self) -> float:
-        """Return peak GPU memory for the current forward pass in MB.
+    def _sample_peak_memory_mb(self) -> tuple[float, float]:
+        """Return peak reserved and allocated GPU memory in MB.
 
         Must be called immediately after the measured forward/step work, with
         reset_peak_memory_stats() called just before it, so the measurement
         reflects the current execution slice and not the global historical
         maximum.
 
-        Uses max_memory_reserved (CUDA memory pool high-water mark) rather than
-        max_memory_allocated so that allocator fragmentation is also visible.
-        See: https://docs.pytorch.org/docs/stable/generated/torch.cuda.memory.max_memory_reserved.html
+        Reserved memory includes the allocator pool. Allocated memory measures
+        memory occupied by live tensors. Both are needed because the reserved
+        pool may remain unchanged after tensors are released.
         """
         peak_reserved_bytes = current_omni_platform.max_memory_reserved()
         peak_allocated_bytes = current_omni_platform.max_memory_allocated()
 
-        peak_memory_mb = peak_reserved_bytes / (1024**2)
+        peak_reserved_mb = peak_reserved_bytes / (1024**2)
+        peak_allocated_mb = peak_allocated_bytes / (1024**2)
         peak_reserved_gb = peak_reserved_bytes / (1024**3)
         peak_allocated_gb = peak_allocated_bytes / (1024**3)
         pool_overhead_gb = peak_reserved_gb - peak_allocated_gb
@@ -461,7 +462,7 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
             pool_overhead_gb,
             pool_overhead_gb / peak_reserved_gb * 100 if peak_reserved_gb > 0 else 0.0,
         )
-        return peak_memory_mb
+        return peak_reserved_mb, peak_allocated_mb
 
     def _prepare_request_for_forward(
         self,
@@ -609,9 +610,13 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
                     )
 
             if is_primary and outputs and record_output_peak_memory:
-                batch_peak_memory_mb = self._sample_peak_memory_mb()
+                batch_peak_memory_mb, batch_peak_memory_allocated_mb = self._sample_peak_memory_mb()
                 for output in outputs:
                     output.peak_memory_mb = max(output.peak_memory_mb, batch_peak_memory_mb)
+                    output.peak_memory_allocated_mb = max(
+                        output.peak_memory_allocated_mb,
+                        batch_peak_memory_allocated_mb,
+                    )
 
             # Log prompt-embed cache activity; hits/misses accumulate across requests.
             prompt_embed_cache = getattr(self, "prompt_embed_cache", None)
@@ -990,10 +995,14 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
                         )
 
                 if is_primary and record_output_peak_memory:
-                    batch_peak_memory_mb = self._sample_peak_memory_mb()
+                    batch_peak_memory_mb, batch_peak_memory_allocated_mb = self._sample_peak_memory_mb()
                     states_by_id = {state.request_id: state for state in states}
                     for state in states:
                         state.peak_memory_mb = max(state.peak_memory_mb, batch_peak_memory_mb)
+                        state.peak_memory_allocated_mb = max(
+                            state.peak_memory_allocated_mb,
+                            batch_peak_memory_allocated_mb,
+                        )
                     for runner_output in runner_output_list:
                         if runner_output.result is None:
                             continue
@@ -1003,6 +1012,10 @@ class DiffusionModelRunner(OmniConnectorModelRunnerMixin):
                         runner_output.result.peak_memory_mb = max(
                             runner_output.result.peak_memory_mb,
                             state.peak_memory_mb,
+                        )
+                        runner_output.result.peak_memory_allocated_mb = max(
+                            runner_output.result.peak_memory_allocated_mb,
+                            state.peak_memory_allocated_mb,
                         )
 
                 self._update_states_after(states, input_batch, pipeline_interrupted)

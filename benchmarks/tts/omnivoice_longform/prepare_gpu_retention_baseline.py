@@ -33,7 +33,8 @@ REPLACEMENTS = (
             audio_copy_stream.synchronize()
         return join_audio_chunks(decoded_chunks, self.sample_rate)
 """,
-        """        return join_audio_chunks(decoded_chunks, self.sample_rate)
+        """        decoded_chunks = [chunk.detach().cpu() for chunk in decoded_chunks]
+        return join_audio_chunks(decoded_chunks, self.sample_rate)
 """,
     ),
 )

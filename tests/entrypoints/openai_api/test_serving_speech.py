@@ -159,6 +159,7 @@ def create_mock_audio_output_for_test(
     request_id: str = "speech-mock-123",
     metrics: dict | None = None,
     peak_memory_mb: float = 0.0,
+    peak_memory_allocated_mb: float = 0.0,
 ) -> OmniRequestOutput:
     class MockCompletionOutput:
         def __init__(self, index: int = 0):
@@ -195,6 +196,7 @@ def create_mock_audio_output_for_test(
     )
     output.metrics = metrics
     output.peak_memory_mb = peak_memory_mb
+    output.peak_memory_allocated_mb = peak_memory_allocated_mb
     return output
 
 
@@ -745,7 +747,10 @@ class TestSpeechAPI:
 
         # Mock generate to yield a valid OmniRequestOutput
         async def mock_generate(*args, **kwargs):
-            yield create_mock_audio_output_for_test(peak_memory_mb=1234.25)
+            yield create_mock_audio_output_for_test(
+                peak_memory_mb=1234.25,
+                peak_memory_allocated_mb=1024.5,
+            )
 
         mock_engine.generate = mocker.MagicMock(side_effect=mock_generate)
 
@@ -771,6 +776,7 @@ class TestSpeechAPI:
         assert response.media_type == "audio/wav"
         assert response.body == b"dummy"
         assert response.headers["x-peak-memory-mb"] == "1234.250"
+        assert response.headers["x-peak-memory-allocated-mb"] == "1024.500"
 
         # Verify generate was called
         mock_engine.generate.assert_called_once()
