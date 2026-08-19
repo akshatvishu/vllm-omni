@@ -131,6 +131,21 @@ def test_dataset_selection_produces_balanced_100_prompt_distribution() -> None:
     assert max(category_counts.values()) - min(category_counts.values()) <= 1
 
 
+def test_small_dataset_selection_produces_ten_prompts_per_bucket() -> None:
+    selection = tomllib.loads(SELECTION.read_text(encoding="utf-8"))
+    selection["source_examples"] = 10
+
+    prompts = select_prompts(_source_rows(), selection)
+
+    assert len(prompts) == 40
+    assert Counter(prompt["bucket"] for prompt in prompts) == {
+        "words_120": 10,
+        "words_200": 10,
+        "words_300": 10,
+        "words_400_plus": 10,
+    }
+
+
 def test_runner_uses_pinned_reference_package_without_checkout() -> None:
     runner = RUNNER.read_text(encoding="utf-8")
 
@@ -140,6 +155,15 @@ def test_runner_uses_pinned_reference_package_without_checkout() -> None:
     assert "REFERENCE_REPO" not in runner
     assert 'OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/results/' in runner
     assert 'OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"' in runner
+    assert "--small) PREPARE_DATASET_ARGS=(--source-examples 10)" in runner
+
+
+def test_dataset_selection_rejects_nonpositive_source_examples() -> None:
+    selection = tomllib.loads(SELECTION.read_text(encoding="utf-8"))
+    selection["source_examples"] = 0
+
+    with pytest.raises(ValueError, match="source_examples must be positive"):
+        select_prompts(_source_rows(), selection)
 
 
 def test_dataset_selection_rejects_too_few_eligible_sources() -> None:
@@ -607,7 +631,9 @@ async def test_vllm_benchmark_checkpoints_each_sweep_and_resumes(tmp_path: Path,
     await benchmark_module.run(args)
 
 
-def test_evaluator_checkpoints_failures_and_resumes_without_reloading_whisper(tmp_path: Path, monkeypatch) -> None:
+def test_evaluator_checkpoints_failures_and_resumes_without_reloading_whisper(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
     common = {
         "case_id": "case-1",
         "prompt_id": "prompt-1",
@@ -681,6 +707,9 @@ def test_evaluator_checkpoints_failures_and_resumes_without_reloading_whisper(tm
 
     evaluate_module.run(args)
 
+    output = capsys.readouterr().out
+    assert "Loading openai/whisper-large-v3 for Whisper transcription. Pending audio files: 1." in output
+    assert "Whisper loaded. Starting transcription." in output
     evaluated = read_jsonl(args.output_dir / "evaluated.jsonl")
     assert [row["evaluation_status"] for row in evaluated] == ["success", "generation_error"]
 

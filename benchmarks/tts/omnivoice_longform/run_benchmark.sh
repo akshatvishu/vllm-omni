@@ -19,6 +19,24 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/results/$(date +%Y%m%d-%H%M%S)}"
 SELECTION="$SCRIPT_DIR/selection.toml"
 read -r -a SEED_VALUES <<< "${SEEDS:-42}"
 read -r -a CONCURRENCY_VALUES <<< "${CONCURRENCIES:-1 2 4}"
+PREPARE_DATASET_ARGS=()
+
+if [[ $# -gt 1 ]]; then
+    echo "Usage: $0 [--small]" >&2
+    exit 2
+fi
+case "${1:-}" in
+    "") ;;
+    --small) PREPARE_DATASET_ARGS=(--source-examples 10) ;;
+    -h|--help)
+        echo "Usage: $0 [--small]"
+        exit 0
+        ;;
+    *)
+        echo "Usage: $0 [--small]" >&2
+        exit 2
+        ;;
+esac
 
 if ! BENCH_PYTHON="$(command -v "$PYTHON_COMMAND")"; then
     echo "Python executable not found: $PYTHON_COMMAND" >&2
@@ -50,7 +68,8 @@ echo "Saving results to: $OUTPUT_DIR"
 
 "$BENCH_PYTHON" -m benchmarks.tts.omnivoice_longform.prepare_dataset \
     --selection "$SELECTION" \
-    --output "$MANIFEST"
+    --output "$MANIFEST" \
+    "${PREPARE_DATASET_ARGS[@]}"
 
 "$BENCH_PYTHON" -m benchmarks.tts.omnivoice_longform.metadata \
     --output "$OUTPUT_DIR/run_metadata.json" \

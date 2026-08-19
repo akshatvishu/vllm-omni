@@ -39,6 +39,12 @@ bash benchmarks/tts/omnivoice_longform/run_benchmark.sh
 
 The script uses the container's `python` and `vllm` commands. It installs the pinned benchmark packages, downloads the pinned dataset and model revisions, runs both backends, runs Whisper, and saves the result under `benchmarks/tts/omnivoice_longform/results/<timestamp>/`. The script prints the full result path before it starts generation and again when it finishes.
 
+Use the small run to select 10 prompts from each word bucket. The small run has 40 prompts. It makes 80 reference requests and 80 vLLM requests at each concurrency because every prompt runs in one-shot and chunked modes.
+
+```bash
+bash benchmarks/tts/omnivoice_longform/run_benchmark.sh --small
+```
+
 The defaults use GPU 0, float32 generation for both implementations, Whisper large v3 in float32, seed 42, and serving concurrency 1, 2, and 4. The OmniVoice and Whisper model revisions are pinned so rerunning the benchmark does not silently change either model.
 
 The following environment variables change the run:

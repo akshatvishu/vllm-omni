@@ -58,6 +58,9 @@ def _prefix_for_bucket(text: str, bucket: dict[str, Any]) -> tuple[str, int] | N
 
 
 def select_prompts(rows: list[dict[str, Any]], selection: dict[str, Any]) -> list[dict[str, Any]]:
+    if selection["source_examples"] < 1:
+        raise ValueError("source_examples must be positive")
+
     eligible: dict[str, list[tuple[dict[str, Any], list[tuple[dict[str, Any], str, int]]]]] = defaultdict(list)
     for row in rows:
         bucket_prompts = []
@@ -106,8 +109,14 @@ def select_prompts(rows: list[dict[str, Any]], selection: dict[str, Any]) -> lis
     return prompts
 
 
-def prepare_manifest(selection_path: Path, output_path: Path) -> None:
+def prepare_manifest(
+    selection_path: Path,
+    output_path: Path,
+    source_examples: int | None = None,
+) -> None:
     selection = tomllib.loads(selection_path.read_text(encoding="utf-8"))
+    if source_examples is not None:
+        selection["source_examples"] = source_examples
     dataset_path = hf_hub_download(
         repo_id=selection["dataset"],
         repo_type="dataset",
@@ -133,9 +142,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare the pinned Long-TTS-Eval prompt manifest")
     parser.add_argument("--selection", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--source-examples", type=int)
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    prepare_manifest(args.selection, args.output)
+    prepare_manifest(args.selection, args.output, args.source_examples)

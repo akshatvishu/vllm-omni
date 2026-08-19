@@ -186,13 +186,17 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError(f"unexpected cases in checkpoint: {sorted(unexpected_cases)}")
 
     dtype = getattr(torch, args.dtype)
-    pending_audio = any(
+    pending_audio_count = sum(
         (row["backend"], row["case_id"]) not in evaluated_by_case and row.get("status", "success") == "success"
         for row in rows
     )
     processor = None
     model = None
-    if pending_audio:
+    if pending_audio_count:
+        print(
+            f"Loading {args.whisper_model} for Whisper transcription. Pending audio files: {pending_audio_count}.",
+            flush=True,
+        )
         processor = AutoProcessor.from_pretrained(
             args.whisper_model,
             revision=args.model_revision,
@@ -203,6 +207,7 @@ def run(args: argparse.Namespace) -> None:
             torch_dtype=dtype,
         ).to(args.device)
         model.eval()
+        print("Whisper loaded. Starting transcription.", flush=True)
 
     for index, row in enumerate(rows, start=1):
         case_key = (row["backend"], row["case_id"])
