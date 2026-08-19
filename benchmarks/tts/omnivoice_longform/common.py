@@ -10,6 +10,7 @@ import re
 import statistics
 import unicodedata
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -88,11 +89,19 @@ def load_prompt_manifest(path: str | Path) -> tuple[dict[str, Any], list[PromptC
 def build_generation_cases(
     prompts: list[PromptCase],
     seeds: list[int] | tuple[int, ...],
+    modes: Sequence[str] = MODES,
 ) -> list[GenerationCase]:
     if not seeds:
         raise ValueError("at least one seed is required")
     if any(seed < 0 for seed in seeds):
         raise ValueError("seeds must be non-negative")
+    if not modes:
+        raise ValueError("at least one generation mode is required")
+    if len(modes) != len(set(modes)):
+        raise ValueError("generation modes must be unique")
+    unsupported_modes = set(modes) - set(MODES)
+    if unsupported_modes:
+        raise ValueError(f"unsupported generation modes: {sorted(unsupported_modes)}")
 
     return [
         GenerationCase(
@@ -107,7 +116,7 @@ def build_generation_cases(
         )
         for prompt in prompts
         for seed in seeds
-        for mode in MODES
+        for mode in modes
     ]
 
 

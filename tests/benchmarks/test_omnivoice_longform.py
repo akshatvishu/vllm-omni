@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import subprocess
@@ -30,6 +31,7 @@ from benchmarks.tts.omnivoice_longform.common import (
     write_immutable_json,
     write_jsonl,
 )
+from benchmarks.tts.omnivoice_longform.compare_memory import compare_results
 from benchmarks.tts.omnivoice_longform.evaluate import (
     _aggregate,
     _validate_backend_cases,
@@ -39,6 +41,7 @@ from benchmarks.tts.omnivoice_longform.evaluate import (
 )
 from benchmarks.tts.omnivoice_longform.metadata import _git_state
 from benchmarks.tts.omnivoice_longform.prepare_dataset import select_prompts
+from benchmarks.tts.omnivoice_longform.prepare_gpu_retention_baseline import prepare_gpu_retention_baseline
 from benchmarks.tts.omnivoice_longform.vllm_omni import benchmark as benchmark_module
 from benchmarks.tts.omnivoice_longform.vllm_omni.benchmark import (
     _generate_case,
@@ -51,6 +54,7 @@ pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
 SELECTION = Path(__file__).parents[2] / "benchmarks" / "tts" / "omnivoice_longform" / "selection.toml"
 RUNNER = Path(__file__).parents[2] / "benchmarks" / "tts" / "omnivoice_longform" / "run_benchmark.sh"
+MEMORY_AB_RUNNER = RUNNER.with_name("run_memory_ab.sh")
 
 
 def _source_rows(count: int = 30) -> list[dict]:
@@ -167,6 +171,44 @@ def test_runner_defaults_and_pinned_packages() -> None:
     assert 'echo "Running Whisper transcription and scoring"' in runner
 
 
+def test_memory_ab_runner_isolated_variants() -> None:
+    runner = MEMORY_AB_RUNNER.read_text(encoding="utf-8")
+
+    assert 'TARGET_REF="${TARGET_REF:-HEAD}"' in runner
+    assert "SOURCE_EXAMPLES=1" in runner
+    assert "--samples)" in runner
+    assert 'worktree add --detach "$BASELINE_WORKTREE" "$RESOLVED_REVISION"' in runner
+    assert 'worktree add --detach "$CANDIDATE_WORKTREE" "$RESOLVED_REVISION"' in runner
+    assert '"$BENCH_PYTHON" "$BASELINE_TRANSFORM" --repo-root "$BASELINE_WORKTREE"' in runner
+    assert 'cd "$worktree"' in runner
+    assert runner.count('run_worktree_python "$CANDIDATE_WORKTREE"') == 2
+    assert runner.count('run_worktree_python "$worktree"') == 2
+    assert "run_variant gpu-retained" in runner
+    assert "run_variant cpu-copy" in runner
+    assert "--modes chunked" in runner
+    assert "--discard-audio" in runner
+    assert "reference.inference" not in runner
+    assert "omnivoice==" not in runner
+    assert "Whisper" not in runner
+
+
+def test_gpu_retention_transform_changes_only_the_chunk_storage_path(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    pipeline = repo / "vllm_omni/diffusion/models/omnivoice/pipeline_omnivoice.py"
+    pipeline.parent.mkdir(parents=True)
+    source_pipeline = Path(__file__).parents[2] / pipeline.relative_to(repo)
+    pipeline.write_bytes(source_pipeline.read_bytes())
+
+    prepare_gpu_retention_baseline(repo)
+
+    baseline = pipeline.read_text(encoding="utf-8")
+    assert "decoded_chunks.append(decoded_audio)" in baseline
+    assert "decoded_chunks.append(_copy_audio_to_cpu(decoded_audio, audio_copy_stream))" not in baseline
+    assert "audio_copy_stream.synchronize()" not in baseline
+    with pytest.raises(ValueError, match="expected code was not found exactly once"):
+        prepare_gpu_retention_baseline(repo)
+
+
 @pytest.mark.parametrize(
     ("arguments", "error"),
     [
@@ -186,6 +228,18 @@ def test_runner_rejects_invalid_arguments(arguments: list[str], error: str) -> N
 
     assert result.returncode == 2
     assert error in result.stderr
+
+
+@pytest.mark.parametrize("arguments", [["--samples"], ["--samples", "0"], ["--unknown"]])
+def test_memory_ab_runner_rejects_invalid_arguments(arguments: list[str]) -> None:
+    result = subprocess.run(
+        ["bash", str(MEMORY_AB_RUNNER), *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
 
 
 def test_dataset_selection_rejects_nonpositive_source_examples() -> None:
@@ -222,6 +276,30 @@ def test_generation_matrix_covers_all_modes_prompts_and_seed(tmp_path: Path) -> 
     assert {case.seed for case in cases} == {42}
     assert cases[0].prompt_id == cases[1].prompt_id
     assert [case.mode for case in cases[:2]] == ["one_shot", "chunked"]
+
+
+def test_generation_matrix_can_select_only_chunked_cases(tmp_path: Path) -> None:
+    _, prompts = load_prompt_manifest(_resolved_manifest(tmp_path))
+
+    cases = build_generation_cases(prompts, DEFAULT_SEEDS, modes=("chunked",))
+
+    assert len(cases) == 100
+    assert {case.mode for case in cases} == {"chunked"}
+
+
+@pytest.mark.parametrize(
+    ("modes", "error"),
+    [
+        ((), "at least one generation mode"),
+        (("chunked", "chunked"), "generation modes must be unique"),
+        (("automatic",), "unsupported generation modes"),
+    ],
+)
+def test_generation_matrix_rejects_invalid_modes(tmp_path: Path, modes: tuple[str, ...], error: str) -> None:
+    _, prompts = load_prompt_manifest(_small_manifest(tmp_path))
+
+    with pytest.raises(ValueError, match=error):
+        build_generation_cases(prompts, DEFAULT_SEEDS, modes=modes)
 
 
 def test_manifest_rejects_missing_bucket_example(tmp_path: Path) -> None:
@@ -367,6 +445,74 @@ def test_serving_summary_counts_failures_without_summarizing_missing_metrics() -
     assert summary["latency_s"] is None
     assert summary["rtf"] is None
     assert summary["cells"][0]["latency_s"] is None
+
+
+def test_memory_comparison_pairs_cases_and_reports_savings(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.jsonl"
+    candidate_path = tmp_path / "candidate.jsonl"
+    baseline_rows = []
+    candidate_rows = []
+    for index, bucket in enumerate(("words_120", "words_200", "words_300", "words_400_plus"), start=1):
+        common = {
+            "case_id": f"case-{index}",
+            "prompt_id": f"prompt-{index}",
+            "bucket": bucket,
+            "word_count": index * 100,
+            "text": f"text {index}",
+            "seed": 42,
+            "mode": "chunked",
+            "concurrency": 1,
+            "status": "success",
+            "audio_duration_s": 10.0 * index,
+            "audio_sha256": f"{index:064x}",
+            "rtf": 0.1,
+        }
+        baseline_rows.append({**common, "peak_reserved_gib": 10.0 + index, "latency_s": 2.0})
+        candidate_rows.append({**common, "peak_reserved_gib": 9.0, "latency_s": 1.8})
+    write_jsonl(baseline_path, baseline_rows)
+    write_jsonl(candidate_path, candidate_rows)
+
+    summary = compare_results(baseline_path, candidate_path, revision="abc123")
+
+    assert summary["revision"] == "abc123"
+    assert summary["overall"]["cases"] == 4
+    assert summary["overall"]["peak_reserved_gib"]["baseline_mean"] == 12.5
+    assert summary["overall"]["peak_reserved_gib"]["candidate_mean"] == 9.0
+    assert summary["overall"]["peak_reserved_gib"]["mean_saved"] == 3.5
+    assert summary["overall"]["latency_s"]["candidate_change_percent"] == pytest.approx(-10.0)
+    assert summary["overall"]["audio_sha256"]["all_cases_match"] is True
+    assert [cell["bucket"] for cell in summary["cells"]] == [
+        "words_120",
+        "words_200",
+        "words_300",
+        "words_400_plus",
+    ]
+
+
+def test_memory_comparison_rejects_failed_cases(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "baseline.jsonl"
+    candidate_path = tmp_path / "candidate.jsonl"
+    row = {
+        "case_id": "case-1",
+        "prompt_id": "prompt-1",
+        "bucket": "words_400_plus",
+        "word_count": 500,
+        "text": "text",
+        "seed": 42,
+        "mode": "chunked",
+        "concurrency": 1,
+        "status": "success",
+        "audio_duration_s": 10.0,
+        "audio_sha256": "a" * 64,
+        "peak_reserved_gib": 10.0,
+        "latency_s": 2.0,
+        "rtf": 0.2,
+    }
+    write_jsonl(baseline_path, [row])
+    write_jsonl(candidate_path, [{**row, "status": "error"}])
+
+    with pytest.raises(ValueError, match="did not succeed"):
+        compare_results(baseline_path, candidate_path)
 
 
 def test_sweep_summary_reports_successful_throughput(capsys) -> None:
@@ -610,6 +756,7 @@ async def test_vllm_request_sends_seed_and_chunk_settings(tmp_path: Path) -> Non
 
     assert row["backend"] == "vllm-omni"
     assert row["audio_duration_s"] == pytest.approx(0.1)
+    assert row["audio_sha256"] == hashlib.sha256(audio.getvalue()).hexdigest()
     assert row["peak_reserved_gib"] == 2.0
     assert Path(row["audio_path"]).is_file()
 
@@ -715,7 +862,9 @@ async def test_vllm_benchmark_checkpoints_each_sweep_and_resumes(tmp_path: Path,
         manifest=manifest,
         output_dir=output_dir,
         seeds=[42],
+        modes=["one_shot", "chunked"],
         concurrencies=[1, 2],
+        discard_audio=False,
         timeout=1.0,
     )
 
@@ -738,6 +887,67 @@ async def test_vllm_benchmark_checkpoints_each_sweep_and_resumes(tmp_path: Path,
 
 
 @pytest.mark.asyncio
+async def test_vllm_benchmark_can_run_only_chunked_cases_without_audio_files(tmp_path: Path, monkeypatch) -> None:
+    output_dir = tmp_path / "output"
+    calls = []
+
+    async def fake_run_cases(client, api_url, model, cases, concurrency, output_dir, progress_description):
+        calls.append((progress_description, len(cases), output_dir))
+        rows = [
+            {
+                "case_id": case.case_id,
+                "prompt_id": case.prompt_id,
+                "bucket": case.bucket,
+                "source_id": case.source_id,
+                "category": case.category,
+                "word_count": case.word_count,
+                "text": case.text,
+                "mode": case.mode,
+                "seed": case.seed,
+                "backend": "vllm-omni",
+                "status": "success",
+                "order_index": index,
+                "audio_path": None,
+                "sample_rate": 24000,
+                "audio_duration_s": 10.0,
+                "latency_s": 1.0,
+                "rtf": 0.1,
+                "peak_reserved_gib": 4.0,
+            }
+            for index, case in enumerate(cases)
+        ]
+        return rows, 4.0
+
+    monkeypatch.setattr(benchmark_module, "_run_cases", fake_run_cases)
+    args = SimpleNamespace(
+        api_base="http://test",
+        api_key="EMPTY",
+        model="k2-fsa/OmniVoice",
+        manifest=_small_manifest(tmp_path),
+        output_dir=output_dir,
+        seeds=[42],
+        modes=["chunked"],
+        concurrencies=[1],
+        discard_audio=True,
+        timeout=1.0,
+    )
+
+    await benchmark_module.run(args)
+
+    assert calls == [
+        ("vLLM concurrency 1 warmup", 4, None),
+        ("vLLM concurrency 1", 4, None),
+    ]
+    rows = read_jsonl(output_dir / "generation.jsonl")
+    assert len(rows) == 4
+    assert {row["mode"] for row in rows} == {"chunked"}
+    assert all(row["audio_path"] is None for row in rows)
+    summary = json.loads((output_dir / "serving_summary.json").read_text(encoding="utf-8"))
+    assert summary["modes"] == ["chunked"]
+    assert summary["audio_files_saved"] is False
+
+
+@pytest.mark.asyncio
 async def test_vllm_benchmark_stops_after_failed_warmup(tmp_path: Path, monkeypatch) -> None:
     output_dir = tmp_path / "output"
     calls = []
@@ -754,7 +964,9 @@ async def test_vllm_benchmark_stops_after_failed_warmup(tmp_path: Path, monkeypa
         manifest=_small_manifest(tmp_path),
         output_dir=output_dir,
         seeds=[42],
+        modes=["one_shot", "chunked"],
         concurrencies=[1],
+        discard_audio=False,
         timeout=1.0,
     )
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import io
 import math
 import statistics
@@ -19,6 +20,7 @@ from tqdm.asyncio import tqdm
 
 from benchmarks.tts.omnivoice_longform.common import (
     DEFAULT_SEEDS,
+    MODES,
     GenerationCase,
     build_generation_cases,
     case_asdict,
@@ -110,6 +112,7 @@ async def _generate_case(
         "audio_path": str(audio_path.resolve()) if audio_path else None,
         "sample_rate": audio_info.samplerate,
         "audio_duration_s": duration_s,
+        "audio_sha256": hashlib.sha256(response.content).hexdigest(),
         "latency_s": latency_s,
         "rtf": latency_s / duration_s,
         "peak_reserved_gib": peak_reserved_gib,
@@ -144,6 +147,7 @@ async def _generate_case_record(
             "audio_path": None,
             "sample_rate": None,
             "audio_duration_s": None,
+            "audio_sha256": None,
             "latency_s": None,
             "rtf": None,
             "peak_reserved_gib": None,
@@ -278,7 +282,7 @@ async def run(args: argparse.Namespace) -> None:
         raise ValueError("concurrency 1 is required for saved quality outputs")
 
     _, prompts = load_prompt_manifest(args.manifest)
-    cases = build_generation_cases(prompts, args.seeds)
+    cases = build_generation_cases(prompts, args.seeds, args.modes)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     serving_path = output_dir / "serving.jsonl"
@@ -329,6 +333,8 @@ async def run(args: argparse.Namespace) -> None:
                 "backend": "vllm-omni",
                 "model": args.model,
                 "seeds": args.seeds,
+                "modes": args.modes,
+                "audio_files_saved": not args.discard_audio,
                 "case_order": [case.case_id for case in cases],
                 "concurrency_results": summaries,
             },
@@ -359,7 +365,7 @@ async def run(args: argparse.Namespace) -> None:
                 raise RuntimeError(
                     f"concurrency {concurrency}: {warmup_failures}/{len(warmup_rows)} warmup requests failed"
                 )
-            save_dir = output_dir if concurrency == 1 else None
+            save_dir = output_dir if concurrency == 1 and not args.discard_audio else None
             rows, wall_time_s = await _run_cases(
                 client,
                 api_url,
@@ -392,7 +398,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--seeds", type=int, nargs="+", default=list(DEFAULT_SEEDS))
+    parser.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
     parser.add_argument("--concurrencies", type=int, nargs="+", default=[1, 2, 4])
+    parser.add_argument("--discard-audio", action="store_true")
     parser.add_argument("--timeout", type=float, default=1200.0)
     return parser.parse_args()
 

@@ -174,3 +174,25 @@ results/<timestamp>/
 The benchmark records the peak GPU memory reserved by PyTorch for every successful generation request. The official OmniVoice runner reads the value in its process. The vLLM-Omni server returns the value in the `X-Peak-Memory-MB` response header, and the benchmark converts it to GiB. PyTorch uses the same API with the ROCm backend, so the measurement does not depend on an `amd-smi` command being present in the container.
 
 The value includes PyTorch's reserved memory pool. It does not include GPU memory allocated outside PyTorch.
+
+## Compare GPU retention with CPU copies
+
+Use the memory A/B runner to measure the effect of copying each decoded chunk to CPU instead of keeping every decoded chunk on the GPU until generation finishes:
+
+```bash
+bash benchmarks/tts/omnivoice_longform/run_memory_ab.sh
+```
+
+The runner tests one Long TTS Eval source row by default. The row produces four nested prompts at about 120, 200, 300, and 500 words, so the longest request exercises the path with the most retained chunks. Each variant warms all four lengths before measurement. PyTorch can keep reserved memory after a warmup, so use the overall maximum to judge GPU memory savings rather than treating each word count row as an independent cold process.
+
+Both variants use the same committed vLLM-Omni revision. The runner uses [prepare_gpu_retention_baseline.py](prepare_gpu_retention_baseline.py) to change the baseline worktree so it keeps decoded chunks on the GPU. The candidate worktree uses the normal code, which copies each decoded chunk to CPU. The runner starts a fresh server for each worktree and runs the variants one after the other on the same GPU.
+
+The A/B run measures only chunked vLLM-Omni requests at concurrency 1. It does not run the official OmniVoice package or Whisper, and it does not save WAV files. It compares the SHA256 hashes of the returned WAV data so the report shows whether both variants produced identical audio. Results are saved under `results/memory-ab/<timestamp>/`. The main report is `comparison.md`, and `comparison.json` contains the same values in a machine readable form.
+
+Use more source rows when you need a more stable latency result:
+
+```bash
+bash benchmarks/tts/omnivoice_longform/run_memory_ab.sh --samples 3
+```
+
+Set `TARGET_REF` or pass `--ref` to test another committed revision. The baseline transform stops with an error if that revision does not contain the expected CPU-copy code.

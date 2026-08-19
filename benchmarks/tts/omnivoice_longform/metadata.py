@@ -14,7 +14,7 @@ from typing import Any
 
 import torch
 
-from benchmarks.tts.omnivoice_longform.common import write_immutable_json
+from benchmarks.tts.omnivoice_longform.common import MODES, write_immutable_json
 
 
 def _git_state(path: Path) -> dict[str, Any]:
@@ -106,8 +106,10 @@ def collect_metadata(args: argparse.Namespace) -> dict[str, Any]:
             "whisper_revision": args.whisper_revision,
             "whisper_dtype": args.whisper_dtype,
             "seeds": args.seeds,
+            "modes": args.modes,
             "concurrencies": args.concurrencies,
             "batch_size": 1,
+            "audio_files_saved": not args.discard_audio,
             "vllm_peak_memory_measured": True,
         },
     }
@@ -127,7 +129,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--whisper-revision", required=True)
     parser.add_argument("--whisper-dtype", required=True)
     parser.add_argument("--seeds", type=int, nargs="+", required=True)
+    parser.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
     parser.add_argument("--concurrencies", type=int, nargs="+", required=True)
+    parser.add_argument("--discard-audio", action="store_true")
     return parser.parse_args()
 
 
