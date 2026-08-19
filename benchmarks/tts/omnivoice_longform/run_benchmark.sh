@@ -98,6 +98,7 @@ echo "Saving results to: $OUTPUT_DIR"
     --seeds "${SEED_VALUES[@]}" \
     --concurrencies "${CONCURRENCY_VALUES[@]}"
 
+echo "Running reference OmniVoice benchmark"
 "$BENCH_PYTHON" -m benchmarks.tts.omnivoice_longform.reference.inference \
     --model "$MODEL" \
     --model-revision "$MODEL_REVISION" \
@@ -124,6 +125,7 @@ cleanup_server() {
 }
 trap cleanup_server EXIT
 
+echo "Starting vLLM-Omni server"
 "$VLLM_BIN" serve "$MODEL" \
     --revision "$MODEL_REVISION" \
     --omni \
@@ -151,6 +153,7 @@ if [[ "$SERVER_READY" -ne 1 ]]; then
     exit 1
 fi
 
+echo "Running vLLM-Omni serving benchmark"
 "$BENCH_PYTHON" -m benchmarks.tts.omnivoice_longform.vllm_omni.benchmark \
     --api-base "http://127.0.0.1:$PORT" \
     --model "$MODEL" \
@@ -163,6 +166,7 @@ cleanup_server
 SERVER_PID=""
 trap - EXIT
 
+echo "Running Whisper transcription and scoring"
 "$BENCH_PYTHON" -m benchmarks.tts.omnivoice_longform.evaluate \
     --records \
         "$OUTPUT_DIR/reference/generation.jsonl" \

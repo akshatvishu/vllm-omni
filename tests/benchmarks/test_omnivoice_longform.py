@@ -26,6 +26,7 @@ from benchmarks.tts.omnivoice_longform.common import (
     chunking_args,
     load_prompt_manifest,
     read_jsonl,
+    representative_warmup_cases,
     write_immutable_json,
     write_jsonl,
 )
@@ -42,7 +43,7 @@ from benchmarks.tts.omnivoice_longform.vllm_omni import benchmark as benchmark_m
 from benchmarks.tts.omnivoice_longform.vllm_omni.benchmark import (
     _generate_case,
     _generate_case_record,
-    _representative_warmup_cases,
+    _print_sweep_summary,
     _summarize_rows,
 )
 
@@ -160,6 +161,10 @@ def test_runner_defaults_and_pinned_packages() -> None:
     assert "CONCURRENCY_VALUES=(1)" in runner
     assert 'CONCURRENCY_VALUES+=("$2")' in runner
     assert "CONCURRENCIES" not in runner
+    assert 'echo "Running reference OmniVoice benchmark"' in runner
+    assert 'echo "Starting vLLM-Omni server"' in runner
+    assert 'echo "Running vLLM-Omni serving benchmark"' in runner
+    assert 'echo "Running Whisper transcription and scoring"' in runner
 
 
 @pytest.mark.parametrize(
@@ -329,6 +334,7 @@ def test_serving_summary_keeps_each_mode_and_length_bucket() -> None:
     assert summary["latency_s"]["p90"] > summary["latency_s"]["p50"]
     assert summary["latency_s"]["p99"] >= summary["latency_s"]["p90"]
     assert summary["throughput_audio_s_per_s"] == pytest.approx(112.0)
+    assert summary["rtf"]["p50"] == 1.0
     assert {(cell["mode"], cell["bucket"]) for cell in summary["cells"]} == {
         (mode, bucket)
         for mode in ("one_shot", "chunked")
@@ -357,14 +363,45 @@ def test_serving_summary_counts_failures_without_summarizing_missing_metrics() -
     assert summary["throughput_requests_per_s"] == 0.0
     assert summary["throughput_audio_s_per_s"] == 0.0
     assert summary["latency_s"] is None
+    assert summary["rtf"] is None
     assert summary["cells"][0]["latency_s"] is None
+
+
+def test_sweep_summary_reports_successful_throughput(capsys) -> None:
+    rows = [
+        {
+            "mode": "chunked",
+            "bucket": "words_120",
+            "word_count": 120,
+            "status": "success",
+            "audio_duration_s": 10.0,
+            "latency_s": 2.0,
+            "rtf": 0.2,
+        },
+        {
+            "mode": "chunked",
+            "bucket": "words_120",
+            "word_count": 120,
+            "status": "error",
+            "audio_duration_s": None,
+            "latency_s": None,
+            "rtf": None,
+        },
+    ]
+
+    _print_sweep_summary(_summarize_rows(rows, concurrency=1, wall_time_s=2.0))
+
+    output = capsys.readouterr().out
+    assert "1/2 requests succeeded (1 failed)" in output
+    assert "request throughput: 0.500 requests/s" in output
+    assert "median latency: 2.00s, median RTF: 0.200" in output
 
 
 def test_warmups_cover_every_mode_and_bucket_and_fill_concurrency(tmp_path: Path) -> None:
     _, prompts = load_prompt_manifest(_resolved_manifest(tmp_path))
     cases = build_generation_cases(prompts, DEFAULT_SEEDS)
 
-    warmups = _representative_warmup_cases(cases, concurrency=12)
+    warmups = representative_warmup_cases(cases, concurrency=12)
 
     assert len(warmups) == 12
     assert {(case.mode, case.bucket) for case in warmups} == {
@@ -372,6 +409,11 @@ def test_warmups_cover_every_mode_and_bucket_and_fill_concurrency(tmp_path: Path
         for mode in ("one_shot", "chunked")
         for bucket in ("words_120", "words_200", "words_300", "words_400_plus")
     }
+
+
+def test_warmups_reject_empty_case_list() -> None:
+    with pytest.raises(ValueError, match="cannot warm up an empty case list"):
+        representative_warmup_cases([], concurrency=1)
 
 
 def test_atomic_jsonl_checkpoint_replaces_complete_file(tmp_path: Path) -> None:
@@ -605,8 +647,8 @@ async def test_vllm_benchmark_checkpoints_each_sweep_and_resumes(tmp_path: Path,
     output_dir = tmp_path / "output"
     sweep_calls = []
 
-    async def fake_run_cases(client, api_url, model, cases, concurrency, output_dir):
-        sweep_calls.append(concurrency)
+    async def fake_run_cases(client, api_url, model, cases, concurrency, output_dir, progress_description):
+        sweep_calls.append((concurrency, progress_description, len(cases)))
         rows = [
             {
                 "case_id": case.case_id,
@@ -645,7 +687,12 @@ async def test_vllm_benchmark_checkpoints_each_sweep_and_resumes(tmp_path: Path,
 
     await benchmark_module.run(args)
 
-    assert sweep_calls == [1, 1, 2, 2]
+    assert sweep_calls == [
+        (1, "vLLM concurrency 1 warmup", 8),
+        (1, "vLLM concurrency 1", 8),
+        (2, "vLLM concurrency 2 warmup", 8),
+        (2, "vLLM concurrency 2", 8),
+    ]
     assert len(read_jsonl(output_dir / "generation.jsonl")) == 8
     assert len(read_jsonl(output_dir / "serving.jsonl")) == 16
 
@@ -654,6 +701,35 @@ async def test_vllm_benchmark_checkpoints_each_sweep_and_resumes(tmp_path: Path,
 
     monkeypatch.setattr(benchmark_module, "_run_cases", fail_if_called)
     await benchmark_module.run(args)
+
+
+@pytest.mark.asyncio
+async def test_vllm_benchmark_stops_after_failed_warmup(tmp_path: Path, monkeypatch) -> None:
+    output_dir = tmp_path / "output"
+    calls = []
+
+    async def fake_run_cases(client, api_url, model, cases, concurrency, output_dir, progress_description):
+        calls.append(progress_description)
+        return [{"status": "error"}], 1.0
+
+    monkeypatch.setattr(benchmark_module, "_run_cases", fake_run_cases)
+    args = SimpleNamespace(
+        api_base="http://test",
+        api_key="EMPTY",
+        model="k2-fsa/OmniVoice",
+        manifest=_small_manifest(tmp_path),
+        output_dir=output_dir,
+        seeds=[42],
+        concurrencies=[1],
+        timeout=1.0,
+    )
+
+    with pytest.raises(RuntimeError, match="1/1 warmup requests failed"):
+        await benchmark_module.run(args)
+
+    assert calls == ["vLLM concurrency 1 warmup"]
+    assert not (output_dir / "serving.jsonl").exists()
+    assert not (output_dir / "serving_summary.json").exists()
 
 
 def test_evaluator_checkpoints_failures_and_resumes_without_reloading_whisper(

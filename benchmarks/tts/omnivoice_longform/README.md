@@ -17,7 +17,7 @@ The quality comparison contains 400 measured outputs:
 | Batch size | 1 |
 | Concurrency | 1 |
 
-The reference backend warms both generation modes. Each vLLM serving sweep warms all eight mode and length cells and sends at least one full concurrency wave before its measured requests. OmniVoice uses batch size 1, so concurrency 2 and 4 measure queueing and saturation rather than request batching.
+At concurrency 1, both backends warm all eight mode and length cells before their measured requests. Each additional vLLM serving sweep also warms all eight cells and sends at least one full concurrency wave. OmniVoice uses batch size 1, so concurrency 2 and 4 measure queueing and saturation rather than request batching.
 
 ## Prompt source
 

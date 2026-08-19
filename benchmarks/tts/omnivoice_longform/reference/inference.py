@@ -16,12 +16,12 @@ from omnivoice import OmniVoice, OmniVoiceGenerationConfig
 
 from benchmarks.tts.omnivoice_longform.common import (
     DEFAULT_SEEDS,
-    MODES,
     build_generation_cases,
     case_asdict,
     chunking_args,
     load_prompt_manifest,
     read_jsonl,
+    representative_warmup_cases,
     write_json,
     write_jsonl,
 )
@@ -66,6 +66,7 @@ def _generation_config(mode: str) -> OmniVoiceGenerationConfig:
 def run(args: argparse.Namespace) -> None:
     _, prompts = load_prompt_manifest(args.manifest)
     cases = build_generation_cases(prompts, args.seeds)
+    warmup_cases = representative_warmup_cases(cases, concurrency=1)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     generation_path = output_dir / "generation.jsonl"
@@ -93,13 +94,13 @@ def run(args: argparse.Namespace) -> None:
         )
         init_time_s = time.perf_counter() - load_start
 
-        warmup_prompt = prompts[0]
-        for mode in MODES:
-            _seed_everything(args.seeds[0])
+        for index, case in enumerate(warmup_cases, start=1):
+            print(f"[warmup {index}/{len(warmup_cases)}] {case.mode} {case.bucket}")
+            _seed_everything(case.seed)
             model.generate(
-                text=warmup_prompt.text,
+                text=case.text,
                 language="English",
-                generation_config=_generation_config(mode),
+                generation_config=_generation_config(case.mode),
             )
     else:
         init_time_s = existing_rows[0]["init_time_s"]
@@ -179,7 +180,7 @@ def run(args: argparse.Namespace) -> None:
         "dtype": args.dtype,
         "device": args.device,
         "init_time_s": init_time_s,
-        "warmup_requests": len(MODES),
+        "warmup_requests": len(warmup_cases),
         "measured_requests": len(rows),
         "successful_requests": successful_requests,
         "failed_requests": len(rows) - successful_requests,

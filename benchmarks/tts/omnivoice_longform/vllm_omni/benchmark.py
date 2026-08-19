@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 import soundfile as sf
+from tqdm.asyncio import tqdm
 
 from benchmarks.tts.omnivoice_longform.common import (
     DEFAULT_SEEDS,
@@ -25,6 +26,7 @@ from benchmarks.tts.omnivoice_longform.common import (
     load_prompt_manifest,
     mean_and_stddev,
     read_jsonl,
+    representative_warmup_cases,
     write_json,
     write_jsonl,
 )
@@ -125,10 +127,11 @@ async def _run_cases(
     cases: list[GenerationCase],
     concurrency: int,
     output_dir: Path | None,
+    progress_description: str,
 ) -> tuple[list[dict[str, Any]], float]:
     semaphore = asyncio.Semaphore(concurrency)
     started = time.perf_counter()
-    rows = await asyncio.gather(
+    rows = await tqdm.gather(
         *(
             _generate_case_record(
                 client,
@@ -140,27 +143,11 @@ async def _run_cases(
                 order_index,
             )
             for order_index, case in enumerate(cases)
-        )
+        ),
+        desc=progress_description,
+        unit="request",
     )
     return rows, time.perf_counter() - started
-
-
-def _representative_warmup_cases(
-    cases: list[GenerationCase],
-    concurrency: int,
-) -> list[GenerationCase]:
-    representatives = []
-    seen_cells = set()
-    for case in cases:
-        cell = (case.mode, case.bucket)
-        if cell not in seen_cells:
-            seen_cells.add(cell)
-            representatives.append(case)
-    if not representatives:
-        raise ValueError("cannot warm up an empty case list")
-
-    warmup_count = max(concurrency, len(representatives))
-    return [representatives[index % len(representatives)] for index in range(warmup_count)]
 
 
 def _summarize_rows(
@@ -183,6 +170,7 @@ def _summarize_rows(
         "throughput_requests_per_s": len(successful_rows) / wall_time_s,
         "throughput_audio_s_per_s": sum(row["audio_duration_s"] for row in successful_rows) / wall_time_s,
         "latency_s": latency_summary([row["latency_s"] for row in successful_rows]),
+        "rtf": latency_summary([row["rtf"] for row in successful_rows]),
     }
     by_mode: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -228,6 +216,20 @@ def _summarize_rows(
         for (mode, bucket), cell_rows in sorted(by_cell.items())
     ]
     return summary
+
+
+def _print_sweep_summary(summary: dict[str, Any]) -> None:
+    print(
+        f"concurrency {summary['concurrency']}: "
+        f"{summary['successful_requests']}/{summary['measured_requests']} requests succeeded "
+        f"({summary['failed_requests']} failed) in {summary['wall_time_s']:.2f}s"
+    )
+    print(
+        f"  request throughput: {summary['throughput_requests_per_s']:.3f} requests/s, "
+        f"audio throughput: {summary['throughput_audio_s_per_s']:.3f} audio-s/s"
+    )
+    if summary["latency_s"] is not None:
+        print(f"  median latency: {summary['latency_s']['p50']:.2f}s, median RTF: {summary['rtf']['p50']:.3f}")
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -282,7 +284,7 @@ async def run(args: argparse.Namespace) -> None:
             if len(wall_times) != 1:
                 raise ValueError(f"inconsistent wall times for concurrency {concurrency}")
             summary = _summarize_rows(rows, concurrency, wall_times.pop())
-            summary["warmup_requests"] = len(_representative_warmup_cases(cases, concurrency))
+            summary["warmup_requests"] = len(representative_warmup_cases(cases, concurrency))
             summaries.append(summary)
         write_json(
             summary_path,
@@ -305,7 +307,7 @@ async def run(args: argparse.Namespace) -> None:
                 write_checkpoints()
                 continue
 
-            warmup_cases = _representative_warmup_cases(cases, concurrency)
+            warmup_cases = representative_warmup_cases(cases, concurrency)
             warmup_rows, _ = await _run_cases(
                 client,
                 api_url,
@@ -313,10 +315,13 @@ async def run(args: argparse.Namespace) -> None:
                 warmup_cases,
                 concurrency,
                 output_dir=None,
+                progress_description=f"vLLM concurrency {concurrency} warmup",
             )
             warmup_failures = sum(row["status"] != "success" for row in warmup_rows)
             if warmup_failures:
-                print(f"concurrency {concurrency}: {warmup_failures}/{len(warmup_rows)} warmup requests failed")
+                raise RuntimeError(
+                    f"concurrency {concurrency}: {warmup_failures}/{len(warmup_rows)} warmup requests failed"
+                )
             save_dir = output_dir if concurrency == 1 else None
             rows, wall_time_s = await _run_cases(
                 client,
@@ -325,6 +330,7 @@ async def run(args: argparse.Namespace) -> None:
                 cases,
                 concurrency,
                 output_dir=save_dir,
+                progress_description=f"vLLM concurrency {concurrency}",
             )
             rows = [
                 {
@@ -336,10 +342,7 @@ async def run(args: argparse.Namespace) -> None:
             ]
             rows_by_concurrency[concurrency] = {row["case_id"]: row for row in rows}
             write_checkpoints()
-            print(
-                f"concurrency {concurrency}: {len(rows)} requests in "
-                f"{wall_time_s:.2f}s, {len(rows) / wall_time_s:.3f} requests/s"
-            )
+            _print_sweep_summary(_summarize_rows(rows, concurrency, wall_time_s))
 
     write_checkpoints()
 

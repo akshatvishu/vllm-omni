@@ -111,6 +111,24 @@ def build_generation_cases(
     ]
 
 
+def representative_warmup_cases(
+    cases: list[GenerationCase],
+    concurrency: int,
+) -> list[GenerationCase]:
+    representatives = []
+    seen_cells = set()
+    for case in cases:
+        cell = (case.mode, case.bucket)
+        if cell not in seen_cells:
+            seen_cells.add(cell)
+            representatives.append(case)
+    if not representatives:
+        raise ValueError("cannot warm up an empty case list")
+
+    warmup_count = max(concurrency, len(representatives))
+    return [representatives[index % len(representatives)] for index in range(warmup_count)]
+
+
 def chunking_args(mode: str) -> dict[str, float]:
     if mode == "one_shot":
         return {
