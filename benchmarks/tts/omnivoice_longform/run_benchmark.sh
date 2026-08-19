@@ -6,9 +6,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-BENCH_PYTHON="${BENCH_PYTHON:-$REPO_ROOT/.venv/bin/python}"
-VLLM_BIN="${VLLM_BIN:-$REPO_ROOT/.venv/bin/vllm}"
-REFERENCE_REPO="${REFERENCE_REPO:-$REPO_ROOT/work/repos/k2-fsa/OmniVoice}"
+PYTHON_COMMAND="${BENCH_PYTHON:-python}"
+VLLM_COMMAND="${VLLM_BIN:-vllm}"
 MODEL="${MODEL:-k2-fsa/OmniVoice}"
 MODEL_REVISION="${MODEL_REVISION:-c5fdb5ccb189668d56333f77ba2629f4cd7535f4}"
 PORT="${PORT:-8091}"
@@ -18,20 +17,15 @@ WHISPER_MODEL="${WHISPER_MODEL:-openai/whisper-large-v3}"
 WHISPER_REVISION="${WHISPER_REVISION:-06f233fe06e710322aca913c1bc4249a0d71fce1}"
 OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/results/$(date +%Y%m%d-%H%M%S)}"
 SELECTION="$SCRIPT_DIR/selection.toml"
-MANIFEST="$OUTPUT_DIR/prompts.json"
 read -r -a SEED_VALUES <<< "${SEEDS:-42}"
 read -r -a CONCURRENCY_VALUES <<< "${CONCURRENCIES:-1 2 4}"
 
-if [[ ! -x "$BENCH_PYTHON" ]]; then
-    echo "Python executable not found: $BENCH_PYTHON" >&2
+if ! BENCH_PYTHON="$(command -v "$PYTHON_COMMAND")"; then
+    echo "Python executable not found: $PYTHON_COMMAND" >&2
     exit 1
 fi
-if [[ ! -x "$VLLM_BIN" ]]; then
-    echo "vLLM executable not found: $VLLM_BIN" >&2
-    exit 1
-fi
-if [[ ! -d "$REFERENCE_REPO" ]]; then
-    echo "Reference OmniVoice repository not found: $REFERENCE_REPO" >&2
+if ! VLLM_BIN="$(command -v "$VLLM_COMMAND")"; then
+    echo "vLLM executable not found: $VLLM_COMMAND" >&2
     exit 1
 fi
 if (echo >/dev/tcp/127.0.0.1/"$PORT") 2>/dev/null; then
@@ -40,12 +34,19 @@ if (echo >/dev/tcp/127.0.0.1/"$PORT") 2>/dev/null; then
 fi
 
 mkdir -p "$OUTPUT_DIR/reference" "$OUTPUT_DIR/vllm-omni" "$OUTPUT_DIR/evaluation"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+MANIFEST="$OUTPUT_DIR/prompts.json"
 export HIP_VISIBLE_DEVICES="$GPU_INDEX"
 export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
 
 cd "$REPO_ROOT"
 
-"$BENCH_PYTHON" -m pip install --no-deps -e "$REFERENCE_REPO"
+echo "Saving results to: $OUTPUT_DIR"
+
+"$BENCH_PYTHON" -m pip install --no-deps \
+    "omnivoice==0.2.1" \
+    "jiwer==4.0.0" \
+    "pydub==0.25.1"
 
 "$BENCH_PYTHON" -m benchmarks.tts.omnivoice_longform.prepare_dataset \
     --selection "$SELECTION" \
@@ -54,7 +55,6 @@ cd "$REPO_ROOT"
 "$BENCH_PYTHON" -m benchmarks.tts.omnivoice_longform.metadata \
     --output "$OUTPUT_DIR/run_metadata.json" \
     --repo-root "$REPO_ROOT" \
-    --reference-repo "$REFERENCE_REPO" \
     --manifest "$MANIFEST" \
     --model "$MODEL" \
     --model-revision "$MODEL_REVISION" \

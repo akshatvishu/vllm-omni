@@ -81,19 +81,19 @@ def collect_metadata(args: argparse.Namespace) -> dict[str, Any]:
         },
         "repositories": {
             "vllm_omni": _git_state(Path(args.repo_root)),
-            "reference_omnivoice": _git_state(Path(args.reference_repo)),
         },
         "environment": {
             "python": platform.python_version(),
             "torch": torch.__version__,
             "torch_hip": torch.version.hip,
+            "torchaudio": _package_version("torchaudio"),
             "transformers": _package_version("transformers"),
             "vllm": _package_version("vllm"),
             "vllm_omni": _package_version("vllm-omni"),
             "omnivoice": _package_version("omnivoice"),
+            "pydub": _package_version("pydub"),
             "huggingface_hub": _package_version("huggingface-hub"),
             "jiwer": _package_version("jiwer"),
-            "scipy": _package_version("scipy"),
             "soundfile": _package_version("soundfile"),
             "accelerator": accelerator,
             "device_name": device_name,
@@ -119,7 +119,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Record OmniVoice benchmark environment")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument("--reference-repo", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--model-revision", required=True)

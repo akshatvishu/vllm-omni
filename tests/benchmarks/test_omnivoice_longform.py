@@ -32,6 +32,7 @@ from benchmarks.tts.omnivoice_longform.common import (
 from benchmarks.tts.omnivoice_longform.evaluate import (
     _aggregate,
     _validate_backend_cases,
+    load_audio_16k,
     score_transcript,
     transcribe_waveform,
 )
@@ -48,6 +49,7 @@ from benchmarks.tts.omnivoice_longform.vllm_omni.benchmark import (
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
 SELECTION = Path(__file__).parents[2] / "benchmarks" / "tts" / "omnivoice_longform" / "selection.toml"
+RUNNER = Path(__file__).parents[2] / "benchmarks" / "tts" / "omnivoice_longform" / "run_benchmark.sh"
 
 
 def _source_rows(count: int = 30) -> list[dict]:
@@ -127,6 +129,17 @@ def test_dataset_selection_produces_balanced_100_prompt_distribution() -> None:
     assert all(len(buckets) == 4 for buckets in buckets_by_source.values())
     category_counts = Counter(category_by_source.values())
     assert max(category_counts.values()) - min(category_counts.values()) <= 1
+
+
+def test_runner_uses_pinned_reference_package_without_checkout() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+
+    assert '"omnivoice==0.2.1"' in runner
+    assert '"jiwer==4.0.0"' in runner
+    assert '"pydub==0.25.1"' in runner
+    assert "REFERENCE_REPO" not in runner
+    assert 'OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/results/' in runner
+    assert 'OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"' in runner
 
 
 def test_dataset_selection_rejects_too_few_eligible_sources() -> None:
@@ -215,6 +228,29 @@ def test_backend_validation_rejects_mismatched_cases() -> None:
 
     with pytest.raises(ValueError, match="do not contain the same cases"):
         _validate_backend_cases(rows)
+
+
+def test_load_audio_16k_downmixes_and_resamples(tmp_path: Path) -> None:
+    sample_rate = 8000
+    duration_s = 0.1
+    samples = int(sample_rate * duration_s)
+    stereo = np.stack(
+        [
+            np.linspace(-0.5, 0.5, samples, dtype=np.float32),
+            np.linspace(0.5, -0.5, samples, dtype=np.float32),
+        ],
+        axis=1,
+    )
+    path = tmp_path / "stereo.wav"
+    sf.write(path, stereo, sample_rate)
+
+    mono = load_audio_16k(path)
+
+    assert mono.dtype == np.float32
+    assert mono.flags.c_contiguous
+    assert mono.shape == (1600,)
+    assert np.isfinite(mono).all()
+    assert np.max(np.abs(mono)) < 1e-4
 
 
 def test_serving_summary_keeps_each_mode_and_length_bucket() -> None:

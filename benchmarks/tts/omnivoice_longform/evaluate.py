@@ -4,16 +4,15 @@
 from __future__ import annotations
 
 import argparse
-import math
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 import jiwer
 import numpy as np
-import scipy.signal
 import soundfile as sf
 import torch
+import torchaudio.functional
 from transformers import AutoProcessor, WhisperForConditionalGeneration
 
 from benchmarks.tts.omnivoice_longform.common import (
@@ -32,12 +31,7 @@ def load_audio_16k(path: str | Path) -> np.ndarray:
     audio, sample_rate = sf.read(path, dtype="float32", always_2d=True)
     mono = audio.mean(axis=1)
     if sample_rate != 16000:
-        divisor = math.gcd(sample_rate, 16000)
-        mono = scipy.signal.resample_poly(
-            mono,
-            16000 // divisor,
-            sample_rate // divisor,
-        )
+        mono = torchaudio.functional.resample(torch.from_numpy(mono), sample_rate, 16000).numpy()
     return np.ascontiguousarray(mono, dtype=np.float32)
 
 

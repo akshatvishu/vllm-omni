@@ -25,27 +25,19 @@ The benchmark uses the `long_tts_eval_en` split of Hugging Face [`wcy1122/Long-T
 
 The selection rules are checked in as [selection.toml](selection.toml). The script downloads and resolves the dataset before model generation starts, then saves the exact prompts and hashes as `prompts.json` in the result directory. Dataset download time is not included in generation latency.
 
-## ROCm setup
+## Requirements
 
-Use an existing ROCm PyTorch and vLLM-Omni environment. Do not install the reference project's dependencies as a group because its lock file selects CUDA PyTorch wheels.
-
-The runner installs the selected local reference package before generation:
-
-```bash
-.venv/bin/python -m pip install --no-deps -e work/repos/k2-fsa/OmniVoice
-```
-
-The environment must already contain the packages other than PyTorch that OmniVoice requires, including Transformers, Accelerate, pydub, NumPy, SoundFile, and torchaudio.
-
-Do not enable the reference FlashInfer path on ROCm.
+Run the benchmark inside a container that already has ROCm PyTorch and vLLM-Omni. The script installs `omnivoice==0.2.1` and the packages needed for scoring with `--no-deps`, so it does not replace the container's PyTorch.
 
 ## Run
 
-Run the full comparison from the repository root:
+Run the full comparison from the repository root with one command:
 
 ```bash
-benchmarks/tts/omnivoice_longform/run_benchmark.sh
+bash benchmarks/tts/omnivoice_longform/run_benchmark.sh
 ```
+
+The script uses the container's `python` and `vllm` commands. It installs the pinned benchmark packages, downloads the pinned dataset and model revisions, runs both backends, runs Whisper, and saves the result under `benchmarks/tts/omnivoice_longform/results/<timestamp>/`. The script prints the full result path before it starts generation and again when it finishes.
 
 The defaults use GPU 0, float32 generation for both implementations, Whisper large v3 in float32, seed 42, and serving concurrency 1, 2, and 4. The OmniVoice and Whisper model revisions are pinned so rerunning the benchmark does not silently change either model.
 
@@ -59,10 +51,10 @@ WHISPER_REVISION=06f233fe06e710322aca913c1bc4249a0d71fce1 \
 SEEDS="42" \
 CONCURRENCIES="1 2 4" \
 OUTPUT_DIR=/path/to/results \
-benchmarks/tts/omnivoice_longform/run_benchmark.sh
+bash benchmarks/tts/omnivoice_longform/run_benchmark.sh
 ```
 
-Set `REFERENCE_REPO` when the original OmniVoice checkout is not under `work/repos/k2-fsa/OmniVoice`. Set `BENCH_PYTHON` and `VLLM_BIN` when the container uses a different virtual environment.
+Set `BENCH_PYTHON` or `VLLM_BIN` only when the container uses different command names or paths.
 
 Rerun the same command with the same `OUTPUT_DIR` to resume. Reference generation and Whisper evaluation checkpoint after every case. vLLM-Omni checkpoints after every completed concurrency sweep. Failed cases are preserved in the output instead of discarding the rest of the run. The resolved prompt manifest and fingerprinted run metadata are immutable, so a changed model revision, Whisper revision, dependency set, repository state, or manifest is rejected instead of mixed with existing results.
 
