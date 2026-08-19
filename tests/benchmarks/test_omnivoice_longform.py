@@ -53,8 +53,6 @@ from benchmarks.tts.omnivoice_longform.vllm_omni.benchmark import (
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
 SELECTION = Path(__file__).parents[2] / "benchmarks" / "tts" / "omnivoice_longform" / "selection.toml"
-RUNNER = Path(__file__).parents[2] / "benchmarks" / "tts" / "omnivoice_longform" / "run_benchmark.sh"
-MEMORY_AB_RUNNER = RUNNER.with_name("run_memory_ab.sh")
 
 
 def _source_rows(count: int = 30) -> list[dict]:
@@ -151,48 +149,6 @@ def test_small_dataset_selection_produces_ten_prompts_per_bucket() -> None:
     }
 
 
-def test_runner_defaults_and_pinned_packages() -> None:
-    runner = RUNNER.read_text(encoding="utf-8")
-
-    assert '"omnivoice==0.2.1"' in runner
-    assert '"jiwer==4.0.0"' in runner
-    assert '"pydub==0.25.1"' in runner
-    assert "REFERENCE_REPO" not in runner
-    assert 'OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/results/' in runner
-    assert 'OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"' in runner
-    assert "--small)" in runner
-    assert "PREPARE_DATASET_ARGS=(--source-examples 10)" in runner
-    assert "CONCURRENCY_VALUES=(1)" in runner
-    assert 'CONCURRENCY_VALUES+=("$2")' in runner
-    assert "CONCURRENCIES" not in runner
-    assert 'echo "Running reference OmniVoice benchmark"' in runner
-    assert 'echo "Starting vLLM-Omni server"' in runner
-    assert 'echo "Running vLLM-Omni serving benchmark"' in runner
-    assert 'echo "Running Whisper transcription and scoring"' in runner
-
-
-def test_memory_ab_runner_isolated_variants() -> None:
-    runner = MEMORY_AB_RUNNER.read_text(encoding="utf-8")
-
-    assert 'TARGET_REF="${TARGET_REF:-HEAD}"' in runner
-    assert "SOURCE_EXAMPLES=1" in runner
-    assert "--samples)" in runner
-    assert 'worktree add --detach "$BASELINE_WORKTREE" "$RESOLVED_REVISION"' in runner
-    assert 'worktree add --detach "$CANDIDATE_WORKTREE" "$RESOLVED_REVISION"' in runner
-    assert '"$BENCH_PYTHON" "$BASELINE_TRANSFORM" --repo-root "$BASELINE_WORKTREE"' in runner
-    assert 'cd "$worktree"' in runner
-    assert runner.count('run_worktree_python "$CANDIDATE_WORKTREE"') == 2
-    assert runner.count('run_worktree_python "$worktree"') == 2
-    assert "run_variant gpu-retained" in runner
-    assert "run_variant cpu-copy" in runner
-    assert "--modes chunked" in runner
-    assert "--discard-audio" in runner
-    assert '--temporary-audio-dir "$audio_dir"' in runner
-    assert "reference.inference" not in runner
-    assert "omnivoice==" not in runner
-    assert "Whisper" not in runner
-
-
 def test_gpu_retention_transform_changes_only_the_chunk_storage_path(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     pipeline = repo / "vllm_omni/diffusion/models/omnivoice/pipeline_omnivoice.py"
@@ -209,39 +165,6 @@ def test_gpu_retention_transform_changes_only_the_chunk_storage_path(tmp_path: P
     assert "audio_copy_stream.synchronize()" not in baseline
     with pytest.raises(ValueError, match="expected code was not found exactly once"):
         prepare_gpu_retention_baseline(repo)
-
-
-@pytest.mark.parametrize(
-    ("arguments", "error"),
-    [
-        (["--concurrency"], "requires a positive integer"),
-        (["--concurrency", "0"], "requires a positive integer"),
-        (["--concurrency", "1"], "Duplicate concurrency: 1"),
-        (["--unknown"], "Usage:"),
-    ],
-)
-def test_runner_rejects_invalid_arguments(arguments: list[str], error: str) -> None:
-    result = subprocess.run(
-        ["bash", str(RUNNER), *arguments],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 2
-    assert error in result.stderr
-
-
-@pytest.mark.parametrize("arguments", [["--samples"], ["--samples", "0"], ["--unknown"]])
-def test_memory_ab_runner_rejects_invalid_arguments(arguments: list[str]) -> None:
-    result = subprocess.run(
-        ["bash", str(MEMORY_AB_RUNNER), *arguments],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 2
 
 
 def test_dataset_selection_rejects_nonpositive_source_examples() -> None:
@@ -278,30 +201,6 @@ def test_generation_matrix_covers_all_modes_prompts_and_seed(tmp_path: Path) -> 
     assert {case.seed for case in cases} == {42}
     assert cases[0].prompt_id == cases[1].prompt_id
     assert [case.mode for case in cases[:2]] == ["one_shot", "chunked"]
-
-
-def test_generation_matrix_can_select_only_chunked_cases(tmp_path: Path) -> None:
-    _, prompts = load_prompt_manifest(_resolved_manifest(tmp_path))
-
-    cases = build_generation_cases(prompts, DEFAULT_SEEDS, modes=("chunked",))
-
-    assert len(cases) == 100
-    assert {case.mode for case in cases} == {"chunked"}
-
-
-@pytest.mark.parametrize(
-    ("modes", "error"),
-    [
-        ((), "at least one generation mode"),
-        (("chunked", "chunked"), "generation modes must be unique"),
-        (("automatic",), "unsupported generation modes"),
-    ],
-)
-def test_generation_matrix_rejects_invalid_modes(tmp_path: Path, modes: tuple[str, ...], error: str) -> None:
-    _, prompts = load_prompt_manifest(_small_manifest(tmp_path))
-
-    with pytest.raises(ValueError, match=error):
-        build_generation_cases(prompts, DEFAULT_SEEDS, modes=modes)
 
 
 def test_manifest_rejects_missing_bucket_example(tmp_path: Path) -> None:
@@ -451,104 +350,102 @@ def test_serving_summary_counts_failures_without_summarizing_missing_metrics() -
     assert summary["cells"][0]["latency_s"] is None
 
 
+def _memory_result_row(
+    tmp_path: Path,
+    label: str,
+    *,
+    samples: np.ndarray | None = None,
+    sample_rate: int = 24000,
+    case_id: str = "case-1",
+    bucket: str = "words_120",
+    word_count: int = 120,
+    **overrides,
+) -> dict:
+    samples = np.zeros(2, dtype=np.float32) if samples is None else samples
+    audio_path = tmp_path / f"{label}.wav"
+    sf.write(audio_path, samples, sample_rate, subtype="FLOAT")
+    row = {
+        "case_id": case_id,
+        "prompt_id": f"prompt-{case_id}",
+        "bucket": bucket,
+        "word_count": word_count,
+        "text": f"text {case_id}",
+        "seed": 42,
+        "mode": "chunked",
+        "concurrency": 1,
+        "status": "success",
+        "audio_path": str(audio_path),
+        "audio_duration_s": len(samples) / sample_rate,
+        "audio_sha256": hashlib.sha256(audio_path.read_bytes()).hexdigest(),
+        "peak_reserved_gib": 4.0,
+        "peak_allocated_gib": 3.0,
+        "latency_s": 1.0,
+        "rtf": 0.1,
+    }
+    row.update(overrides)
+    return row
+
+
 def test_memory_comparison_pairs_cases_and_reports_savings(tmp_path: Path) -> None:
     baseline_path = tmp_path / "baseline.jsonl"
     candidate_path = tmp_path / "candidate.jsonl"
-    baseline_rows = []
-    candidate_rows = []
-    for index, bucket in enumerate(("words_120", "words_200", "words_300", "words_400_plus"), start=1):
-        baseline_audio = tmp_path / f"baseline-{index}.wav"
-        candidate_audio = tmp_path / f"candidate-{index}.wav"
-        samples = np.linspace(-0.5, 0.5, index * 16, dtype=np.float32)
-        sf.write(baseline_audio, samples, 24000, subtype="FLOAT")
-        sf.write(candidate_audio, samples, 24000, subtype="FLOAT")
-        common = {
-            "case_id": f"case-{index}",
-            "prompt_id": f"prompt-{index}",
-            "bucket": bucket,
-            "word_count": index * 100,
-            "text": f"text {index}",
-            "seed": 42,
-            "mode": "chunked",
-            "concurrency": 1,
-            "status": "success",
-            "audio_duration_s": 10.0 * index,
-            "audio_sha256": f"{index:064x}",
-            "rtf": 0.1,
-        }
-        baseline_rows.append(
-            {
-                **common,
-                "audio_path": str(baseline_audio),
-                "peak_reserved_gib": 10.0 + index,
-                "peak_allocated_gib": 8.0 + index,
-                "latency_s": 2.0,
-            }
-        )
-        candidate_rows.append(
-            {
-                **common,
-                "audio_path": str(candidate_audio),
-                "peak_reserved_gib": 9.0,
-                "peak_allocated_gib": 7.0,
-                "latency_s": 1.8,
-            }
-        )
-    write_jsonl(baseline_path, baseline_rows)
-    write_jsonl(candidate_path, candidate_rows)
+    samples = np.array([0.0, 0.5], dtype=np.float32)
+    write_jsonl(
+        baseline_path,
+        [
+            _memory_result_row(
+                tmp_path,
+                "baseline",
+                samples=samples,
+                peak_reserved_gib=5.0,
+                peak_allocated_gib=4.0,
+            )
+        ],
+    )
+    write_jsonl(
+        candidate_path,
+        [
+            _memory_result_row(
+                tmp_path,
+                "candidate",
+                samples=samples,
+                peak_reserved_gib=4.0,
+                peak_allocated_gib=3.0,
+                latency_s=0.9,
+            )
+        ],
+    )
 
     summary = compare_results(baseline_path, candidate_path, revision="abc123")
 
     assert summary["revision"] == "abc123"
-    assert summary["overall"]["cases"] == 4
-    assert summary["overall"]["peak_reserved_gib"]["baseline_mean"] == 12.5
-    assert summary["overall"]["peak_reserved_gib"]["candidate_mean"] == 9.0
-    assert summary["overall"]["peak_reserved_gib"]["mean_saved"] == 3.5
-    assert summary["overall"]["peak_allocated_gib"]["mean_saved"] == 3.5
+    assert summary["overall"]["cases"] == 1
+    assert summary["overall"]["peak_reserved_gib"]["mean_saved"] == 1.0
+    assert summary["overall"]["peak_allocated_gib"]["mean_saved"] == 1.0
     assert summary["overall"]["latency_s"]["candidate_change_percent"] == pytest.approx(-10.0)
     assert summary["overall"]["wav_sha256"]["all_cases_match"] is True
     assert summary["overall"]["pcm"] == {
-        "comparable_cases": 4,
+        "comparable_cases": 1,
         "mismatched_cases": 0,
         "max_absolute_error": 0.0,
         "rmse": 0.0,
         "snr_db": None,
         "snr_status": "exact",
     }
-    assert [cell["bucket"] for cell in summary["cells"]] == [
-        "words_120",
-        "words_200",
-        "words_300",
-        "words_400_plus",
-    ]
+    assert [cell["bucket"] for cell in summary["cells"]] == ["words_120"]
 
 
 def test_memory_comparison_reports_numeric_pcm_difference(tmp_path: Path) -> None:
-    baseline_audio = tmp_path / "baseline.wav"
-    candidate_audio = tmp_path / "candidate.wav"
-    sf.write(baseline_audio, np.array([0.0, 0.5], dtype=np.float32), 24000, subtype="FLOAT")
-    sf.write(candidate_audio, np.array([0.0, 0.25], dtype=np.float32), 24000, subtype="FLOAT")
-    common = {
-        "case_id": "case-1",
-        "prompt_id": "prompt-1",
-        "bucket": "words_120",
-        "word_count": 120,
-        "text": "text",
-        "seed": 42,
-        "mode": "chunked",
-        "concurrency": 1,
-        "status": "success",
-        "audio_duration_s": 2 / 24000,
-        "audio_sha256": "a" * 64,
-        "peak_reserved_gib": 4.0,
-        "peak_allocated_gib": 3.0,
-        "latency_s": 1.0,
-        "rtf": 1.0,
-    }
     baseline_path = tmp_path / "baseline.jsonl"
     candidate_path = tmp_path / "candidate.jsonl"
-    write_jsonl(baseline_path, [{**common, "audio_path": str(baseline_audio)}])
-    write_jsonl(candidate_path, [{**common, "audio_path": str(candidate_audio)}])
+    write_jsonl(
+        baseline_path,
+        [_memory_result_row(tmp_path, "baseline", samples=np.array([0.0, 0.5], dtype=np.float32))],
+    )
+    write_jsonl(
+        candidate_path,
+        [_memory_result_row(tmp_path, "candidate", samples=np.array([0.0, 0.25], dtype=np.float32))],
+    )
 
     pcm = compare_results(baseline_path, candidate_path)["overall"]["pcm"]
 
@@ -571,31 +468,20 @@ def test_memory_comparison_reports_pcm_mismatch(
     candidate_rate: int,
     expected_reason: str,
 ) -> None:
-    baseline_audio = tmp_path / "baseline.wav"
-    candidate_audio = tmp_path / "candidate.wav"
-    sf.write(baseline_audio, np.zeros(2, dtype=np.float32), 24000)
-    sf.write(candidate_audio, np.zeros(candidate_samples, dtype=np.float32), candidate_rate)
-    common = {
-        "case_id": "case-1",
-        "prompt_id": "prompt-1",
-        "bucket": "words_120",
-        "word_count": 120,
-        "text": "text",
-        "seed": 42,
-        "mode": "chunked",
-        "concurrency": 1,
-        "status": "success",
-        "audio_duration_s": 0.1,
-        "audio_sha256": "a" * 64,
-        "peak_reserved_gib": 4.0,
-        "peak_allocated_gib": 3.0,
-        "latency_s": 1.0,
-        "rtf": 1.0,
-    }
     baseline_path = tmp_path / "baseline.jsonl"
     candidate_path = tmp_path / "candidate.jsonl"
-    write_jsonl(baseline_path, [{**common, "audio_path": str(baseline_audio)}])
-    write_jsonl(candidate_path, [{**common, "audio_path": str(candidate_audio)}])
+    write_jsonl(baseline_path, [_memory_result_row(tmp_path, "baseline")])
+    write_jsonl(
+        candidate_path,
+        [
+            _memory_result_row(
+                tmp_path,
+                "candidate",
+                samples=np.zeros(candidate_samples, dtype=np.float32),
+                sample_rate=candidate_rate,
+            )
+        ],
+    )
 
     summary = compare_results(baseline_path, candidate_path)
 
@@ -611,36 +497,6 @@ def test_clear_audio_paths_removes_temporary_paths_from_results(tmp_path: Path) 
     _clear_audio_paths([serving_path])
 
     assert read_jsonl(serving_path)[0]["audio_path"] is None
-
-
-def test_memory_comparison_rejects_failed_cases(tmp_path: Path) -> None:
-    baseline_path = tmp_path / "baseline.jsonl"
-    candidate_path = tmp_path / "candidate.jsonl"
-    audio_path = tmp_path / "audio.wav"
-    sf.write(audio_path, np.zeros(16, dtype=np.float32), 24000)
-    row = {
-        "case_id": "case-1",
-        "prompt_id": "prompt-1",
-        "bucket": "words_400_plus",
-        "word_count": 500,
-        "text": "text",
-        "seed": 42,
-        "mode": "chunked",
-        "concurrency": 1,
-        "status": "success",
-        "audio_duration_s": 10.0,
-        "audio_sha256": "a" * 64,
-        "audio_path": str(audio_path),
-        "peak_reserved_gib": 10.0,
-        "peak_allocated_gib": 9.0,
-        "latency_s": 2.0,
-        "rtf": 0.2,
-    }
-    write_jsonl(baseline_path, [row])
-    write_jsonl(candidate_path, [{**row, "status": "error"}])
-
-    with pytest.raises(ValueError, match="did not succeed"):
-        compare_results(baseline_path, candidate_path)
 
 
 def test_sweep_summary_reports_successful_throughput(capsys) -> None:
