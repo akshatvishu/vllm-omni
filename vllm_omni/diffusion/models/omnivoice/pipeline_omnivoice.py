@@ -403,6 +403,8 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
             decoded_audio = self.decoder(tokens)
             if decoded_audio.device.type != "cpu" and self.pin_memory and audio_copy_stream is None:
                 audio_copy_stream = torch.Stream(device=decoded_audio.device)
+            # Keep completed chunks on CPU. Storing them on GPU makes memory
+            # grow with the generated audio length.
             decoded_chunks.append(_copy_audio_to_cpu(decoded_audio, audio_copy_stream))
             if chunk_index == 0 and fixed_ref_audio_tokens is None:
                 fixed_ref_text = text_chunk
