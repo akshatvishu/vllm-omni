@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+
 """Server/client/runner runtime primitives for tests."""
 
 import asyncio
@@ -2092,6 +2095,7 @@ class OpenAIClientHandler:
           - response_format: audio format such as "wav" or "pcm" (optional)
           - task_type, ref_text, ref_audio: TTS-specific extras (optional, passed via extra_body)
           - min_audio_bytes: optional minimum ``len(audio_bytes)`` checked in ``assert_audio_speech_response``
+          - transcript_expected_text: local expected spoken text; defaults to ``input``
           - status_code: if set, HTTP status is asserted (int or e.g. ``(400, 422)``); uses APIError handling
           - err_message: optional substring(s) to match against error text (``str`` or list/tuple of alternatives;
             see ``assert_audio_speech_response``). If set, uses the same APIError path as ``status_code``.
