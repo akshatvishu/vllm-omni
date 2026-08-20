@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+
 # Copyright 2026 OpenMOSS and the vLLM-Omni team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License").
@@ -257,6 +260,7 @@ class MossTTSCodecDecoder(nn.Module):
         self._stream_max_step_frames: int = self._stream_chunk_frames or 100
         self._stream_req_slots: dict[str, int] = {}
         self._async_chunk = bool(getattr(self.vllm_config.model_config, "async_chunk", False))
+        self._streaming_codec_enabled = False
         self._streaming_graph_batch_sizes = self._streaming_graph_batch_sizes_from_compilation_config()
         self._streaming_graph_frame_sizes = sorted(
             {frames for frames in (self._initial_stream_chunk_frames, self._stream_chunk_frames) if frames > 0}
@@ -387,7 +391,7 @@ class MossTTSCodecDecoder(nn.Module):
                 continue
             meta = (info.get("meta", {}) if isinstance(info, dict) else {}) or {}
             finished = bool(meta.get("stream_finished", meta.get("finished", False)))
-            streaming_enabled = self._async_chunk
+            streaming_enabled = self._streaming_codec_enabled
             if seg.numel() % self._n_vq != 0:
                 logger.warning(
                     "MossTTS codec input length %d not divisible by n_vq %d; skipping.",
@@ -489,7 +493,7 @@ class MossTTSCodecDecoder(nn.Module):
         return torch.zeros((0,), dtype=torch.float32)
 
     def _ensure_stream_session(self) -> _MossCodecStreamSession | None:
-        if self._codec is None:
+        if self._codec is None or not self._streaming_codec_enabled:
             return None
         if self._stream_session is not None:
             return self._stream_session
@@ -750,7 +754,7 @@ class MossTTSCodecDecoder(nn.Module):
         )
 
         codec.eval()
-        if device.type != "cpu":
+        if device.type == "cuda" and isinstance(codec, MossAudioTokenizerV2Model):
             codec.decoder.to(dtype=torch.bfloat16)
         build_decode_lut = getattr(codec.quantizer, "build_decode_lut", None)
         if callable(build_decode_lut):
@@ -782,8 +786,9 @@ class MossTTSCodecDecoder(nn.Module):
             self._n_channels,
         )
 
+        self._configure_codec_streaming()
         self._configure_decoder_cudagraph(device)
-        if self._async_chunk and self._streaming_graph_batch_sizes and self._streaming_graph_frame_sizes:
+        if self._streaming_codec_enabled and self._streaming_graph_batch_sizes and self._streaming_graph_frame_sizes:
             self._ensure_stream_session()
 
         # vLLM's track_weights_loading() compares the returned set against
@@ -812,19 +817,37 @@ class MossTTSCodecDecoder(nn.Module):
         logger.info("Using vendored MOSS Audio Tokenizer v1 classes from %s", codec_path)
         return codec_cfg, codec
 
+    def _configure_codec_streaming(self) -> None:
+        if self._codec is None:
+            self._streaming_codec_enabled = False
+            return
+        required_methods = (
+            "initialize_decoder_state_pool",
+            "reset_decoder_state_slots",
+            "decode_streaming_batch",
+        )
+        self._streaming_codec_enabled = self._async_chunk and all(
+            callable(getattr(self._codec, method, None)) for method in required_methods
+        )
+        if self._async_chunk and not self._streaming_codec_enabled:
+            logger.warning(
+                "MOSS Audio Tokenizer %s does not support stateful streaming; using per-chunk batch decode.",
+                self._codec_path,
+            )
+
     def _configure_decoder_cudagraph(self, device: torch.device) -> None:
         """Select the codec CUDA Graph path.
 
         ``enforce_eager`` is the single graph on/off switch. If graphing is
-        enabled, ``async_chunk`` decides whether decode uses the persistent
-        streaming-state wrapper or the offline full-chunk wrapper.
+        enabled, codecs with state-pool support use the persistent streaming
+        wrapper; other codecs use the per-chunk wrapper.
         """
         if getattr(self.vllm_config.model_config, "enforce_eager", True):
             self._streaming_graph_batch_sizes = []
             return
         if self._codec is None:
             return
-        if self._async_chunk:
+        if self._streaming_codec_enabled:
             logger.info(
                 "MOSS-TTS codec CUDA Graph selected streaming wrapper: B=%s exact_T=%s",
                 self._streaming_graph_batch_sizes,

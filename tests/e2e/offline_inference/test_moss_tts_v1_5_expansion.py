@@ -1,19 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """E2E offline inference test for MOSS-TTS-v1.5 (MossTTSDelay-8B).
 
 MOSS-TTS-v1.5 is a continued-training upgrade of MOSS-TTS 1.0 with the SAME
-``MossTTSDelay`` architecture and API. The 8B checkpoint is H100-gated; small-GPU
-MossTTSDelay coverage stays in ``test_moss_tts_expansion.py``.
+``MossTTSDelay`` architecture and API. The 8B checkpoint runs on H100 or MI325;
+small-GPU MossTTSDelay coverage stays in ``test_moss_tts_expansion.py``.
 """
 
 from __future__ import annotations
 
+import gc
 import os
 import urllib.request
 
 import pytest
+import soundfile as sf
 import torch
+import torchaudio
+from transformers import AutoProcessor
 from vllm import SamplingParams
 
 from tests.helpers.mark import hardware_test
@@ -33,6 +37,7 @@ _SKIP_ISSUE_6417 = pytest.mark.skip(
 )
 
 pytestmark = [
+    pytest.mark.full_model,
     pytest.mark.slow,
     pytest.mark.tts,
     _SKIP_ISSUE_6417,
@@ -68,17 +73,37 @@ def ref_audio_path(tmp_path_factory) -> str:
     return str(target)
 
 
-def _build_request(text: str, ref_audio_path: str) -> dict:
-    return {
-        "prompt": "<|im_start|>assistant\n",
+@pytest.fixture(scope="session")
+def voice_clone_request(ref_audio_path: str) -> dict:
+    data, sample_rate = sf.read(ref_audio_path, always_2d=True)
+    wav = torch.from_numpy(data.T).to(torch.float32)
+    if wav.shape[0] > 1:
+        wav = wav.mean(dim=0, keepdim=True)
+    if sample_rate != SAMPLE_RATE:
+        wav = torchaudio.functional.resample(wav, sample_rate, SAMPLE_RATE)
+
+    processor = AutoProcessor.from_pretrained(MODEL, trust_remote_code=True)
+    with torch.inference_mode():
+        reference_codes = processor.encode_audios_from_wav(
+            [wav],
+            sampling_rate=SAMPLE_RATE,
+            n_vq=int(processor.model_config.n_vq),
+        )[0]
+        message = processor.build_user_message(
+            text="Hello, this is a MOSS-TTS v1.5 voice cloning test.",
+            reference=[reference_codes],
+        )
+        unified_codes = processor(conversations=[[message]], mode="generation")["input_ids"][0]
+
+    request = {
+        "prompt_token_ids": unified_codes[:, 0].tolist(),
         "additional_information": {
-            "task_type": ["voice_clone"],
-            "text": [text],
-            "mode": ["voice_clone"],
-            "prompt_audio_path": [ref_audio_path],
-            "seed": [42],
+            "codes": {"ref": unified_codes[:, 1:].contiguous().to(torch.int64)},
         },
     }
+    del processor
+    gc.collect()
+    return request
 
 
 def _sampling_for(omni_runner: OmniRunner) -> SamplingParams | list[SamplingParams]:
@@ -112,11 +137,10 @@ def _collect_audio(omni_runner: OmniRunner, request: dict) -> tuple[torch.Tensor
     raise AssertionError("No stage outputs received")
 
 
-@hardware_test(res={"cuda": "H100"})
-def test_moss_tts_v15_voice_clone(omni_runner: OmniRunner, ref_audio_path) -> None:
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"})
+def test_moss_tts_v15_voice_clone(voice_clone_request: dict, omni_runner: OmniRunner) -> None:
     """MOSS-TTS-v1.5 (8B): voice_clone produces non-empty 24 kHz audio."""
-    req = _build_request("Hello, this is a MOSS-TTS v1.5 voice cloning test.", ref_audio_path)
-    audio, sr = _collect_audio(omni_runner, req)
+    audio, sr = _collect_audio(omni_runner, voice_clone_request)
 
     assert sr == SAMPLE_RATE, f"Expected {SAMPLE_RATE} Hz, got {sr}"
     assert audio.numel() > 0, "Audio tensor is empty"
