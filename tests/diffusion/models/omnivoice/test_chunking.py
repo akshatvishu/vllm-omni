@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from vllm_omni.diffusion.models.omnivoice.chunking import join_audio_chunks, split_text_into_chunks
+from vllm_omni.diffusion.models.omnivoice.chunking import (
+    _split_at_sentence_boundaries,
+    join_audio_chunks,
+    split_text_into_chunks,
+)
 from vllm_omni.diffusion.models.omnivoice.pipeline_omnivoice import (
     OmniVoicePipeline,
     _copy_audio_to_cpu,
@@ -99,6 +103,23 @@ def test_split_text_handles_multi_period_abbreviation_and_cjk_punctuation():
     chunks = split_text_into_chunks(text, max_characters=20)
 
     assert chunks == ["Use e.g. this form.", "下一句。最后一句！"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Meet me at apt. 5. Then leave.", ["Meet me at apt. 5.", " Then leave."]),
+        ("Read the D.I.Y. guide. Next.", ["Read the D.I.Y. guide.", " Next."]),
+        ("Read the D.I.Y guide. Next.", ["Read the D.I.Y guide.", " Next."]),
+        ("Please R.S.V.P. today. Thanks.", ["Please R.S.V.P. today.", " Thanks."]),
+        ("Please R.S.V.P today. Thanks.", ["Please R.S.V.P today.", " Thanks."]),
+        ("P.S. Please reply. Done.", ["P.S. Please reply.", " Done."]),
+        ("P.S Please reply. Done.", ["P.S Please reply.", " Done."]),
+        ("Smith et al. reported it. Next.", ["Smith et al. reported it.", " Next."]),
+    ],
+)
+def test_sentence_boundaries_preserve_additional_abbreviations(text, expected):
+    assert _split_at_sentence_boundaries(text) == expected
 
 
 @pytest.mark.parametrize(

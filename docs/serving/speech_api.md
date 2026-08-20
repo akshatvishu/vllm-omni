@@ -750,6 +750,8 @@ OmniVoice splits long input into smaller text chunks and joins the decoded audio
 | `audio_chunk_duration` | float | 15.0 | Target duration in seconds for each generated text chunk. The value must be positive. |
 | `audio_chunk_threshold` | float | 30.0 | Estimated duration in seconds above which chunking starts. The value must be non-negative. |
 
+Use the defaults unless you have tested output quality for your workload. To retain protection from long text word loss, keep `audio_chunk_duration` at or below 15 seconds and `audio_chunk_threshold` at or below 30 seconds. Lower values create more chunks and audio joins, which can increase generation time and introduce audible pauses.
+
 ```json
 {
     "input": "A long passage to synthesize...",
