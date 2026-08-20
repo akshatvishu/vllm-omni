@@ -20,8 +20,6 @@ from tests.helpers.stage_config import get_deploy_config_path
 from vllm_omni.platforms import current_omni_platform
 
 if current_omni_platform.is_rocm():
-    # A cold AITER kernel build can exceed the 120 second client timeout;
-    # later runs reuse the cached kernel.
     os.environ.setdefault("COSYVOICE3_TRT", "0")
 
 pytestmark = [pytest.mark.slow, pytest.mark.tts, pytest.mark.advanced_model]
@@ -46,6 +44,13 @@ def get_prompt(prompt_type="zh"):
         "en": "Hello, this is a voice cloning test with English text.",
     }
     return prompts.get(prompt_type, prompts["zh"])
+
+
+def _set_rocm_request_timeout(request_config: dict) -> None:
+    if current_omni_platform.is_rocm():
+        # A cold AITER MHA kernel build took 301 seconds on MI300X.
+        # Allow 600 seconds for the first request; later requests reuse the cache.
+        request_config["timeout"] = 600.0
 
 
 tts_server_params = [
@@ -90,6 +95,7 @@ def test_voice_clone_zh_001(omni_server, openai_client) -> None:
         "ref_audio": REF_AUDIO_URL,
         "ref_text": REF_TEXT,
     }
+    _set_rocm_request_timeout(request_config)
     openai_client.send_audio_speech_request(request_config)
 
 
@@ -113,6 +119,7 @@ def test_voice_clone_zh_002(omni_server, openai_client) -> None:
         "ref_audio": REF_AUDIO_URL,
         "ref_text": REF_TEXT,
     }
+    _set_rocm_request_timeout(request_config)
     openai_client.send_audio_speech_request(request_config)
 
 
@@ -135,4 +142,5 @@ def test_voice_clone_en_001(omni_server, openai_client) -> None:
         "ref_audio": REF_AUDIO_URL,
         "ref_text": REF_TEXT,
     }
+    _set_rocm_request_timeout(request_config)
     openai_client.send_audio_speech_request(request_config)

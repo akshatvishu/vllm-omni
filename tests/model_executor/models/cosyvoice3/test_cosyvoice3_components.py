@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Unit tests for CosyVoice3 components."""
 
 from types import SimpleNamespace
@@ -9,8 +9,26 @@ import torch
 import torch.nn as nn
 
 from tests.helpers.mark import hardware_test
+from vllm_omni.model_executor.models.cosyvoice3.code2wav_core.hifigan import (
+    CausalHiFTGenerator,
+)
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
+
+
+def test_causal_hift_moves_stft_window_with_model():
+    hift = CausalHiFTGenerator(
+        base_channels=32,
+        upsample_rates=[2, 2],
+        upsample_kernel_sizes=[4, 4],
+        source_resblock_kernel_sizes=[3, 3],
+        source_resblock_dilation_sizes=[[1, 3, 5], [1, 3, 5]],
+    )
+
+    assert hift.get_buffer("stft_window") is hift.stft_window
+    assert "stft_window" not in hift.state_dict()
+    hift.to(dtype=torch.float64)
+    assert hift.stft_window.dtype == torch.float64
 
 
 class TestPreLookaheadLayer:
