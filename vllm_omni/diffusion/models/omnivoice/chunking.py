@@ -64,6 +64,14 @@ _ABBREVIATIONS = frozenset(
         "approx.",
         "fig.",
         "def.",
+        "apt.",
+        "D.I.Y.",
+        "D.I.Y",
+        "R.S.V.P.",
+        "R.S.V.P",
+        "P.S.",
+        "P.S",
+        "al.",
     }
 )
 
