@@ -62,7 +62,9 @@ class OmniDiffusionRequest:
         if not isinstance(self.request_id, str) or not self.request_id:
             raise ValueError("OmniDiffusionRequest.request_id must be a non-empty string.")
 
-        legacy_seed = self.sampling_params.extra_args.pop("seed", None)
+        legacy_seed = self.sampling_params.extra_args.get("seed")
+        if legacy_seed is not None:
+            legacy_seed = validate_diffusion_seed(legacy_seed)
         if self.sampling_params.seed is None and legacy_seed is not None:
             self.sampling_params.seed = legacy_seed
         if self.sampling_params.seed is not None:

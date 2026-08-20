@@ -743,7 +743,7 @@ Fish Speech uses `ref_audio` and `ref_text` for voice cloning (no `task_type` ne
 |-------|-------------|
 | `k2-fsa/OmniVoice` | Pure-diffusion TTS. Supports voice cloning via `ref_audio` (with optional `ref_text`); no built-in voice presets. |
 
-OmniVoice splits long input into smaller generation requests and joins the decoded audio. You can change the split behavior for one request through `extra_params`:
+OmniVoice splits long input into smaller text chunks and joins the decoded audio. You can change the split behavior for one request through `extra_params`:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
