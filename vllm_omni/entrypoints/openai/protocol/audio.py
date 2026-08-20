@@ -148,8 +148,8 @@ class OpenAICreateSpeechRequest(BaseModel):
         default=None,
         ge=0,
         le=2**63 - 1,
-        description="Random seed for reproducible generation. When set, ensures "
-        "deterministic output for the same input text and seed value.",
+        description="Random seed for model sampling. A fixed seed alone does not make output "
+        "independent of batch size or request scheduling.",
     )
     initial_codec_chunk_frames: int | None = Field(
         default=None,

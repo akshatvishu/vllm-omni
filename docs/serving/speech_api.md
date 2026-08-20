@@ -120,12 +120,26 @@ Content-Type: application/json
 | `language` | string | "Auto" | Language (see supported languages below) |
 | `instructions` | string | "" | Voice style/emotion instructions |
 | `max_new_tokens` | integer | 2048 | Maximum tokens to generate |
+| `seed` | integer | null | Random seed for model sampling. A fixed seed alone does not make output independent of batch size or request scheduling. |
 | `initial_codec_chunk_frames` | integer | null | Per-request initial chunk size override for TTFA tuning. When null, IC is computed dynamically based on server load. |
 | `non_streaming_mode` | bool | null | Qwen3-TTS prompt construction mode override. Does not affect HTTP response streaming or async-chunk pipelining. When null, Qwen3-TTS uses model defaults: Base=false, CustomVoice/VoiceDesign=true. |
 | `stream` | bool | false | When true, stream OpenAI `speech.audio.*` SSE events (requires `response_format="pcm"` or `"wav"`). For raw PCM/WAV byte streaming, set `stream_format="audio"`. |
 | `stream_format` | string | null | Streaming output format. `"audio"` streams raw audio bytes as they are decoded; `"sse"` streams OpenAI `speech.audio.*` Server-Sent Events. If omitted, `stream=true` selects SSE and `stream=false` remains non-streaming. See [Response Format](#response-format). |
 
 **Supported languages:** Only applicable to Qwen3-TTS. Derived from the model configuration (`talker_config.codec_language_id` in the checkpoint's `config.json`), plus `Auto`, which is always accepted. Official Qwen3-TTS checkpoints support: Auto, Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian.
+
+#### Reproducible output across batch sizes
+
+Set `VLLM_BATCH_INVARIANT=1` before starting the server when the same request must produce the same output regardless of batch size or request scheduling:
+
+```bash
+VLLM_BATCH_INVARIANT=1 vllm serve Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice \
+    --deploy-config vllm_omni/deploy/qwen3_tts.yaml \
+    --omni \
+    --trust-remote-code
+```
+
+Batch invariance is a beta vLLM feature and can reduce performance. Reproducibility also requires the same hardware and software version. See the [vLLM batch invariance guide](https://docs.vllm.ai/en/latest/features/batch_invariance/) and [vLLM reproducibility notes](https://docs.vllm.ai/en/latest/usage/reproducibility/) for the current limits.
 
 #### Voice Clone Parameters (Base task)
 
