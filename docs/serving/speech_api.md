@@ -130,16 +130,16 @@ Content-Type: application/json
 
 #### Reproducible output across batch sizes
 
-Set `VLLM_BATCH_INVARIANT=1` before starting the server when the same request must produce the same output regardless of batch size or request scheduling:
+On supported hardware, set `VLLM_BATCH_INVARIANT=1` before starting the server when the same request must produce the same output regardless of batch size or request scheduling:
 
 ```bash
-VLLM_BATCH_INVARIANT=1 vllm serve Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice \
+VLLM_BATCH_INVARIANT=1 vllm-omni serve Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice \
     --deploy-config vllm_omni/deploy/qwen3_tts.yaml \
     --omni \
     --trust-remote-code
 ```
 
-Batch invariance is a beta vLLM feature and can reduce performance. Reproducibility also requires the same hardware and software version. See the [vLLM batch invariance guide](https://docs.vllm.ai/en/latest/features/batch_invariance/) and [vLLM reproducibility notes](https://docs.vllm.ai/en/latest/usage/reproducibility/) for the current limits.
+Batch invariance is a beta vLLM feature and can reduce performance. Upstream vLLM currently requires an NVIDIA GPU with compute capability 8.0 or newer. Reproducibility also requires the same hardware and software version. See the [vLLM batch invariance guide](https://docs.vllm.ai/en/latest/features/batch_invariance/) and [vLLM reproducibility notes](https://docs.vllm.ai/en/latest/usage/reproducibility/) for the current limits.
 
 #### Voice Clone Parameters (Base task)
 
