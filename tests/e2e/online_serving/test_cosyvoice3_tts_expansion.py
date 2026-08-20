@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """
 E2E Online tests for CosyVoice3 TTS model with voice cloning.
 
@@ -17,8 +17,12 @@ from tests.helpers.mark import hardware_test
 from tests.helpers.media import load_test_audio_data_url
 from tests.helpers.runtime import OmniServerParams
 from tests.helpers.stage_config import get_deploy_config_path
+from vllm_omni.platforms import current_omni_platform
 
-pytestmark = [pytest.mark.slow, pytest.mark.tts]
+if current_omni_platform.is_rocm():
+    os.environ.setdefault("COSYVOICE3_TRT", "0")
+
+pytestmark = [pytest.mark.slow, pytest.mark.tts, pytest.mark.advanced_model]
 
 MODEL = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
 
@@ -65,8 +69,7 @@ tts_async_chunk_server_params = [
 ]
 
 
-@hardware_test(res={"cuda": "H100"}, num_cards=1)
-@pytest.mark.skip(reason="https://github.com/vllm-project/vllm-omni/issues/4644")
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=1)
 @pytest.mark.parametrize("omni_server", tts_server_params, indirect=True)
 def test_voice_clone_zh_001(omni_server, openai_client) -> None:
     """
@@ -88,8 +91,7 @@ def test_voice_clone_zh_001(omni_server, openai_client) -> None:
     openai_client.send_audio_speech_request(request_config)
 
 
-@hardware_test(res={"cuda": "H100"}, num_cards=1)
-@pytest.mark.skip(reason="https://github.com/vllm-project/vllm-omni/issues/4644")
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=1)
 @pytest.mark.parametrize("omni_server", tts_async_chunk_server_params, indirect=True)
 def test_voice_clone_zh_002(omni_server, openai_client) -> None:
     """
@@ -112,8 +114,7 @@ def test_voice_clone_zh_002(omni_server, openai_client) -> None:
     openai_client.send_audio_speech_request(request_config)
 
 
-@hardware_test(res={"cuda": "H100"}, num_cards=1)
-@pytest.mark.skip(reason="https://github.com/vllm-project/vllm-omni/issues/4644")
+@hardware_test(res={"cuda": "H100", "rocm": "MI325"}, num_cards=1)
 @pytest.mark.parametrize("omni_server", tts_server_params, indirect=True)
 def test_voice_clone_en_001(omni_server, openai_client) -> None:
     """
