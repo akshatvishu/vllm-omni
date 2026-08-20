@@ -359,7 +359,7 @@ class TestSamplerMethods:
         return talker
 
     @staticmethod
-    def _sampling_metadata(temperature=1.0, top_k=50, top_p=0.95):
+    def _sampling_metadata(temperature=1.0, top_k=50, top_p=0.95, generators=None):
         return type(
             "SamplingMetadata",
             (),
@@ -368,8 +368,15 @@ class TestSamplerMethods:
                 "top_k": top_k,
                 "top_p": top_p,
                 "all_greedy": temperature is None,
+                "generators": generators or {},
             },
         )()
+
+    @staticmethod
+    def _seeded_generator(seed):
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(seed)
+        return generator
 
     def test_sample_respects_mask(self):
         """Tokens masked to -inf must never be sampled."""
@@ -457,6 +464,51 @@ class TestSamplerMethods:
         torch.testing.assert_close(seen[0][2], seen[0][3])
         assert torch.count_nonzero(seen[0][0]).item() == 1
         assert torch.count_nonzero(seen[0][2]).item() > 1
+
+    def test_seeded_sampling_is_batch_independent(self):
+        t = self._make_minimal_talker()
+        num_codebooks = 8
+        torch.manual_seed(123)
+        first_logits = torch.randn(num_codebooks, 64)
+        second_logits = torch.randn(num_codebooks, 64)
+        filler_logits = torch.randn(num_codebooks, 64)
+        reference_generator = self._seeded_generator(42)
+        batched_generators = {
+            1: self._seeded_generator(42),
+            2: self._seeded_generator(42),
+        }
+
+        reference_first = t._sample_audio_codes(
+            first_logits,
+            self._sampling_metadata(generators={0: reference_generator}),
+            num_codebooks=num_codebooks,
+        )
+        batched_first = t._sample_audio_codes(
+            torch.cat([filler_logits, first_logits, first_logits]),
+            self._sampling_metadata(generators=batched_generators),
+            num_codebooks=num_codebooks,
+        )
+        assert torch.equal(reference_first, batched_first[num_codebooks : 2 * num_codebooks])
+        assert torch.equal(reference_first, batched_first[2 * num_codebooks :])
+
+        reference_second = t._sample_audio_codes(
+            second_logits,
+            self._sampling_metadata(generators={0: reference_generator}),
+            num_codebooks=num_codebooks,
+        )
+        condensed_second = t._sample_audio_codes(
+            torch.cat([second_logits, second_logits]),
+            self._sampling_metadata(
+                generators={
+                    0: batched_generators[1],
+                    1: batched_generators[2],
+                }
+            ),
+            num_codebooks=num_codebooks,
+        )
+
+        assert torch.equal(reference_second, condensed_second[:num_codebooks])
+        assert torch.equal(reference_second, condensed_second[num_codebooks:])
 
     def test_delay_masking_forces_boc_during_delay(self):
         """During delay phase, codebooks beyond delay_count must have only BOC allowed."""

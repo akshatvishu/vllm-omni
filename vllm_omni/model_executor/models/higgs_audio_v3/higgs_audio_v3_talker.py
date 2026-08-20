@@ -1472,7 +1472,19 @@ class HiggsAudioV3TalkerForConditionalGeneration(nn.Module):
         fallback = x.argmax(dim=-1)
         safe_x = torch.where(all_masked.unsqueeze(-1), torch.zeros_like(x), x)
         probs = safe_x.softmax(dim=-1)
-        sampled = torch.multinomial(probs, num_samples=1).squeeze(-1)
+        if sampling_metadata.generators:
+            sampled = torch.cat(
+                [
+                    torch.multinomial(
+                        probs[req_idx * num_codebooks : (req_idx + 1) * num_codebooks],
+                        num_samples=1,
+                        generator=sampling_metadata.generators.get(req_idx),
+                    )
+                    for req_idx in range(int(probs.shape[0]) // num_codebooks)
+                ]
+            ).squeeze(-1)
+        else:
+            sampled = torch.multinomial(probs, num_samples=1).squeeze(-1)
         sampled = torch.where(all_masked, fallback, sampled)
         return torch.where(greedy, logits_2d.argmax(dim=-1), sampled)
 
