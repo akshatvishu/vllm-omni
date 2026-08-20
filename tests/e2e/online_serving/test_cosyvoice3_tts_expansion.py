@@ -20,6 +20,8 @@ from tests.helpers.stage_config import get_deploy_config_path
 from vllm_omni.platforms import current_omni_platform
 
 if current_omni_platform.is_rocm():
+    # A cold AITER kernel build can exceed the 120 second client timeout;
+    # later runs reuse the cached kernel.
     os.environ.setdefault("COSYVOICE3_TRT", "0")
 
 pytestmark = [pytest.mark.slow, pytest.mark.tts, pytest.mark.advanced_model]
