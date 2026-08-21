@@ -22,7 +22,7 @@ from vllm_omni.platforms import current_omni_platform
 if current_omni_platform.is_rocm():
     os.environ.setdefault("COSYVOICE3_TRT", "0")
 
-pytestmark = [pytest.mark.slow, pytest.mark.tts, pytest.mark.advanced_model]
+pytestmark = [pytest.mark.slow, pytest.mark.tts, pytest.mark.core_model]
 
 MODEL = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
 

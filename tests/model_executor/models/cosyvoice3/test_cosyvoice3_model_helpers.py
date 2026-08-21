@@ -401,11 +401,11 @@ def test_sample_tolerates_padded_rows_without_history():
     assert out.sampled_token_ids.shape == (2, 1)
 
 
-def test_sample_sanitizes_non_finite_logits():
+def test_sample_excludes_non_finite_logits():
     model = _make_talker_model()
     metadata = _make_sampling_metadata(output_token_ids=[[]])
     metadata.temperature.fill_(0.5)
-    logits = torch.tensor([[float("nan"), float("inf"), float("-inf")]], dtype=torch.bfloat16)
+    logits = torch.tensor([[float("nan"), 1.0, float("inf"), float("-inf")]], dtype=torch.bfloat16)
 
     out = model.sample(logits, metadata)
 
@@ -413,27 +413,38 @@ def test_sample_sanitizes_non_finite_logits():
     assert out.sampled_token_ids.tolist() == [[1]]
 
 
-def test_sample_preserves_allowed_token_mask_when_logits_are_nan():
+def test_sample_preserves_allowed_token_mask_with_invalid_logits():
     model = _make_talker_model()
     metadata = _make_sampling_metadata(output_token_ids=[[]])
     metadata.allowed_token_ids_mask = torch.tensor([[True, False, True]])
-    logits = torch.full((1, 3), float("nan"), dtype=torch.float32)
+    logits = torch.tensor([[float("nan"), 1.0, float("inf")]], dtype=torch.float32)
 
     out = model.sample(logits, metadata)
 
     assert out is not None
     assert out.sampled_token_ids.tolist() == [[1]]
+
+
+def test_sample_rejects_rows_without_finite_logits():
+    model = _make_talker_model()
+    metadata = _make_sampling_metadata(output_token_ids=[[]])
+    metadata.allowed_token_ids_mask = torch.tensor([[True, False, True]])
+    logits = torch.tensor([[0.0, float("nan"), 0.0]], dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="no finite logits"):
+        model.sample(logits, metadata)
 
 
 def test_sample_keeps_only_finite_token_after_ras_rejection():
     model = _make_talker_model()
-    metadata = _make_sampling_metadata(output_token_ids=[[0] * 10])
-    logits = torch.tensor([[0.0, float("-inf"), float("-inf")]], dtype=torch.float32)
+    metadata = _make_sampling_metadata(output_token_ids=[[1] * 10])
+    metadata.allowed_token_ids_mask = torch.tensor([[True, False, True]])
+    logits = torch.tensor([[0.0, 1.0, 0.0]], dtype=torch.float32)
 
     out = model.sample(logits, metadata)
 
     assert out is not None
-    assert out.sampled_token_ids.tolist() == [[0]]
+    assert out.sampled_token_ids.tolist() == [[1]]
 
 
 def test_gpu_ar_model_runner_prefers_model_sampler_when_opted_in():
