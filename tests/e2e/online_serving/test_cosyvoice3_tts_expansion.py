@@ -22,16 +22,10 @@ from vllm_omni.platforms import current_omni_platform
 if current_omni_platform.is_rocm():
     os.environ.setdefault("COSYVOICE3_TRT", "0")
 
-_SKIP_CUDA_ISSUE_6416 = pytest.mark.skipif(
-    current_omni_platform.is_cuda(),
-    reason="https://github.com/vllm-project/vllm-omni/issues/6416",
-)
-
 pytestmark = [
     pytest.mark.slow,
     pytest.mark.tts,
     pytest.mark.core_model,
-    _SKIP_CUDA_ISSUE_6416,
 ]
 
 MODEL = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
