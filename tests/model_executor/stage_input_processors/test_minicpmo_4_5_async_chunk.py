@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from collections import defaultdict
 from types import SimpleNamespace
@@ -158,9 +158,13 @@ def test_duplex_turn_end_waits_for_terminal_codec_flush() -> None:
 def test_first_chunk_forwards_reference_voice_and_duplex_identity() -> None:
     manager = _manager()
     request = _request("req")
-    request.additional_information = {
+    request.model_intermediate_buffer = {
         "codes": {"ref": [0.1, -0.1]},
         "meta": {"ref_audio_sr": 16000},
+    }
+    request.additional_information = {
+        "codes": {"ref": [0.9]},
+        "meta": {"ref_audio_sr": 8000},
     }
 
     payload = tts2code2wav_async_chunk(
@@ -186,7 +190,7 @@ def test_first_chunk_forwards_reference_voice_and_duplex_identity() -> None:
 def test_full_payload_forwards_all_codes_and_request_metadata() -> None:
     manager = _manager()
     request = _request("req")
-    request.additional_information = {
+    request.model_intermediate_buffer = {
         "codes": {"ref": [0.1, -0.1]},
         "meta": {
             "ref_audio_sr": 16000,
