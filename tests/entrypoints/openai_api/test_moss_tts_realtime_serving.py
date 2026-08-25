@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+
 import asyncio
 from types import SimpleNamespace
 
@@ -67,14 +70,21 @@ def test_realtime_serving_builds_the_talker_prompt(monkeypatch: pytest.MonkeyPat
     processor = object()
     codec = object()
     server._get_moss_realtime_components = lambda: (tokenizer, processor, codec)
-    server._resolve_ref_audio = object()
+    server.uploaded_speakers = {}
+
+    async def resolve_ref_audio(ref_audio):
+        assert ref_audio == "data:audio/wav;base64,AAAA"
+        return [0.1, 0.2], 24000, "resolved-audio-key"
+
+    server._resolve_ref_audio = resolve_ref_audio
 
     reference_codes = torch.arange(64, dtype=torch.int64).reshape(4, 16)
     encode_call = None
 
     async def fake_encode(ref_audio, **kwargs):
         nonlocal encode_call
-        encode_call = (ref_audio, kwargs)
+        resolved_audio = await kwargs.pop("resolve_ref_audio")(ref_audio)
+        encode_call = (ref_audio, kwargs, resolved_audio)
         return reference_codes
 
     build_call = None
@@ -105,11 +115,11 @@ def test_realtime_serving_builds_the_talker_prompt(monkeypatch: pytest.MonkeyPat
         "data:audio/wav;base64,AAAA",
         {
             "codec": codec,
-            "resolve_ref_audio": server._resolve_ref_audio,
             "speaker_cache": server._speaker_cache,
             "voice_name": None,
             "voice_created_at": 0,
         },
+        ([0.1, 0.2], 24000, "resolved-audio-key"),
     )
     assert build_call == (tokenizer, processor, "speak this text", reference_codes)
     assert params == {
@@ -117,5 +127,55 @@ def test_realtime_serving_builds_the_talker_prompt(monkeypatch: pytest.MonkeyPat
         "codes": {"ref": reference_codes},
         "ids": {"all": [12]},
         "max_new_frames": [50],
+        "ref_audio_cache_key": "resolved-audio-key",
     }
     assert "prompt_audio_array" not in params
+
+
+@pytest.mark.asyncio
+async def test_realtime_reference_cache_tracks_resolved_audio_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from vllm_omni.model_executor.models.moss_tts.reference_encoder import (
+        encode_realtime_reference_codes,
+    )
+    from vllm_omni.utils.speaker_cache import SpeakerEmbeddingCache
+
+    class Codec:
+        def __init__(self):
+            self.call_count = 0
+
+        def batch_encode(self, wavs, *, num_quantizers):
+            assert num_quantizers == 16
+            self.call_count += 1
+            return SimpleNamespace(
+                audio_codes=torch.full((16, 1, 3), self.call_count, dtype=torch.int64),
+                audio_codes_lengths=torch.tensor([3]),
+            )
+
+    resolve_keys = iter(("key-a", "key-b"))
+
+    async def resolve_ref_audio(_):
+        return [0.1, 0.2, 0.3], 24000, next(resolve_keys)
+
+    async def run_inline(func, *args):
+        return func(*args)
+
+    monkeypatch.setattr(asyncio, "to_thread", run_inline)
+
+    codec = Codec()
+    speaker_cache = SpeakerEmbeddingCache(max_bytes=1024 * 1024)
+    first = await encode_realtime_reference_codes(
+        "file:///speaker.wav",
+        codec=codec,
+        resolve_ref_audio=resolve_ref_audio,
+        speaker_cache=speaker_cache,
+    )
+    second = await encode_realtime_reference_codes(
+        "file:///speaker.wav",
+        codec=codec,
+        resolve_ref_audio=resolve_ref_audio,
+        speaker_cache=speaker_cache,
+    )
+
+    assert codec.call_count == 2
+    assert torch.all(first == 1)
+    assert torch.all(second == 2)

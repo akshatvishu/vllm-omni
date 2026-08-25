@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """E2E offline inference tests for MOSS-TTS-Realtime (MossTTSRealtime, 1.7B).
 
 Uses the standard omni_runner + pytestmark pattern (one module-scoped engine

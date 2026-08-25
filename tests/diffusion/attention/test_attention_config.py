@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 """Tests for per-role attention backend configuration (RFC: per-role-attention-backend).
 
@@ -51,6 +51,81 @@ class TestAttentionSpec:
     def test_skip_softmax_rejected_on_non_trtllm(self):
         with pytest.raises(ValueError, match="only supported by the TRTLLM_ATTN"):
             AttentionSpec(backend="TORCH_SDPA", skip_softmax={"target_sparsity": 0.5})
+
+    def test_quant_serialized_with_defaults_and_overrides(self):
+        assert AttentionSpec(backend="TRTLLM_ATTN", quant={"dtype_qk": "fp8_e4m3"}).backend_kwargs()["quant"] == {
+            "dtype_qk": "fp8_e4m3",
+            "q_block_size": 1,
+            "k_block_size": 16,
+        }
+        assert AttentionSpec(
+            backend="TRTLLM_ATTN", quant={"dtype_qk": "int8", "q_block_size": 4, "k_block_size": 16}
+        ).backend_kwargs()["quant"] == {"dtype_qk": "int8", "q_block_size": 4, "k_block_size": 16}
+
+    def test_quant_superset_fields_passed_through(self):
+        # FLASHINFER_ATTN-style config (dtype_vo / flashinfer_backend) round-trips on the shared spec.
+        bk = AttentionSpec(
+            backend="FLASHINFER_ATTN",
+            quant={"dtype_qk": "bfloat16", "dtype_vo": "fp8_e4m3", "flashinfer_backend": "trtllm-gen"},
+        ).backend_kwargs()["quant"]
+        assert bk["dtype_qk"] == "bfloat16"
+        assert bk["dtype_vo"] == "fp8_e4m3"
+        assert bk["flashinfer_backend"] == "trtllm-gen"
+
+    def test_quant_and_skip_softmax_coexist(self):
+        bk = AttentionSpec(
+            backend="TRTLLM_ATTN", quant={"dtype_qk": "int8"}, skip_softmax={"target_sparsity": 0.5}
+        ).backend_kwargs()
+        assert bk["target_sparsity"] == 0.5 and bk["quant"]["dtype_qk"] == "int8"
+
+    @pytest.mark.parametrize(
+        "spec, match",
+        [
+            ({"backend": "TORCH_SDPA", "quant": {"dtype_qk": "int8"}}, "only supported by the TRTLLM_ATTN"),
+            ({"backend": "TRTLLM_ATTN", "quant": {"dtype_qk": "int4"}}, "quant.dtype_qk"),
+            ({"backend": "TRTLLM_ATTN", "quant": {"dtype_qk": "int8", "k_block_size": 8}}, "quant.k_block_size"),
+        ],
+    )
+    def test_quant_validation_rejects(self, spec, match):
+        with pytest.raises(ValueError, match=match):
+            AttentionSpec(**spec)
+
+    def test_fastvideo_vsa_topk_serialized(self):
+        spec = AttentionSpec(backend="FASTVIDEO_VSA", fastvideo_vsa_topk=96)
+        assert spec.backend_kwargs() == {"topk": 96}
+
+    def test_fastvideo_vsa_topk_rejected_for_other_backend(self):
+        with pytest.raises(ValueError, match="only supported by the FASTVIDEO_VSA"):
+            AttentionSpec(backend="TORCH_SDPA", fastvideo_vsa_topk=96)
+
+    def test_block_sparse_defaults_applied_when_backend_selected(self):
+        spec = AttentionSpec(backend="RAINFUSION_ATTN")
+        assert spec.block_sparse.sparsity == 0.8
+        assert spec.backend_kwargs() == {"sparsity": 0.8, "start_step": 0}
+
+    def test_block_sparse_skip_layers_selector_expanded(self):
+        spec = AttentionSpec(
+            backend="RAINFUSION_ATTN",
+            block_sparse={"sparsity": 0.9, "start_step": 12, "skip_layers": "0-2,38"},
+        )
+        assert spec.block_sparse.skip_layer_indices == {0, 1, 2, 38}
+        assert spec.backend_kwargs() == {
+            "sparsity": 0.9,
+            "start_step": 12,
+            "skip_layers": [0, 1, 2, 38],
+        }
+
+    def test_block_sparse_rejected_on_dense_backend(self):
+        with pytest.raises(ValueError, match="block_sparse is only supported by"):
+            AttentionSpec(backend="FLASH_ATTN", block_sparse={"sparsity": 0.8})
+
+    @pytest.mark.parametrize(
+        "block_sparse",
+        [{"sparsity": 1.5}, {"start_step": -1}],
+    )
+    def test_block_sparse_invalid_values(self, block_sparse):
+        with pytest.raises(ValueError):
+            AttentionSpec(backend="RAINFUSION_ATTN", block_sparse=block_sparse)
 
 
 class TestAttentionConfig:
