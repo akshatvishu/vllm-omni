@@ -218,11 +218,8 @@ def _attach_daily_omni_to_request_func_input(sample: SampleRequest, rfi: Request
         setattr(rfi, "mm_position", sample.omni_chat_mm_position)
 
 
-def _attach_seed_tts_to_request_func_input(
-    sample: SampleRequest,
-    request_func_input: RequestFuncInput,
-) -> None:
-    """Attach Seed-TTS reference data and mark the request for PCM capture.
+def _attach_seed_tts_to_request_func_input(sample: SampleRequest, rfi: RequestFuncInput) -> None:
+    """Merge Seed-TTS per-row TTS fields into ``extra_body`` and mark for PCM capture.
 
     Always sets ``seed_tts_row=True`` on the RequestFuncInput for any
     :class:`SeedTTSSampleRequest` subclass (including text-only and design
@@ -232,25 +229,25 @@ def _attach_seed_tts_to_request_func_input(
     if not isinstance(sample, SeedTTSSampleRequest):
         return
     # Mark for PCM capture (WER / UTMOS eval) regardless of extra body presence.
-    setattr(request_func_input, "seed_tts_row", True)
-    system_prompt = (sample.seed_tts_system_prompt or "").strip() or SEED_TTS_DEFAULT_OMNI_SYSTEM_PROMPT
-    setattr(request_func_input, "seed_tts_system_prompt", system_prompt)
-    setattr(request_func_input, "seed_tts_speech_extra", sample.seed_tts_speech_extra)
-    setattr(request_func_input, "seed_tts_turns", sample.seed_tts_turns)
-    speech_extra = sample.seed_tts_speech_extra
+    setattr(rfi, "seed_tts_row", True)
+    sys_prompt = (sample.seed_tts_system_prompt or "").strip() or SEED_TTS_DEFAULT_OMNI_SYSTEM_PROMPT
+    setattr(rfi, "seed_tts_system_prompt", sys_prompt)
+    setattr(rfi, "seed_tts_speech_extra", sample.seed_tts_speech_extra)
+    setattr(rfi, "seed_tts_turns", sample.seed_tts_turns)
     setattr(
-        request_func_input,
+        rfi,
         "omni_chat_messages",
         [
-            {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
+            {"role": "system", "content": [{"type": "text", "text": sys_prompt}]},
             {"role": "user", "content": [{"type": "text", "text": sample.prompt}]},
         ],
     )
-    if not speech_extra:
+    ex = sample.seed_tts_speech_extra
+    if not ex:
         return  # voice comes from --extra-body in config; no ref_audio to merge
-    merged_extra_body = dict(request_func_input.extra_body) if request_func_input.extra_body else {}
-    merged_extra_body.update(speech_extra)
-    request_func_input.extra_body = merged_extra_body
+    base = dict(rfi.extra_body) if rfi.extra_body else {}
+    base.update(ex)
+    rfi.extra_body = base
 
 
 def _attach_omniinteract_to_request_func_input(sample: SampleRequest, rfi: RequestFuncInput) -> None:

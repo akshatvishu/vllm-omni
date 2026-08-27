@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Unit tests for the MiniCPM-o 4.5 stage 0 -> stage 1 bridge.
 
 Covers ``vllm_omni.model_executor.stage_input_processors.minicpmo_4_5_omni.llm2tts``:

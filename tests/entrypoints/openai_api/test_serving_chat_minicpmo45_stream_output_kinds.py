@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Regression tests for MiniCPM-o 4.5 audio-streaming output-kind coercion.
 
 Chat ``stream=true`` coerces every AR stage to DELTA. For MiniCPM-o 4.5 that

@@ -1,6 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
-
 import asyncio
 import base64
 import json
@@ -263,8 +260,17 @@ class OmniOpenAIServingChat(OpenAIServingChat, AudioMixin):
         if not self._has_minicpmo45_stage():
             return
 
-        # OpenAI clients flatten their ``extra_body`` argument into root JSON fields.
         reference_audio_source = getattr(request, "ref_audio", None)
+        extra_body = getattr(request, "extra_body", None)
+        model_extra = getattr(request, "model_extra", None)
+        if reference_audio_source is None and isinstance(extra_body, dict):
+            reference_audio_source = extra_body.get("ref_audio")
+        if reference_audio_source is None and isinstance(model_extra, dict):
+            nested_extra_body = model_extra.get("extra_body")
+            if isinstance(nested_extra_body, dict):
+                reference_audio_source = nested_extra_body.get("ref_audio")
+            if reference_audio_source is None:
+                reference_audio_source = model_extra.get("ref_audio")
         if reference_audio_source is None:
             return
         if not isinstance(reference_audio_source, str):

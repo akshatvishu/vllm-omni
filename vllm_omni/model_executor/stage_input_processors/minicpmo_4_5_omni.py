@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """MiniCPM-o 4.5 Thinker-to-Talker and Talker-to-Code2Wav bridges."""
 
 import logging
@@ -159,14 +159,15 @@ def _codec_config(transfer_manager: Any) -> tuple[int, int]:
     return chunk_frames, left_context_frames
 
 
-def _request_intermediate_information(request: object) -> Mapping[str, object]:
-    model_intermediate_buffer = getattr(request, "model_intermediate_buffer", None)
-    if isinstance(model_intermediate_buffer, Mapping):
-        return model_intermediate_buffer
-
-    # Direct processor callers can still provide the legacy serialized field.
-    additional_information = getattr(request, "additional_information", None)
-    return additional_information if isinstance(additional_information, Mapping) else {}
+def _request_intermediate_section(request: object, section: str) -> dict[str, object]:
+    merged: dict[str, object] = {}
+    for attribute in ("additional_information", "model_intermediate_buffer"):
+        information = getattr(request, attribute, None)
+        if isinstance(information, Mapping):
+            values = information.get(section)
+            if isinstance(values, Mapping):
+                merged.update(values)
+    return merged
 
 
 def _codec_scalars(value: Any) -> list[int]:
@@ -376,11 +377,10 @@ def tts2code2wav_async_chunk(
     ref_audio = None
     ref_audio_sr = None
     if int(record["cache_epoch"]) == 0 and chunk_seq == 0:
-        request_information = _request_intermediate_information(request)
-        codes_info = request_information.get("codes")
-        meta_info = request_information.get("meta")
-        raw_ref_audio = codes_info.get("ref") if isinstance(codes_info, Mapping) else None
-        raw_ref_audio_sr = meta_info.get("ref_audio_sr") if isinstance(meta_info, Mapping) else None
+        codes_info = _request_intermediate_section(request, "codes")
+        meta_info = _request_intermediate_section(request, "meta")
+        raw_ref_audio = codes_info.get("ref")
+        raw_ref_audio_sr = meta_info.get("ref_audio_sr")
         ref_audio_sr = _coerce_int(raw_ref_audio_sr)
         if raw_ref_audio is not None:
             ref_audio = torch.as_tensor(raw_ref_audio, dtype=torch.float32).reshape(-1).cpu()
@@ -435,16 +435,9 @@ def tts2code2wav_full_payload(
     context = [_MINICPMO45_SILENCE_CODE] * left_context_frames if codes else []
     output_codes = [*context, *codes]
 
-    request_information = _request_intermediate_information(request)
-    codes_info = request_information.get("codes")
-    if not isinstance(codes_info, Mapping):
-        codes_info = {}
-    meta_info = request_information.get("meta")
-    if not isinstance(meta_info, Mapping):
-        meta_info = {}
-    duplex_info = request_information.get("duplex")
-    if not isinstance(duplex_info, Mapping):
-        duplex_info = {}
+    codes_info = _request_intermediate_section(request, "codes")
+    meta_info = _request_intermediate_section(request, "meta")
+    duplex_info = _request_intermediate_section(request, "duplex")
 
     ref_audio = codes_info.get("ref")
     finished = torch.tensor(True, dtype=torch.bool)
