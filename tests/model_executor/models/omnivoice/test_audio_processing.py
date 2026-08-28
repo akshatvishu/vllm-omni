@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from __future__ import annotations
 
@@ -21,6 +21,10 @@ from vllm_omni.diffusion.models.omnivoice.audio import (
     prepare_reference_audio,
     remove_silence,
 )
+from vllm_omni.diffusion.request import OmniDiffusionRequest
+from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
+from vllm_omni.diffusion.worker.utils import StepRequestState
+from vllm_omni.inputs.data import OmniDiffusionSamplingParams
 from vllm_omni.utils.speaker_cache import SpeakerEmbeddingCache
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
@@ -258,7 +262,7 @@ def test_generated_zero_audio_remains_finite():
 class _FakeASR:
     def __init__(self, text: str):
         self.text = text
-        self.inputs = []
+        self.inputs: list[dict] = []
 
     def __call__(self, audio_input):
         self.inputs.append(audio_input)
@@ -270,7 +274,7 @@ class _FakeGenerator:
         self.num_codebooks = num_codebooks
 
     def __call__(self, **kwargs):
-        target_len = kwargs["target_lens"][0]
+        target_len = sum(kwargs["target_lens"])
         return torch.zeros((1, self.num_codebooks, target_len), dtype=torch.long)
 
 
@@ -324,10 +328,16 @@ def _build_fake_pipeline(monkeypatch, prepared_waveform, *, asr_text="reference 
     return model, prepare_calls, encoded_calls
 
 
-def _request(prompt):
-    return SimpleNamespace(
-        prompts=[prompt],
-        sampling_params=SimpleNamespace(extra_args={}),
+def _request(*prompts):
+    return DiffusionRequestBatch(
+        requests=[
+            OmniDiffusionRequest(
+                prompt=prompt,
+                sampling_params=OmniDiffusionSamplingParams(),
+                request_id=str(index),
+            )
+            for index, prompt in enumerate(prompts)
+        ],
     )
 
 
@@ -344,7 +354,7 @@ def test_pipeline_uses_one_prepared_waveform_for_asr_and_tokenizer(monkeypatch):
         )
     )
 
-    assert result.error is None
+    assert result[0].error is None
     assert len(prepare_calls) == 1
     assert prepare_calls[0][1] == 16000
     assert prepare_calls[0][2]["trim_long"] is True
@@ -373,7 +383,7 @@ def test_pipeline_explicit_reference_text_prepares_audio_without_asr(monkeypatch
         )
     )
 
-    assert result.error is None
+    assert result[0].error is None
     assert model._asr_pipeline.inputs == []
     assert prepare_calls[0][2]["trim_long"] is False
     assert len(encoded_calls) == 1
@@ -388,8 +398,8 @@ def test_pipeline_text_only_skips_reference_audio_processing(monkeypatch):
 
     result = model.forward(_request("hello"))
 
-    assert result.error is None
-    torch.testing.assert_close(result.output, torch.full((1, 1, 10000), 0.2))
+    assert result[0].error is None
+    torch.testing.assert_close(result[0].output, torch.full((1, 1, 10000), 0.2))
     assert prepare_calls == []
     assert encoded_calls == []
     assert model._asr_pipeline.inputs == []
@@ -409,7 +419,7 @@ def test_pipeline_text_only_bypasses_audio_postprocessing(monkeypatch):
 
     result = model.forward(_request("hello"))
 
-    assert result.error is None
+    assert result[0].error is None
 
 
 def test_pipeline_reuses_inline_reference_cache(monkeypatch):
@@ -425,8 +435,8 @@ def test_pipeline_reuses_inline_reference_cache(monkeypatch):
     first = model.forward(request)
     second = model.forward(request)
 
-    assert first.error is None
-    assert second.error is None
+    assert first[0].error is None
+    assert second[0].error is None
     assert len(prepare_calls) == 2
     assert len(model._asr_pipeline.inputs) == 1
     assert len(encoded_calls) == 1
@@ -513,3 +523,70 @@ def test_inline_reference_cache_key_preserves_original_rms():
     assert pipeline_omnivoice.OmniVoicePipeline._inline_cache_key(
         quiet, "asr"
     ) != pipeline_omnivoice.OmniVoicePipeline._inline_cache_key(loud, "asr")
+
+
+@pytest.mark.parametrize("cache_kind", ["inline", "named"])
+def test_batch_keeps_reference_rms_per_request_and_on_cache_hits(monkeypatch, cache_kind):
+    model, _, encoded_calls = _build_fake_pipeline(monkeypatch, np.ones((1, _HOP_LENGTH), dtype=np.float32))
+    model._speaker_cache = SpeakerEmbeddingCache(max_bytes=1024 * 1024)
+
+    def prepare(waveform, sample_rate, **kwargs):
+        return PreparedReferenceAudio(waveform[np.newaxis, :], sample_rate, float(waveform[0]))
+
+    monkeypatch.setattr(pipeline_omnivoice, "prepare_reference_audio", prepare)
+    prompts = ["hello", {"prompt": ""}]
+    for index, rms in enumerate((0.03, 0.08)):
+        prompt = {
+            "prompt": "hello",
+            "ref_audio": (np.full(_HOP_LENGTH, rms, dtype=np.float32), _SAMPLE_RATE),
+        }
+        if cache_kind == "named":
+            prompt["voice_name"] = f"speaker-{index}"
+        prompts.append(prompt)
+
+    for _ in range(2):
+        outputs = model.forward(_request(*prompts))
+        assert len(outputs) == 4
+        torch.testing.assert_close(outputs[0].output, torch.full((1, 1, 10000), 0.2))
+        assert outputs[1].error == "Empty text prompt"
+        for output, rms in zip(outputs[2:], (0.03, 0.08)):
+            assert output.error is None
+            assert output.output.shape == (1, 1, 14800)
+            assert output.output[0, 0, 5000].item() == pytest.approx(0.2 * rms / 0.1, abs=1e-5)
+    assert len(encoded_calls) == 2
+    assert len(model._asr_pipeline.inputs) == 2
+
+
+@pytest.mark.parametrize("clone", [False, True])
+def test_step_execution_preserves_reference_postprocessing(monkeypatch, clone):
+    model, prepare_calls, _ = _build_fake_pipeline(monkeypatch, np.ones((1, _HOP_LENGTH), dtype=np.float32))
+    prompt: str | dict = "hello"
+    if clone:
+        prompt = {
+            "prompt": "hello",
+            "ref_audio": (np.ones(_HOP_LENGTH, dtype=np.float32), _SAMPLE_RATE),
+        }
+    else:
+
+        def fail_postprocess(*args, **kwargs):
+            raise AssertionError("text-only output must bypass voice-cloning postprocessing")
+
+        monkeypatch.setattr(pipeline_omnivoice, "postprocess_generated_audio", fail_postprocess)
+
+    state = StepRequestState(
+        request_id="step-request",
+        prompt=prompt,
+        sampling=OmniDiffusionSamplingParams(num_inference_steps=1),
+    )
+    model.prepare_encode(state)
+    output = model.post_decode(state)
+
+    assert output.error is None
+    if clone:
+        assert state.extra["reference_rms"] == 0.07
+        assert output.output.shape == (1, 1, 14800)
+        assert output.output[0, 0, 5000].item() == pytest.approx(0.14, abs=1e-5)
+    else:
+        assert state.extra["reference_rms"] is None
+        assert prepare_calls == []
+        torch.testing.assert_close(output.output, torch.full((1, 1, 10000), 0.2))

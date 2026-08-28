@@ -49,6 +49,51 @@ cache — see the note under *1x L40S 48GB*.
 
 ## GPU
 
+### Optional FP8 AR KV cache
+
+For CUDA deployments, `mammoth_moda2_fp8_kv.yaml` is an opt-in preset that
+stores the Stage 0 AR KV cache as FP8 E4M3. Stage 1 remains on
+`kv_cache_dtype=auto`; its DiT execution is unaffected. This setting quantizes
+only the autoregressive KV cache. It is neither FP8 weight/activation
+quantization nor vLLM-Omni diffusion KV-cache quantization.
+
+Use the preset in place of the default deploy config:
+
+```bash
+python examples/offline_inference/text_to_image/text_to_image.py \
+  --model ./MammothModa2-Preview \
+  --deploy-config vllm_omni/deploy/mammoth_moda2_fp8_kv.yaml \
+  --prompt "A stylish woman riding a motorcycle in NYC, movie poster style" \
+  --height 1024 \
+  --width 1024 \
+  --seed 42 \
+  --extra-body '{"text_guidance_scale": 4.0, "cfg_range": [0.0, 1.0], "num_inference_steps": 50}' \
+  --output mammoth_t2i.png
+```
+
+The preset was validated on one NVIDIA H800 80GB with CUDA and
+FlashAttention 3. The native and FP8 runs used the same model, code revision,
+and downstream configuration.
+
+| Metric | Native BF16 (`kv_cache_dtype=auto`) | FP8 E4M3 (`fp8_e4m3`) | Change |
+| --- | ---: | ---: | ---: |
+| KV cache memory | 15.59 GiB | 15.55 GiB | -0.04 GiB |
+| GPU KV cache size | 145,904 tokens | 291,232 tokens | +99.6% |
+| Maximum concurrency at 8,192 tokens | 17.81x | 35.55x | +99.6% |
+| Steady-state AR median | 71.191 s | 79.816 s | +12.1% |
+| Steady-state end-to-end median | 83.840 s | 92.473 s | +10.3% |
+| Steady-state DiT median | 12.574 s | 12.561 s | effectively unchanged |
+
+The FP8 run used `kv_cache_dtype=fp8_e4m3` only for Stage 0; Stage 1 used
+`kv_cache_dtype=auto`. The nearly unchanged reserved cache memory holds almost
+twice as many tokens because FP8 reduces the bytes per cached token. This is a
+capacity/concurrency tradeoff: the measured AR and end-to-end latencies were
+higher than the native-BF16 baseline.
+
+1024x1024 fixed-seed smoke test completed successfully with no obvious visual
+failure. FP8 is lossy, so numerical or image-quality equivalence with BF16 is
+not implied.
+
 ### 1x L40S 48GB
 
 > **48 GB config adjustment:** the committed
@@ -81,7 +126,7 @@ MammothModa2 generation parameters as a JSON object through `--extra-body`:
 ```bash
 python examples/offline_inference/text_to_image/text_to_image.py \
   --model ./MammothModa2-Preview \
-  --stage-configs-path vllm_omni/deploy/mammoth_moda2.yaml \
+  --deploy-config vllm_omni/deploy/mammoth_moda2.yaml \
   --prompt "A stylish woman riding a motorcycle in NYC, movie poster style" \
   --height 1024 \
   --width 1024 \
@@ -131,6 +176,44 @@ exists and is a valid image:
 ls -lh mammoth_t2i.png
 python -c "from PIL import Image; print(Image.open('mammoth_t2i.png').size)"
 ```
+
+### 1x AMD MI300X, MammothModa2 Preview
+
+#### Environment
+
+- OS: Linux 6.8.0-134-generic, x86_64
+- Container: official ROCm image built from `docker/Dockerfile.rocm`
+- Python: 3.12.13
+- PyTorch: 2.11.0+gitd0c8b1f
+- Driver / runtime: AMD 6.19.14.31400000 / ROCm 7.2.53211
+- GPU: one AMD Instinct MI300X, `gfx942:sramecc+:xnack-`, 191.69 GiB visible HBM
+- vLLM version: 0.27.0+rocm723
+- vLLM Omni version or commit: `73e1368c7bb940efe1a025859c9d6c8eeeb2e3f0`
+- Installed vLLM Omni package metadata: `0.27.0rc2.dev44+g55abdade9.rocm`
+
+#### Offline Commands
+
+The checked run used the committed stage split, with `gpu_memory_utilization` set to 0.5 for AR and 0.3 for DiT:
+
+```bash
+python3 examples/offline_inference/text_to_image/text_to_image.py \
+    --model bytedance-research/MammothModa2-Preview \
+    --deploy-config vllm_omni/deploy/mammoth_moda2.yaml \
+    --prompt "A stylish woman riding a motorcycle in NYC, movie poster style" \
+    --height 1024 \
+    --width 1024 \
+    --seed 42 \
+    --extra-body '{"text_guidance_scale": 4.0, "cfg_range": [0.0, 1.0], "num_inference_steps": 50}' \
+    --enable-diffusion-pipeline-profiler \
+    --log-stats \
+    --output mammoth_t2i.png
+```
+
+#### Verification
+
+The first request took 85.224 seconds. The AR stage generated 4,161 visual tokens in 72.996 seconds, and the DiT stage took 12.163 seconds. AR weight loading used 21.4 GiB and took 8.250 seconds. DiT weight loading used 5.49 GiB and took 1.824 seconds. The largest one second whole device memory sample was 106.57 GiB, including the AR KV cache reserved by the 0.5 memory setting.
+
+The output was a valid 1024 by 1024 RGB PNG.
 
 ## MammothModa2-Dev unified inference
 

@@ -18,3 +18,5 @@ stages:
         load_asr_on_startup: false
         asr_model_name: "openai/whisper-large-v3-turbo"
         asr_device: null
+    max_num_seqs: 8
+    request_batch_max_wait_ms: 10

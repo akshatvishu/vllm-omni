@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """WebSocket handler for streaming generated video chunks.
 
 Protocol:
@@ -51,7 +51,7 @@ from vllm_omni.entrypoints.openai.stage_params import (
     build_stage_sampling_params_list,
     get_default_sampling_params_list,
 )
-from vllm_omni.entrypoints.openai.utils import get_stage_type, parse_lora_request
+from vllm_omni.entrypoints.openai.utils import is_video_generation_pipeline, parse_lora_request
 from vllm_omni.entrypoints.openai.video_api_utils import (
     StreamingVideoFormat,
     create_streaming_video_encoder,
@@ -535,6 +535,8 @@ class OmniStreamingVideoOutputHandler:
         provided_fields = request.model_fields_set
         if "num_inference_steps" in provided_fields and request.num_inference_steps is not None:
             gen_params.num_inference_steps = request.num_inference_steps
+        if "quality" in provided_fields:
+            gen_params.quality = request.quality
         if "guidance_scale" in provided_fields and request.guidance_scale is not None:
             gen_params.guidance_scale = request.guidance_scale
         if "guidance_scale_2" in provided_fields and request.guidance_scale_2 is not None:
@@ -553,6 +555,14 @@ class OmniStreamingVideoOutputHandler:
                 raise HTTPException(
                     status_code=HTTPStatus.BAD_REQUEST.value,
                     detail="extra_params must be a JSON object/dict.",
+                )
+            # Worker-side pre-encoding produces one progressive MP4, which this
+            # path's incremental fMP4 encoder cannot consume; streaming already
+            # overlaps encoding through that encoder instead.
+            if request.extra_params.get("preencode_mp4"):
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST.value,
+                    detail="preencode_mp4 is not supported for streaming video sessions.",
                 )
             gen_params.extra_args.update(request.extra_params)
 
@@ -614,13 +624,11 @@ class OmniStreamingVideoOutputHandler:
                 detail="Stage configs not found. Start server with an omni diffusion model.",
             )
 
-        for stage in stage_configs:
-            stage_type = get_stage_type(stage)
-            if stage_type != "diffusion":
-                raise HTTPException(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
-                    detail=f"Video generation only supports diffusion stages, found '{stage_type}' stage.",
-                )
+        if not is_video_generation_pipeline(stage_configs):
+            raise HTTPException(
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE.value,
+                detail="No final video output stage found in video generation pipeline.",
+            )
 
         sampling_params_list = build_stage_sampling_params_list(
             list(stage_configs),
@@ -669,17 +677,8 @@ class OmniStreamingVideoOutputHandler:
         if result.images:
             # Video frames may be list[list[Image.Image]] despite images: list[Image.Image].
             videos = result.images  # type: ignore[assignment]
-        elif result.request_output is not None:
-            request_output = result.request_output
-            if isinstance(request_output, dict) and request_output.get("images"):
-                videos = request_output["images"]
-            elif isinstance(request_output, OmniRequestOutput):
-                if request_output.images:
-                    # Same nested-frames mismatch as result.images above.
-                    videos = request_output.images  # type: ignore[assignment]
-                else:
-                    request_multimodal_output = request_output.multimodal_output
-                    videos = request_multimodal_output.get("video")
+        # OmniRequestOutput IS the RequestOutput now — images and
+        # multimodal_output are checked directly on result.
         if videos is None:
             videos = result.multimodal_output.get("video")
 
