@@ -4,8 +4,10 @@
 import json
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
+from diffusers.video_processor import VideoProcessor
 
 import vllm_omni.diffusion.models.wan2_2.pipeline_wan2_2 as wan22_module
 from vllm_omni.diffusion.models.wan2_2.pipeline_wan2_2 import (
@@ -36,6 +38,16 @@ def test_wan22_postprocess_honors_request_output_type() -> None:
     )
 
     assert output is video
+
+
+def test_wan22_numpy_postprocess_matches_diffusers_and_is_contiguous() -> None:
+    video = torch.linspace(-1.25, 1.25, 2 * 3 * 5 * 4 * 6, dtype=torch.float32).reshape(2, 3, 5, 4, 6)
+    expected = VideoProcessor(vae_scale_factor=8).postprocess_video(video, output_type="np")
+
+    output = get_wan22_post_process_func(SimpleNamespace())(video.clone(), output_type="np")["payload"]["video"]
+
+    np.testing.assert_array_equal(output, expected)
+    assert output.flags.c_contiguous
 
 
 def test_retrieve_latents_supports_sample_mode_argmax_and_direct_latents() -> None:

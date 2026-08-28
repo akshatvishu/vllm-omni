@@ -30,3 +30,19 @@ def test_dmd_sigma_requires_scalar_timestep() -> None:
     scheduler = WanEulerScheduler(num_train_timesteps=1000, shift=8.0)
     with pytest.raises(ValueError, match="scalar timestep"):
         scheduler.sigma_for_timestep(torch.tensor([757.0, 522.0]))
+
+
+def test_dmd_predict_clean_matches_fastvideo_fp64_rounding() -> None:
+    scheduler = WanEulerScheduler(num_train_timesteps=1000, shift=8.0)
+    timestep = torch.tensor(757.0)
+    sample = torch.tensor([0.330078125], dtype=torch.bfloat16)
+    model_output = torch.tensor([1.4453125], dtype=torch.bfloat16)
+
+    actual = scheduler.predict_clean(model_output, sample, timestep)
+    sigma = scheduler.sigma_for_timestep(timestep, dtype=torch.float64)
+    expected = (sample.double() - sigma * model_output.double()).to(model_output.dtype)
+    old_fp32_result = (sample.float() - sigma.float() * model_output.float()).to(model_output.dtype)
+
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    assert actual.dtype == model_output.dtype
+    assert not torch.equal(actual, old_fp32_result)

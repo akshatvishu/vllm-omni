@@ -131,9 +131,11 @@ class WanEulerScheduler:
         timestep: float | torch.Tensor,
     ) -> torch.Tensor:
         """Convert a flow/noise prediction into the corresponding clean latent."""
-        sample_fp32 = sample.to(torch.float32)
-        sigma = self.sigma_for_timestep(timestep, device=sample.device, dtype=torch.float32)
-        return sample_fp32 - sigma * model_output.to(torch.float32)
+        output_dtype = model_output.dtype
+        sample_fp64 = sample.to(torch.float64)
+        sigma = self.sigma_for_timestep(timestep, device=sample.device, dtype=torch.float64)
+        pred_clean = sample_fp64 - sigma * model_output.to(torch.float64)
+        return pred_clean.to(output_dtype)
 
     def add_noise(
         self,

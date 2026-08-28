@@ -35,7 +35,7 @@ from vllm_omni.diffusion.distributed.sp_plan import SequenceParallelInput, Seque
 from vllm_omni.diffusion.layers.rope import RotaryEmbeddingS2VGrid, RotaryEmbeddingWanS2V, WanS2VRotaryPosEmbed
 from vllm_omni.platforms import current_omni_platform
 
-from .wan2_2_transformer import DistributedRMSNorm, WanFeedForward
+from .wan2_2_transformer import WanFeedForward, WanRMSNorm
 
 logger = init_logger(__name__)
 
@@ -109,8 +109,8 @@ class WanS2VSelfAttention(nn.Module):
         self.tp_inner_dim = self.num_heads * self.head_dim
 
         # QK normalization (TP-aware)
-        self.norm_q = DistributedRMSNorm(self.tp_inner_dim, eps=eps) if qk_norm else nn.Identity()
-        self.norm_k = DistributedRMSNorm(self.tp_inner_dim, eps=eps) if qk_norm else nn.Identity()
+        self.norm_q = WanRMSNorm(self.tp_inner_dim, eps=eps) if qk_norm else nn.Identity()
+        self.norm_k = WanRMSNorm(self.tp_inner_dim, eps=eps) if qk_norm else nn.Identity()
 
         # Output projection
         self.to_out = RowParallelLinear(
@@ -188,8 +188,8 @@ class WanS2VCrossAttention(nn.Module):
         self.tp_inner_dim = self.num_heads * self.head_dim
 
         # QK normalization (TP-aware)
-        self.norm_q = DistributedRMSNorm(self.tp_inner_dim, eps=eps) if qk_norm else nn.Identity()
-        self.norm_k = DistributedRMSNorm(self.tp_inner_dim, eps=eps) if qk_norm else nn.Identity()
+        self.norm_q = WanRMSNorm(self.tp_inner_dim, eps=eps) if qk_norm else nn.Identity()
+        self.norm_k = WanRMSNorm(self.tp_inner_dim, eps=eps) if qk_norm else nn.Identity()
 
         # Output projection
         self.to_out = RowParallelLinear(self.inner_dim, dim, bias=True, input_is_parallel=True, return_bias=False)
@@ -1098,7 +1098,7 @@ class WanS2VTransformer3DModel(nn.Module):
     - QKVParallelLinear for self-attention Q/K/V (fused)
     - ColumnParallelLinear for cross-attention Q/K/V
     - RowParallelLinear for output projections
-    - DistributedRMSNorm for QK normalization (TP-aware)
+    - WanRMSNorm for QK normalization (TP-aware)
     - WanFeedForward (ColumnParallelGELU + RowParallelLinear)
     - FP32LayerNorm for layer normalization
     - Attention layer for attention computation

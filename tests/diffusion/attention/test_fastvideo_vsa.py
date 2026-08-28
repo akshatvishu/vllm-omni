@@ -79,6 +79,59 @@ def test_fastvideo_vsa_tiles_3d_sequence_and_untiles(monkeypatch):
     assert calls["block_size"] == (4, 8, 8)
 
 
+def test_fastvideo_vsa_uses_generic_kernel_for_64_token_blocks(monkeypatch):
+    calls: dict[str, Any] = {}
+    fake_module = types.ModuleType("fastvideo_kernel")
+
+    def fake_video_sparse_attn(
+        q,
+        k,
+        v,
+        variable_block_sizes,
+        q_variable_block_sizes,
+        topk,
+        block_size,
+        compress_attn_weight,
+    ):
+        calls["q_shape"] = tuple(q.shape)
+        calls["compress_shape"] = tuple(compress_attn_weight.shape)
+        calls["block_size"] = block_size
+        calls["topk"] = topk
+        return q + k + v
+
+    setattr(fake_module, "video_sparse_attn", fake_video_sparse_attn)
+    monkeypatch.setitem(sys.modules, "fastvideo_kernel", fake_module)
+
+    impl = FastVideoVSAImpl(
+        num_heads=2,
+        head_size=8,
+        softmax_scale=8**-0.5,
+        causal=False,
+        backend_kwargs={
+            "topk": 1,
+            "block_size": (4, 4, 4),
+            "min_seq_len": 1,
+            "disable_when_sp_active": False,
+        },
+    )
+    query = torch.randn(1, 300, 2, 8)
+    metadata = AttentionMetadata(
+        extra={
+            "vsa_dit_seq_shape": (3, 10, 10),
+            "gate_compress": torch.ones_like(query),
+        }
+    )
+    monkeypatch.setattr(impl, "_fallback_reason", lambda *args, **kwargs: None)
+
+    output = impl.forward_cuda(query, query, query, metadata)
+
+    assert output.shape == query.shape
+    assert calls["q_shape"] == (1, 2, 576, 8)
+    assert calls["compress_shape"] == (1, 2, 576, 8)
+    assert calls["block_size"] == (4, 4, 4)
+    assert calls["topk"] == 1
+
+
 def test_fastvideo_vsa_uses_learned_gate_when_provided(monkeypatch):
     calls: dict[str, Any] = {}
     fake_module = types.ModuleType("fastvideo_kernel")

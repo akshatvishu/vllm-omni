@@ -94,6 +94,23 @@ class TestAttentionSpec:
         spec = AttentionSpec(backend="FASTVIDEO_VSA", fastvideo_vsa_topk=96)
         assert spec.backend_kwargs() == {"topk": 96}
 
+    def test_fastvideo_vsa_block_size_serialized(self):
+        spec = AttentionSpec(
+            backend="FASTVIDEO_VSA",
+            fastvideo_vsa_topk=64,
+            fastvideo_vsa_block_size=[4, 4, 4],  # type: ignore[arg-type]
+        )
+        assert spec.fastvideo_vsa_block_size == (4, 4, 4)
+        assert spec.backend_kwargs() == {"topk": 64, "block_size": (4, 4, 4)}
+
+    @pytest.mark.parametrize("block_size", [(4, 4), (4, 4, 0)])
+    def test_fastvideo_vsa_block_size_rejects_invalid_shape(self, block_size):
+        with pytest.raises(ValueError, match="fastvideo_vsa_block_size"):
+            AttentionSpec(
+                backend="FASTVIDEO_VSA",
+                fastvideo_vsa_block_size=block_size,
+            )
+
     def test_fastvideo_vsa_topk_rejected_for_other_backend(self):
         with pytest.raises(ValueError, match="only supported by the FASTVIDEO_VSA"):
             AttentionSpec(backend="TORCH_SDPA", fastvideo_vsa_topk=96)

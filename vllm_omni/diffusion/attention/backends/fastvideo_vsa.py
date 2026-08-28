@@ -42,6 +42,28 @@ if not hasattr(torch.ops.vllm_omni, "fastvideo_vsa_bshd"):
         block_h: int,
         block_w: int,
     ) -> torch.Tensor:
+        block_size = (block_t, block_h, block_w)
+        compress_attn_weight_or_none = compress_attn_weight if compress_attn_weight.numel() else None
+
+        if block_t * block_h * block_w == 64:
+            from fastvideo_kernel import video_sparse_attn
+
+            output = video_sparse_attn(
+                query.transpose(1, 2).contiguous(),
+                key.transpose(1, 2).contiguous(),
+                value.transpose(1, 2).contiguous(),
+                variable_block_sizes=variable_block_sizes,
+                q_variable_block_sizes=q_variable_block_sizes,
+                topk=topk,
+                block_size=block_size,
+                compress_attn_weight=(
+                    compress_attn_weight_or_none.transpose(1, 2).contiguous()
+                    if compress_attn_weight_or_none is not None
+                    else None
+                ),
+            )
+            return output.transpose(1, 2).contiguous()
+
         from fastvideo_kernel import video_sparse_attn_bshd
 
         return video_sparse_attn_bshd(
@@ -51,8 +73,8 @@ if not hasattr(torch.ops.vllm_omni, "fastvideo_vsa_bshd"):
             variable_block_sizes=variable_block_sizes,
             q_variable_block_sizes=q_variable_block_sizes,
             topk=topk,
-            block_size=(block_t, block_h, block_w),
-            compress_attn_weight=compress_attn_weight if compress_attn_weight.numel() else None,
+            block_size=block_size,
+            compress_attn_weight=compress_attn_weight_or_none,
         )
 
     @_fastvideo_vsa_bshd_op.register_fake
@@ -232,11 +254,10 @@ class FastVideoVSAImpl(AttentionImpl):
             qkv_layout=qkv_layout,
         )
 
-        if self.block_elements != 256:
+        if self.block_elements not in (64, 256):
             logger.warning(
-                "FASTVIDEO_VSA currently uses fastvideo_kernel.video_sparse_attn_bshd, "
-                "which supports only 256-token blocks. Configured block_size=%s "
-                "(product=%d) will fall back to SDPA.",
+                "FASTVIDEO_VSA supports 64-token and 256-token blocks. "
+                "Configured block_size=%s (product=%d) will fall back to SDPA.",
                 self.block_size,
                 self.block_elements,
             )
@@ -269,8 +290,8 @@ class FastVideoVSAImpl(AttentionImpl):
     ) -> str | None:
         if self.causal:
             return "causal attention is not supported"
-        if self.block_elements != 256:
-            return f"block_elements must be 256, got {self.block_elements}"
+        if self.block_elements not in (64, 256):
+            return f"block_elements must be 64 or 256, got {self.block_elements}"
         if self.topk <= 0:
             return f"topk must be positive, got {self.topk}"
         if query.ndim != 4 or key.ndim != 4 or value.ndim != 4:
@@ -335,9 +356,10 @@ class FastVideoVSAImpl(AttentionImpl):
         use_native_sdpa = self.topk == num_blocks and not preserve_all_blocks
         route = "SDPA" if use_native_sdpa else "VSA_ALL_BLOCKS" if self.topk == num_blocks else "VSA"
         checkpoint_mode = "fastvideo_dmd" if preserve_all_blocks else "native"
+        kernel = "video_sparse_attn" if self.block_elements == 64 else "video_sparse_attn_bshd"
         logger.info_once(
             "FASTVIDEO_VSA routing: seq_len=%d, dit_seq_shape=%s, block_size=%s, num_blocks=%d, "
-            "topk=%d, keep_ratio=%.1f%%, checkpoint_mode=%s, route=%s",
+            "topk=%d, keep_ratio=%.1f%%, checkpoint_mode=%s, route=%s, kernel=%s",
             seq_len,
             dit_seq_shape,
             self.block_size,
@@ -346,6 +368,7 @@ class FastVideoVSAImpl(AttentionImpl):
             100.0 * self.topk / num_blocks,
             checkpoint_mode,
             route,
+            kernel,
         )
         if use_native_sdpa:
             return self._fallback(

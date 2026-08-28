@@ -20,6 +20,7 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.conv import Conv3dLayer
 from vllm.model_executor.layers.linear import ColumnParallelLinear, QKVParallelLinear, RowParallelLinear
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
+from vllm.model_executor.layers.rotary_embedding.common import ApplyRotaryEmb
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.models.utils import (
     PPMissingLayer,
@@ -42,18 +43,14 @@ from vllm_omni.diffusion.distributed.sp_plan import (
 )
 from vllm_omni.diffusion.forward_context import build_local_sp_padding_mask, get_forward_context
 from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNorm
-from vllm_omni.diffusion.layers.norm import LayerNorm, RMSNorm
-from vllm_omni.diffusion.layers.rope import RotaryEmbeddingWan
+from vllm_omni.diffusion.layers.norm import LayerNorm
 from vllm_omni.platforms import current_omni_platform
 
 logger = init_logger(__name__)
 
 
-class DistributedRMSNorm(nn.Module):
-    """
-    RMSNorm that computes global RMS across tensor parallel ranks.
-    This ensures mathematically equivalent results to non-TP execution.
-    """
+class WanRMSNorm(nn.Module):
+    """FastVideo-compatible QK normalization with TP-aware variance."""
 
     def __init__(self, hidden_size: int, eps: float = 1e-6):
         super().__init__()
@@ -62,23 +59,39 @@ class DistributedRMSNorm(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         tp_size = get_tensor_model_parallel_world_size()
-
         input_dtype = x.dtype
         x_float = x.float()
-        local_sum_sq = (x_float**2).sum(dim=-1, keepdim=True)
-        local_count = x.shape[-1]
 
         if tp_size > 1:
-            global_sum_sq = tensor_model_parallel_all_reduce(local_sum_sq)
-            global_count = local_count * tp_size
+            sum_sq = (x_float**2).sum(dim=-1, keepdim=True)
+            sum_sq = tensor_model_parallel_all_reduce(sum_sq)
+            variance = sum_sq / (x.shape[-1] * tp_size)
         else:
-            global_sum_sq = local_sum_sq
-            global_count = local_count
+            variance = (x_float**2).mean(dim=-1, keepdim=True)
 
-        rms = torch.sqrt(global_sum_sq / global_count + self.eps)
+        normalized = x_float * torch.rsqrt(variance + self.eps)
+        return normalized.to(input_dtype) * self.weight.to(input_dtype)
 
-        output = (x_float / rms) * self.weight.float()
-        return output.to(input_dtype)
+
+def _apply_wan_rotary_embedding(
+    rotary_embedding: ApplyRotaryEmb,
+    x: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+) -> torch.Tensor:
+    if current_omni_platform.is_rocm():
+        return rotary_embedding.forward_native(x, cos, sin)
+    return rotary_embedding(x, cos, sin)
+
+
+def _apply_wan_output_norm(
+    norm: AdaLayerNorm,
+    hidden_states: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
+) -> torch.Tensor:
+    normalized = norm.layernorm(hidden_states).float()
+    return (normalized * (1 + scale) + shift).type_as(hidden_states)
 
 
 class ColumnParallelGELU(nn.Module):
@@ -387,13 +400,8 @@ class WanSelfAttention(nn.Module):
         self.num_kv_heads = self.to_qkv.num_kv_heads
         self.tp_inner_dim = self.num_heads * head_dim
 
-        # QK normalization using vLLM's RMSNorm
-        if get_tensor_model_parallel_world_size() > 1:
-            self.norm_q = DistributedRMSNorm(self.tp_inner_dim, eps=eps)
-            self.norm_k = DistributedRMSNorm(self.tp_inner_dim, eps=eps)
-        else:
-            self.norm_q = RMSNorm(self.tp_inner_dim, eps=eps)
-            self.norm_k = RMSNorm(self.tp_inner_dim, eps=eps)
+        self.norm_q = WanRMSNorm(self.tp_inner_dim, eps=eps)
+        self.norm_k = WanRMSNorm(self.tp_inner_dim, eps=eps)
 
         self.to_out = RowParallelLinear(
             self.inner_dim,
@@ -406,7 +414,11 @@ class WanSelfAttention(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
 
-        self.rotary_embedding = RotaryEmbeddingWan(is_neox_style=False, half_head_dim=True)
+        self.rotary_embedding = ApplyRotaryEmb(
+            enforce_enable=True,
+            is_neox_style=False,
+            enable_fp32_compute=True,
+        )
 
         # Unified attention layer
         self.attn = Attention(
@@ -471,8 +483,8 @@ class WanSelfAttention(nn.Module):
         # Apply rotary embeddings
         if rotary_emb is not None:
             freqs_cos, freqs_sin = rotary_emb
-            query = self.rotary_embedding(query, freqs_cos, freqs_sin)
-            key = self.rotary_embedding(key, freqs_cos, freqs_sin)
+            query = _apply_wan_rotary_embedding(self.rotary_embedding, query, freqs_cos, freqs_sin)
+            key = _apply_wan_rotary_embedding(self.rotary_embedding, key, freqs_cos, freqs_sin)
 
         # Compute attention using unified attention layer
         hidden_states = self.attn(query, key, value, attn_metadata)
@@ -547,13 +559,8 @@ class WanCrossAttention(nn.Module):
         self.num_heads = num_heads // tp_size
         self.tp_inner_dim = self.num_heads * head_dim
 
-        # QK normalization
-        if get_tensor_model_parallel_world_size() > 1:
-            self.norm_q = DistributedRMSNorm(self.tp_inner_dim, eps=eps)
-            self.norm_k = DistributedRMSNorm(self.tp_inner_dim, eps=eps)
-        else:
-            self.norm_q = RMSNorm(self.tp_inner_dim, eps=eps)
-            self.norm_k = RMSNorm(self.tp_inner_dim, eps=eps)
+        self.norm_q = WanRMSNorm(self.tp_inner_dim, eps=eps)
+        self.norm_k = WanRMSNorm(self.tp_inner_dim, eps=eps)
 
         # Optional added KV projections for I2V (image embeddings)
         self.added_kv_proj_dim = added_kv_proj_dim
@@ -576,10 +583,7 @@ class WanCrossAttention(nn.Module):
                 quant_config=quant_config,
                 prefix=f"{prefix}.add_v_proj" if prefix else "add_v_proj",
             )
-            if get_tensor_model_parallel_world_size() > 1:
-                self.norm_added_k = DistributedRMSNorm(self.tp_inner_dim, eps=eps)
-            else:
-                self.norm_added_k = RMSNorm(self.tp_inner_dim, eps=eps)
+            self.norm_added_k = WanRMSNorm(self.tp_inner_dim, eps=eps)
         else:
             self.add_k_proj = None
             self.add_v_proj = None
@@ -742,7 +746,7 @@ class WanTransformerBlock(nn.Module):
         if temb.ndim == 4:
             # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-                self.scale_shift_table.unsqueeze(0) + temb
+                self.scale_shift_table.unsqueeze(0) + temb.float()
             ).chunk(6, dim=2)
             shift_msa = shift_msa.squeeze(2)
             scale_msa = scale_msa.squeeze(2)
@@ -753,11 +757,11 @@ class WanTransformerBlock(nn.Module):
         else:
             # temb: batch_size, 6, inner_dim (wan2.1/wan2.2 14B)
             shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-                self.scale_shift_table + temb
+                self.scale_shift_table + temb.float()
             ).chunk(6, dim=1)
 
         # 1. Self-attention
-        norm_hidden_states = self.norm1(hidden_states, scale_msa, shift_msa).type_as(hidden_states)
+        norm_hidden_states = self.norm1(hidden_states.float(), scale_msa, shift_msa).type_as(hidden_states)
         self_attn_extra = {}
         if vsa_dit_seq_shape is not None:
             self_attn_extra["vsa_dit_seq_shape"] = vsa_dit_seq_shape
@@ -765,10 +769,11 @@ class WanTransformerBlock(nn.Module):
             self_attn_extra["preserve_vsa_all_blocks"] = True
         self_attn_metadata = AttentionMetadata(attn_mask=hidden_states_mask, extra=self_attn_extra)
         attn_output = self.attn1(norm_hidden_states, rotary_emb, self_attn_metadata)
-        hidden_states = (hidden_states + attn_output * gate_msa).type_as(hidden_states)
+        residual_hidden_states = hidden_states + attn_output * gate_msa
 
         # 2. Cross-attention
-        norm_hidden_states = self.norm2(hidden_states).type_as(hidden_states)
+        norm_hidden_states = self.norm2(residual_hidden_states).type_as(hidden_states)
+        hidden_states = residual_hidden_states.type_as(hidden_states)
         attn_output = self.attn2(norm_hidden_states, encoder_hidden_states, None)
         hidden_states = hidden_states + attn_output
 
@@ -931,6 +936,7 @@ class WanTransformer3DModel(nn.Module):
                 kernel_size=patch_size,
                 stride=patch_size,
             )
+            self.patch_embedding.enable_linear = False
         else:
             self.patch_embedding = PPMissingLayer()
 
@@ -1013,7 +1019,7 @@ class WanTransformer3DModel(nn.Module):
             rotary_emb = self._cached_rope_emb
         else:
             freqs_cos, freqs_sin = self.rope(hidden_states)
-            rotary_emb = (freqs_cos[..., 0::2].to(hidden_states.dtype), freqs_sin[..., 1::2].to(hidden_states.dtype))
+            rotary_emb = (freqs_cos[0, :, 0, 0::2], freqs_sin[0, :, 0, 1::2])
             self._hidden_states_shape = hidden_states.shape
             self._cached_rope_emb = rotary_emb
 
@@ -1108,7 +1114,7 @@ class WanTransformer3DModel(nn.Module):
             shift = shift.unsqueeze(1)
             scale = scale.unsqueeze(1)
 
-        hidden_states = self.norm_out(hidden_states, scale, shift).type_as(hidden_states)
+        hidden_states = _apply_wan_output_norm(self.norm_out, hidden_states, scale, shift)
         hidden_states = self.proj_out(hidden_states)
 
         hidden_states = hidden_states.reshape(

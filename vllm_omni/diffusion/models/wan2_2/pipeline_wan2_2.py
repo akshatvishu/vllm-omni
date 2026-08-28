@@ -48,6 +48,16 @@ FASTWAN_DMD_TIMESTEPS = (1000.0, 757.0, 522.0)
 FASTWAN_DMD_SCHEDULER_SHIFT = 8.0
 
 
+def _denormalize_wan_latents(
+    latents: torch.Tensor,
+    latents_mean: list[float] | tuple[float, ...],
+    latents_std: list[float] | tuple[float, ...],
+) -> torch.Tensor:
+    mean = torch.tensor(latents_mean, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
+    std = torch.tensor(latents_std, device=latents.device, dtype=latents.dtype).view(1, -1, 1, 1, 1)
+    return latents * std + mean
+
+
 def build_wan_scheduler(sample_solver: str, flow_shift: float) -> Any:
     if sample_solver == "unipc":
         return FlowUniPCMultistepScheduler(
@@ -243,8 +253,14 @@ def get_wan22_post_process_func(
                 model_path=sampling_params.frame_interpolation_model_path,
             )
             video_metadata["video_fps_multiplier"] = multiplier
+        if output_type == "np":
+            if video_processor.config.do_normalize:
+                video = video_processor.denormalize(video)
+            video = video.permute(0, 2, 3, 4, 1).contiguous().cpu().float().numpy()
+        else:
+            video = video_processor.postprocess_video(video, output_type=output_type)
         return {
-            "payload": {"video": video_processor.postprocess_video(video, output_type=output_type)},
+            "payload": {"video": video},
             "metadata": {"video": video_metadata} if video_metadata else {},
         }
 
@@ -902,15 +918,11 @@ class Wan22Pipeline(
             output = latents
         else:
             latents = latents.to(self.vae.dtype)
-            latents_mean = (
-                torch.tensor(self.vae.config.latents_mean)
-                .view(1, self.vae.config.z_dim, 1, 1, 1)
-                .to(latents.device, latents.dtype)
+            latents = _denormalize_wan_latents(
+                latents,
+                self.vae.config.latents_mean,
+                self.vae.config.latents_std,
             )
-            latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
-                latents.device, latents.dtype
-            )
-            latents = latents / latents_std + latents_mean
             output = self.vae.decode(latents, return_dict=False)[0]
 
         if DEBUG_PERF:
