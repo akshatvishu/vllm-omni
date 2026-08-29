@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from collections import defaultdict
 from types import SimpleNamespace
@@ -70,6 +70,16 @@ def _codes(payload) -> list[int]:
     assert payload.codes.audio.dtype == torch.long
     assert payload.codes.audio.ndim == 1
     return payload.codes.audio.tolist()
+
+
+def test_empty_full_payload_releases_consumer_wait_gate() -> None:
+    payload = tts2code2wav_full_payload(_manager(), None, _request("req"))
+
+    assert _codes(payload) == []
+    assert payload.meta.code_flat_numel == 0
+    assert payload.meta.left_context_size == 0
+    assert payload.meta.last_chunk is True
+    assert payload.meta.finished.item() is True
 
 
 @pytest.mark.parametrize(("count", "emitted"), [(24, False), (25, True), (26, True)])
