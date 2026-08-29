@@ -780,6 +780,24 @@ class TestSamplerMethods:
         assert talker._decode_eoc_countdown[0].item() == -1
         assert talker._decode_generation_done[0].item() is False
 
+    def test_finished_request_state_is_cleared_when_request_id_is_reused(self):
+        talker = self._make_state_tracking_talker(1)
+
+        talker._sync_decode_state_with_batch(["request"])
+        talker._decode_has_codes[0] = True
+        talker._decode_last_codes[0] = 7
+        talker._decode_delay_count[0] = 5
+        talker._decode_eoc_countdown[0] = 0
+        talker._decode_generation_done[0] = True
+        talker.on_requests_finished({"request"})
+        talker._sync_decode_state_with_batch(["request"])
+
+        assert talker._decode_has_codes[0].item() is False
+        assert talker._decode_last_codes[0].eq(0).all()
+        assert talker._decode_delay_count[0].item() == 0
+        assert talker._decode_eoc_countdown[0].item() == -1
+        assert talker._decode_generation_done[0].item() is False
+
     def test_mixed_batch_prefill_mask_targets_request_rows(self):
         """Mixed prefill/decode must reset only prefill request rows."""
         t = self._make_batched_sampler_talker(num_rows=3)

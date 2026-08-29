@@ -392,7 +392,7 @@ class HiggsAudioV3TalkerForConditionalGeneration(nn.Module):
         self._ensure_state_pool_capacity(len(req_ids), device)
         previous_req_ids = getattr(self, "_last_batch_req_ids", [])
 
-        if previous_req_ids != req_ids:
+        if previous_req_ids != req_ids or any(req_id not in self._state_pool_indices for req_id in req_ids):
             previous_rows = [row for row, req_id in enumerate(previous_req_ids) if req_id in self._state_pool_indices]
             if previous_rows:
                 pool_rows = [self._state_pool_indices[previous_req_ids[row]] for row in previous_rows]
