@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+
 from __future__ import annotations
 
 import copy
@@ -128,7 +131,9 @@ class SqueezeExcitationBlock(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, hidden_states):
-        hidden_states_mean = hidden_states.mean(dim=2, keepdim=True)
+        # vLLM's batch invariant mean returns FP32. Restore the input dtype
+        # before the BF16/FP16 convolution.
+        hidden_states_mean = hidden_states.mean(dim=2, keepdim=True).to(hidden_states.dtype)
         hidden_states_mean = self.relu(self.conv1(hidden_states_mean))
         hidden_states_mean = self.sigmoid(self.conv2(hidden_states_mean))
         return hidden_states * hidden_states_mean

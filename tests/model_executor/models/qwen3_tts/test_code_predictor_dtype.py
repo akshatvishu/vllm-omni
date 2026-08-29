@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """
 Tests for code predictor dtype alignment (fix for #2385).
 
@@ -41,6 +41,7 @@ _COMMON = os.path.join(_MODELS, "common")
 def _load_module(name: str, filename: str):
     path = os.path.abspath(os.path.join(_BASE, filename))
     spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod  # register before exec (needed for dataclasses etc.)
     spec.loader.exec_module(mod)
@@ -82,15 +83,24 @@ def _build_mock_modules(mocker: MockerFixture) -> dict[str, object]:
 
     vllm_parallel_mock = mocker.MagicMock()
     vllm_parallel_mock.VocabParallelEmbedding = torch.nn.Embedding
+    vllm_envs_mock = types.ModuleType("vllm.envs")
+    setattr(vllm_envs_mock, "VLLM_BATCH_INVARIANT", False)
+    compilation_mock = types.ModuleType("vllm.config.compilation")
+    setattr(compilation_mock, "CompilationMode", types.SimpleNamespace(NONE=0))
+    batch_invariant_mock = types.ModuleType("vllm.model_executor.layers.batch_invariant")
+    setattr(batch_invariant_mock, "linear_batch_invariant", F.linear)
     custom_op_mock = types.ModuleType("vllm_omni.diffusion.layers.custom_op")
-    custom_op_mock.CustomOp = NativeCustomOp
+    setattr(custom_op_mock, "CustomOp", NativeCustomOp)
 
     return {
         "vllm_omni": mocker.MagicMock(),
         "vllm_omni.platforms": platforms_mock,
+        "vllm.envs": vllm_envs_mock,
         "vllm.logger": logger_mock,
         "vllm.config": mocker.MagicMock(),
+        "vllm.config.compilation": compilation_mock,
         "vllm.config.vllm": vllm_config_mod,
+        "vllm.model_executor.layers.batch_invariant": batch_invariant_mock,
         "vllm.model_executor.model_loader.weight_utils": weight_utils_mock,
         "vllm.model_executor.layers.vocab_parallel_embedding": vllm_parallel_mock,
         "vllm_omni.diffusion.layers.custom_op": custom_op_mock,
@@ -119,6 +129,7 @@ def _load_target_classes(mocker: MockerFixture):
     common_spec = importlib.util.spec_from_file_location(
         "vllm_omni.model_executor.models.common.qwen3_code_predictor", common_cp_path
     )
+    assert common_spec is not None and common_spec.loader is not None
     common_cp_mod = importlib.util.module_from_spec(common_spec)
     sys.modules["vllm_omni.model_executor.models.common.qwen3_code_predictor"] = common_cp_mod
     common_spec.loader.exec_module(common_cp_mod)
@@ -307,6 +318,37 @@ class TestCodePredictorDtypeAlignment:
         compile_mock.assert_not_called()
         assert predictor._compiled_model_fwd == predictor.model.forward
 
+    @pytest.mark.parametrize(
+        "opt_out",
+        ["mode", "backend"],
+    )
+    def test_setup_compile_honors_server_opt_out(
+        self,
+        opt_out: str,
+        mocker: MockerFixture,
+        loaded_target_classes,
+    ) -> None:
+        """The predictor must not compile when the server disables it."""
+        _, _, code_predictor_wrapper, _, _ = loaded_target_classes
+        common_mod = sys.modules["vllm_omni.model_executor.models.common.qwen3_code_predictor"]
+        cp_config, talker_config = _make_tiny_config(loaded_target_classes)
+        vllm_config = _make_vllm_config(mocker, max_num_seqs=2)
+        vllm_config.compilation_config.mode = common_mod.CompilationMode.NONE if opt_out == "mode" else 1
+        vllm_config.compilation_config.backend = "eager" if opt_out == "backend" else "inductor"
+        predictor = code_predictor_wrapper(
+            vllm_config=vllm_config,
+            config=cp_config,
+            talker_config=talker_config,
+        )
+        mocker.patch.object(common_mod.current_omni_platform, "supports_torch_inductor", return_value=True)
+        mocker.patch.object(common_mod.current_omni_platform, "is_xpu", return_value=False)
+        compile_mock = mocker.patch.object(common_mod.torch, "compile")
+
+        predictor._setup_compile()
+
+        compile_mock.assert_not_called()
+        assert predictor._compiled_model_fwd == predictor.model.forward
+
     def test_forward_with_mismatched_input_dtype(self, mocker: MockerFixture, loaded_target_classes) -> None:
         """forward() should not crash when inputs are float32 but model is float16."""
         _, _, code_predictor_wrapper, _, _ = loaded_target_classes
@@ -477,6 +519,113 @@ class TestCodePredictorPerRowGenerators:
         assert torch.equal(first[0], first[1])
         # A different seed on the same inputs must diverge in the residual layers.
         assert not torch.equal(first[0, 1:], first[2, 1:])
+
+    def test_batch_invariant_linears_match_one_and_four_rows(
+        self,
+        mocker: MockerFixture,
+        loaded_target_classes,
+    ) -> None:
+        _, _, code_predictor_wrapper, _, _ = loaded_target_classes
+        common_mod = sys.modules["vllm_omni.model_executor.models.common.qwen3_code_predictor"]
+        cp_config, talker_config = _make_tiny_config(loaded_target_classes)
+        talker_config.hidden_size = 48
+        vllm_config = _make_vllm_config(mocker, max_num_seqs=4)
+        vllm_config.compilation_config.mode = common_mod.CompilationMode.NONE
+        mocker.patch.object(common_mod.envs, "VLLM_BATCH_INVARIANT", True)
+        mocker.patch.object(common_mod.current_omni_platform, "is_cuda_alike", return_value=True)
+
+        def rowwise_linear(
+            input_: torch.Tensor,
+            weight: torch.Tensor,
+            bias: torch.Tensor | None = None,
+        ) -> torch.Tensor:
+            flat_input = input_.reshape(-1, input_.shape[-1])
+            output = torch.cat([F.linear(row[None], weight, bias) for row in flat_input])
+            return output.reshape(*input_.shape[:-1], weight.shape[0])
+
+        invariant_linear = mocker.patch.object(
+            common_mod,
+            "linear_batch_invariant",
+            side_effect=rowwise_linear,
+        )
+        predictor = code_predictor_wrapper(
+            vllm_config=vllm_config,
+            config=cp_config,
+            talker_config=talker_config,
+        )
+        predictor._wrapper_config.use_cuda_graphs = False
+        linear_modules = {
+            name: module for name, module in predictor.named_modules() if isinstance(module, torch.nn.Linear)
+        }
+        expected_linears = {
+            "model.layers.0.self_attn.qkv_proj",
+            "model.layers.0.self_attn.o_proj",
+            "model.layers.0.mlp.gate_up_proj",
+            "model.layers.0.mlp.down_proj",
+            "small_to_mtp_projection",
+            *(f"lm_head.{index}" for index in range(cp_config.num_code_groups - 1)),
+        }
+        assert expected_linears <= linear_modules.keys()
+        assert all(isinstance(module, common_mod._BatchInvariantLinear) for module in linear_modules.values())
+
+        torch.manual_seed(123)
+        row_embed = torch.randn(1, talker_config.hidden_size)
+        row_hidden = torch.randn(1, talker_config.hidden_size)
+
+        def run(rows: int):
+            captured_logits: list[torch.Tensor] = []
+            handles = [
+                head.register_forward_hook(lambda _module, _inputs, output: captured_logits.append(output.clone()))
+                for head in predictor.lm_head
+            ]
+            generators = [torch.Generator().manual_seed(6361) for _ in range(rows)]
+            try:
+                codes = predictor(
+                    layer0_code=torch.zeros(rows, dtype=torch.long),
+                    layer0_embed=row_embed.expand(rows, -1).clone(),
+                    last_talker_hidden=row_hidden.expand(rows, -1).clone(),
+                    generators=generators,
+                )
+            finally:
+                for handle in handles:
+                    handle.remove()
+            return codes, captured_logits, generators
+
+        single_codes, single_logits, single_generators = run(1)
+        batch_codes, batch_logits, batch_generators = run(4)
+
+        assert len(single_logits) == len(batch_logits) == cp_config.num_code_groups - 1
+        for single_step, batch_step in zip(single_logits, batch_logits, strict=True):
+            assert torch.equal(single_step.expand_as(batch_step), batch_step)
+        assert torch.equal(single_codes.expand_as(batch_codes), batch_codes)
+        assert all(
+            torch.equal(single_generators[0].get_state(), generator.get_state()) for generator in batch_generators
+        )
+        assert invariant_linear.call_count > 0
+
+    @pytest.mark.parametrize(
+        ("batch_invariant_enabled", "cuda_alike"),
+        [(False, True), (True, False)],
+    )
+    def test_batch_invariant_linear_keeps_plain_linear_fallback(
+        self,
+        batch_invariant_enabled: bool,
+        cuda_alike: bool,
+        mocker: MockerFixture,
+        loaded_target_classes,
+    ) -> None:
+        _ = loaded_target_classes
+        common_mod = sys.modules["vllm_omni.model_executor.models.common.qwen3_code_predictor"]
+        mocker.patch.object(common_mod.envs, "VLLM_BATCH_INVARIANT", batch_invariant_enabled)
+        mocker.patch.object(common_mod.current_omni_platform, "is_cuda_alike", return_value=cuda_alike)
+        invariant_linear = mocker.patch.object(common_mod, "linear_batch_invariant")
+        linear = common_mod._BatchInvariantLinear(8, 4, bias=True)
+        inputs = torch.randn(3, 8)
+
+        output = linear(inputs)
+
+        assert torch.equal(output, F.linear(inputs, linear.weight, linear.bias))
+        invariant_linear.assert_not_called()
 
     def test_forward_rejects_mismatched_generators_length(self, mocker: MockerFixture, loaded_target_classes) -> None:
         predictor, talker_config = self._make_predictor(mocker, loaded_target_classes)

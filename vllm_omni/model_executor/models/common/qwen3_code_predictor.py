@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+
 """Qwen3 Code Predictor -- optimized re-prefill, no KV cache.
 
 Shared by Qwen3-Omni and Qwen3-TTS talker models.
@@ -20,8 +23,11 @@ from collections.abc import Iterable, Sequence
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import vllm.envs as envs
 from vllm.config import VllmConfig
+from vllm.config.compilation import CompilationMode
 from vllm.logger import init_logger
+from vllm.model_executor.layers.batch_invariant import linear_batch_invariant
 from vllm.model_executor.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
@@ -51,6 +57,15 @@ if current_omni_platform.is_npu():
 # fused norm/RoPE kernels below are dispatched by the current device platform.
 #
 # See: https://github.com/vllm-project/vllm-omni/issues/2274
+
+
+class _BatchInvariantLinear(nn.Linear):
+    """Keep HF weights while using vLLM's invariant GEMM when requested."""
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if envs.VLLM_BATCH_INVARIANT and current_omni_platform.is_cuda_alike():
+            return linear_batch_invariant(input, self.weight, self.bias)
+        return F.linear(input, self.weight, self.bias)
 
 
 class _RMSNorm(CustomOp):
@@ -189,12 +204,12 @@ class CodePredictorAttention(nn.Module):
         bias = getattr(config, "attention_bias", False)
         self._q_size = self.num_heads * self.head_dim
         self._kv_size = self.num_kv_heads * self.head_dim
-        self.qkv_proj = nn.Linear(
+        self.qkv_proj = _BatchInvariantLinear(
             self.hidden_size,
             self._q_size + 2 * self._kv_size,
             bias=bias,
         )
-        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
+        self.o_proj = _BatchInvariantLinear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
         self.q_norm = _RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.k_norm = _RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         if current_omni_platform.is_npu():
@@ -328,12 +343,12 @@ class CodePredictorMLP(nn.Module):
         # separate gate/up linears. See the module-level HF-numerics note for
         # the GPU bit-level drift caveat.
         self._intermediate_size = int(config.intermediate_size)
-        self.gate_up_proj = nn.Linear(
+        self.gate_up_proj = _BatchInvariantLinear(
             config.hidden_size,
             2 * config.intermediate_size,
             bias=False,
         )
-        self.down_proj = nn.Linear(config.intermediate_size, config.hidden_size, bias=False)
+        self.down_proj = _BatchInvariantLinear(config.intermediate_size, config.hidden_size, bias=False)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         gate_up = self.gate_up_proj(hidden_states)
@@ -655,12 +670,15 @@ class CodePredictorWrapper(nn.Module):
         )
 
         self.lm_head = nn.ModuleList(
-            [nn.Linear(cp_config.hidden_size, cp_config.vocab_size, bias=False) for _ in range(self._num_groups - 1)]
+            [
+                _BatchInvariantLinear(cp_config.hidden_size, cp_config.vocab_size, bias=False)
+                for _ in range(self._num_groups - 1)
+            ]
         )
 
         # Projection: Identity when hidden sizes match or not needed
         if wrapper_config.use_projection and _talker_hidden != self._cp_hidden:
-            self.small_to_mtp_projection = nn.Linear(_talker_hidden, self._cp_hidden, bias=True)
+            self.small_to_mtp_projection = _BatchInvariantLinear(_talker_hidden, self._cp_hidden, bias=True)
         else:
             self.small_to_mtp_projection = nn.Identity()
 
@@ -731,10 +749,14 @@ class CodePredictorWrapper(nn.Module):
         self._lm_heads_list = list(self.lm_head)
         self._codec_embeds_list = list(self.model.codec_embedding)
 
+        # This wrapper invokes torch.compile directly, so honor the server's
+        # compile opt-out before applying platform fallbacks.
+        compilation_config = self._vllm_config.compilation_config
+        compile_disabled = compilation_config.mode == CompilationMode.NONE or compilation_config.backend == "eager"
         # Torch 2.13 XPU Dynamo can double-register built-in handlers when
         # spawned workers compile this predictor. Keep this narrow path eager
         # until the upstream XPU compiler issue is resolved.
-        if current_omni_platform.is_xpu() or not current_omni_platform.supports_torch_inductor():
+        if compile_disabled or current_omni_platform.is_xpu() or not current_omni_platform.supports_torch_inductor():
             # NPU or other platforms without Inductor support
             self._compiled_model_fwd = self.model.forward
 
