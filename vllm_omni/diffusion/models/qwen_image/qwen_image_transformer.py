@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from __future__ import annotations
 
@@ -44,10 +44,13 @@ from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelOutput,
 )
 from vllm_omni.diffusion.forward_context import get_forward_context
+from vllm_omni.diffusion.hooks import HookRegistry, ModelHook
 from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNorm
 from vllm_omni.diffusion.layers.rope import RotaryEmbedding
 
 logger = init_logger(__name__)
+
+_ModulationParams = tuple[torch.Tensor, torch.Tensor]
 
 
 def _normalize_qwen_image_weight_name(name: str) -> str:
@@ -713,6 +716,56 @@ class QwenImageCrossAttention(nn.Module):
         return img_attn_output, txt_attn_output
 
 
+class _QwenModulationCacheHook(ModelHook):
+    """Reuse one block's modulation outputs across a serial CFG pair."""
+
+    _HOOK_NAME = "qwen_cfg_modulation_cache"
+
+    def __init__(self) -> None:
+        self._cache: tuple[torch.Tensor, _ModulationParams] | None = None
+
+    def pre_forward(
+        self,
+        module: nn.Module,
+        *args: Any,
+        **kwargs: Any,
+    ) -> tuple[tuple, dict]:
+        cache_key = kwargs.pop("modulation_cache_key", None)
+        temb = kwargs.get("temb")
+        if (
+            cache_key is None
+            or not isinstance(temb, torch.Tensor)
+            or torch.is_grad_enabled()
+            or torch.compiler.is_compiling()
+            or (temb.device.type == "cuda" and torch.cuda.is_current_stream_capturing())
+        ):
+            self._cache = None
+            return args, kwargs
+
+        cached = self._cache
+        if cached is not None and cached[0] is cache_key:
+            modulation_params = cached[1]
+            self._cache = None
+        else:
+            modulation_params = module._compute_modulation_params(temb)  # type: ignore[attr-defined]
+            self._cache = (cache_key, modulation_params)
+
+        kwargs["modulation_params"] = modulation_params
+        return args, kwargs
+
+    def reset_state(self, module: nn.Module) -> nn.Module:
+        self._cache = None
+        return module
+
+
+def _apply_qwen_modulation_cache_hook(block: nn.Module) -> None:
+    registry = HookRegistry.get_or_create(block)
+    registry.register_hook(
+        _QwenModulationCacheHook._HOOK_NAME,
+        _QwenModulationCacheHook(),
+    )
+
+
 class QwenImageTransformerBlock(nn.Module):
     def __init__(
         self,
@@ -824,6 +877,15 @@ class QwenImageTransformerBlock(nn.Module):
 
         return scale_result, shift_result, gate_result
 
+    def _compute_modulation_params(
+        self,
+        temb: torch.Tensor,
+    ) -> _ModulationParams:
+        img_mod_params = self.img_mod(temb)
+        txt_temb = temb.chunk(2, dim=0)[0] if self.zero_cond_t else temb
+        txt_mod_params = self.txt_mod(txt_temb)
+        return img_mod_params, txt_mod_params
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -834,14 +896,13 @@ class QwenImageTransformerBlock(nn.Module):
         joint_attention_kwargs: dict[str, Any] | None = None,
         modulate_index: list[int] | None = None,
         hidden_states_mask: torch.Tensor | None = None,
+        modulation_cache_key: torch.Tensor | None = None,
+        modulation_params: _ModulationParams | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # Get modulation parameters for both streams
-        img_mod_params = self.img_mod(temb)  # [B, 6*dim]
-
-        if self.zero_cond_t:
-            temb = torch.chunk(temb, 2, dim=0)[0]
-
-        txt_mod_params = self.txt_mod(temb)  # [B, 6*dim]
+        del modulation_cache_key
+        if modulation_params is None:
+            modulation_params = self._compute_modulation_params(temb)
+        img_mod_params, txt_mod_params = modulation_params
 
         # Split modulation parameters for norm1 and norm2
         img_mod1, img_mod2 = img_mod_params.chunk(2, dim=-1)  # Each [B, 3*dim]
@@ -1040,6 +1101,8 @@ class QwenImageTransformer2DModel(CachedTransformer):
                 for i in range(num_layers)
             ]
         )
+        for block in self.transformer_blocks:
+            _apply_qwen_modulation_cache_hook(block)
 
         # Final modulation and output projection are kept full precision —
         # they produce the output latent and are precision-sensitive
@@ -1085,6 +1148,7 @@ class QwenImageTransformer2DModel(CachedTransformer):
         guidance: torch.Tensor = None,  # TODO: this should probably be removed
         attention_kwargs: dict[str, Any] | None = None,
         additional_t_cond=None,
+        modulation_cache_key: torch.Tensor | None = None,
         return_dict: bool = True,
     ) -> torch.Tensor | Transformer2DModelOutput:
         """
@@ -1203,6 +1267,7 @@ class QwenImageTransformer2DModel(CachedTransformer):
                 joint_attention_kwargs=attention_kwargs,
                 modulate_index=modulate_index,
                 hidden_states_mask=hidden_states_mask,
+                modulation_cache_key=modulation_cache_key,
             )
 
         if self.zero_cond_t:

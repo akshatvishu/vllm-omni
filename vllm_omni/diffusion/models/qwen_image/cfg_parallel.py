@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """CFG Parallel Mixin for Qwen Image series
 Shared by
 - QwenImagePipeline
@@ -18,6 +18,16 @@ from vllm_omni.diffusion.distributed.parallel_state import get_classifier_free_g
 from vllm_omni.diffusion.models.progress_bar import ProgressBarMixin
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_qwen_cfg_inputs(
+    timestep: torch.Tensor,
+    do_true_cfg: bool,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Prepare values shared by the two serial CFG transformer calls."""
+    model_timestep = timestep / 1000
+    modulation_cache_key = model_timestep if do_true_cfg and get_classifier_free_guidance_world_size() == 1 else None
+    return model_timestep, modulation_cache_key
 
 
 class QwenImageCFGParallelMixin(CFGParallelMixin, ProgressBarMixin):
@@ -78,6 +88,10 @@ class QwenImageCFGParallelMixin(CFGParallelMixin, ProgressBarMixin):
 
                 # Broadcast timestep to match batch size
                 timestep = t.expand(latents.shape[0]).to(device=latents.device, dtype=latents.dtype)
+                model_timestep, modulation_cache_key = _prepare_qwen_cfg_inputs(
+                    timestep,
+                    do_true_cfg,
+                )
 
                 # Concatenate image latents with noise latents if available (for editing pipelines)
                 latent_model_input = latents
@@ -86,24 +100,26 @@ class QwenImageCFGParallelMixin(CFGParallelMixin, ProgressBarMixin):
 
                 positive_kwargs = {
                     "hidden_states": latent_model_input,
-                    "timestep": timestep / 1000,
+                    "timestep": model_timestep,
                     "guidance": guidance,
                     "encoder_hidden_states_mask": prompt_embeds_mask,
                     "encoder_hidden_states": prompt_embeds,
                     "img_shapes": img_shapes,
                     "txt_seq_lens": txt_seq_lens,
                     **additional_transformer_kwargs,
+                    "modulation_cache_key": modulation_cache_key,
                 }
                 if do_true_cfg:
                     negative_kwargs = {
                         "hidden_states": latent_model_input,
-                        "timestep": timestep / 1000,
+                        "timestep": model_timestep,
                         "guidance": guidance,
                         "encoder_hidden_states_mask": negative_prompt_embeds_mask,
                         "encoder_hidden_states": negative_prompt_embeds,
                         "img_shapes": img_shapes,
                         "txt_seq_lens": negative_txt_seq_lens,
                         **additional_transformer_kwargs,
+                        "modulation_cache_key": modulation_cache_key,
                     }
                 else:
                     negative_kwargs = None

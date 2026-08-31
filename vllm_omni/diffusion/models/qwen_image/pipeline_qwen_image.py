@@ -32,6 +32,7 @@ from vllm_omni.diffusion.models.dmd2 import DMD2PipelineMixin
 from vllm_omni.diffusion.models.interface import SupportsComponentDiscovery
 from vllm_omni.diffusion.models.qwen_image.cfg_parallel import (
     QwenImageCFGParallelMixin,
+    _prepare_qwen_cfg_inputs,
 )
 from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import (
     QwenImageTransformer2DModel,
@@ -851,6 +852,10 @@ class QwenImagePipeline(
             device=latents.device,
             dtype=latents.dtype,
         )
+        model_timestep, modulation_cache_key = _prepare_qwen_cfg_inputs(
+            t_for_model,
+            do_true_cfg,
+        )
 
         # Concatenate image latents if available (editing pipelines)
         latent_model_input = latents
@@ -859,24 +864,26 @@ class QwenImagePipeline(
 
         positive_kwargs = {
             "hidden_states": latent_model_input,
-            "timestep": t_for_model / 1000,
+            "timestep": model_timestep,
             "guidance": guidance,
             "encoder_hidden_states_mask": prompt_embeds_mask,
             "encoder_hidden_states": prompt_embeds,
             "img_shapes": img_shapes,
             "txt_seq_lens": txt_seq_lens,
             **extra_transformer_kwargs,
+            "modulation_cache_key": modulation_cache_key,
         }
         if do_true_cfg:
             negative_kwargs = {
                 "hidden_states": latent_model_input,
-                "timestep": t_for_model / 1000,
+                "timestep": model_timestep,
                 "guidance": guidance,
                 "encoder_hidden_states_mask": negative_prompt_embeds_mask,
                 "encoder_hidden_states": negative_prompt_embeds,
                 "img_shapes": img_shapes,
                 "txt_seq_lens": negative_txt_seq_lens,
                 **extra_transformer_kwargs,
+                "modulation_cache_key": modulation_cache_key,
             }
         else:
             negative_kwargs = None
