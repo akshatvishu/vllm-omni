@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.normalization import AdaLayerNormContinuous
 from vllm.logger import init_logger
+from vllm.model_executor.layers.fusion.quant_activation import QuantizedActivation
 from vllm.model_executor.layers.linear import (
     ColumnParallelLinear,
     QKVParallelLinear,
@@ -46,6 +47,10 @@ from vllm_omni.diffusion.distributed.sp_plan import (
 from vllm_omni.diffusion.forward_context import get_forward_context
 from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNorm
 from vllm_omni.diffusion.layers.rope import RotaryEmbedding
+from vllm_omni.diffusion.models.qwen_image.fused_adaln_fp8 import (
+    fused_adaln_fp8,
+    fused_adaln_fp8_supported,
+)
 
 logger = init_logger(__name__)
 
@@ -465,7 +470,7 @@ class ColumnParallelApproxGELU(nn.Module):
         )
         self.approximate = approximate
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor | QuantizedActivation) -> torch.Tensor:
         x = self.proj(x)
         return F.gelu(x, approximate=self.approximate)
 
@@ -511,7 +516,7 @@ class FeedForward(nn.Module):
 
         self.net = nn.ModuleList(layers)
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor | QuantizedActivation) -> torch.Tensor:
         for module in self.net:
             hidden_states = module(hidden_states)
         return hidden_states
@@ -612,13 +617,26 @@ class QwenImageCrossAttention(nn.Module):
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
+        hidden_states: torch.Tensor | QuantizedActivation,
+        encoder_hidden_states: torch.Tensor | QuantizedActivation,
         vid_freqs: torch.Tensor,
         txt_freqs: torch.Tensor,
         hidden_states_mask: torch.Tensor | None = None,
         encoder_hidden_states_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if isinstance(hidden_states, QuantizedActivation):
+            hidden_states_shape = hidden_states.orig_shape
+            hidden_states_device = hidden_states.data.device
+        else:
+            hidden_states_shape = hidden_states.shape
+            hidden_states_device = hidden_states.device
+        if isinstance(encoder_hidden_states, QuantizedActivation):
+            encoder_hidden_states_shape = encoder_hidden_states.orig_shape
+            encoder_hidden_states_device = encoder_hidden_states.data.device
+        else:
+            encoder_hidden_states_shape = encoder_hidden_states.shape
+            encoder_hidden_states_device = encoder_hidden_states.device
+
         img_qkv, _ = self.to_qkv(hidden_states)
         q_size = self.query_num_heads * self.head_dim
         kv_size = self.kv_num_heads * self.head_dim
@@ -652,7 +670,7 @@ class QwenImageCrossAttention(nn.Module):
         txt_query = self.rope(txt_query, txt_cos, txt_sin)
         txt_key = self.rope(txt_key, txt_cos, txt_sin)
 
-        seq_len_txt = encoder_hidden_states.shape[1]
+        seq_len_txt = encoder_hidden_states_shape[1]
         joint_query = torch.cat([txt_query, img_query], dim=1)
         joint_key = torch.cat([txt_key, img_key], dim=1)
         joint_value = torch.cat([txt_value, img_value], dim=1)
@@ -683,9 +701,9 @@ class QwenImageCrossAttention(nn.Module):
                 else:
                     mask_list.append(
                         torch.ones(
-                            encoder_hidden_states.shape[:2],
+                            encoder_hidden_states_shape[:2],
                             dtype=torch.bool,
-                            device=encoder_hidden_states.device,
+                            device=encoder_hidden_states_device,
                         )
                     )
                 if hidden_states_mask is not None:
@@ -693,9 +711,9 @@ class QwenImageCrossAttention(nn.Module):
                 else:
                     mask_list.append(
                         torch.ones(
-                            hidden_states.shape[:2],
+                            hidden_states_shape[:2],
                             dtype=torch.bool,
-                            device=hidden_states.device,
+                            device=hidden_states_device,
                         )
                     )
                 joint_mask = torch.cat(mask_list, dim=1) if len(mask_list) > 1 else mask_list[0]
@@ -824,6 +842,18 @@ class QwenImageTransformerBlock(nn.Module):
 
         return scale_result, shift_result, gate_result
 
+    @staticmethod
+    def _norm_for_linear(
+        norm: AdaLayerNorm,
+        x: torch.Tensor,
+        scale: torch.Tensor,
+        shift: torch.Tensor,
+        consumer: nn.Module,
+    ) -> torch.Tensor | QuantizedActivation:
+        if fused_adaln_fp8_supported(x, scale, shift, consumer):
+            return fused_adaln_fp8(x, scale, shift, norm.eps)
+        return norm(x, scale, shift)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -849,11 +879,23 @@ class QwenImageTransformerBlock(nn.Module):
 
         # Process image stream - norm1 + modulation
         img_scale1, img_shift1, img_gate1 = self._modulate(img_mod1, modulate_index)
-        img_modulated = self.img_norm1(hidden_states, img_scale1, img_shift1)
+        img_modulated = self._norm_for_linear(
+            self.img_norm1,
+            hidden_states,
+            img_scale1,
+            img_shift1,
+            self.attn.to_qkv,
+        )
 
         # Process text stream - norm1 + modulation
         txt_scale1, txt_shift1, txt_gate1 = self._modulate(txt_mod1)
-        txt_modulated = self.txt_norm1(encoder_hidden_states, txt_scale1, txt_shift1)
+        txt_modulated = self._norm_for_linear(
+            self.txt_norm1,
+            encoder_hidden_states,
+            txt_scale1,
+            txt_shift1,
+            self.attn.add_kv_proj,
+        )
 
         # Use QwenAttnProcessor2_0 for joint attention computation
         # This directly implements the DoubleStreamLayerMegatron logic:
@@ -879,14 +921,26 @@ class QwenImageTransformerBlock(nn.Module):
 
         # Process image stream - norm2 + MLP
         img_scale2, img_shift2, img_gate2 = self._modulate(img_mod2, modulate_index)
-        img_modulated2 = self.img_norm2(hidden_states, img_scale2, img_shift2)
+        img_modulated2 = self._norm_for_linear(
+            self.img_norm2,
+            hidden_states,
+            img_scale2,
+            img_shift2,
+            self.img_mlp.net[0].proj,
+        )
 
         img_mlp_output = self.img_mlp(img_modulated2)
         hidden_states = hidden_states + img_gate2 * img_mlp_output
 
         # Process text stream - norm2 + MLP
         txt_scale2, txt_shift2, txt_gate2 = self._modulate(txt_mod2)
-        txt_modulated2 = self.txt_norm2(encoder_hidden_states, txt_scale2, txt_shift2)
+        txt_modulated2 = self._norm_for_linear(
+            self.txt_norm2,
+            encoder_hidden_states,
+            txt_scale2,
+            txt_shift2,
+            self.txt_mlp.net[0].proj,
+        )
 
         txt_mlp_output = self.txt_mlp(txt_modulated2)
         encoder_hidden_states = encoder_hidden_states + txt_gate2 * txt_mlp_output
