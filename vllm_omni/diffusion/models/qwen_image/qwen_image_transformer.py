@@ -46,6 +46,7 @@ from vllm_omni.diffusion.distributed.sp_plan import (
 from vllm_omni.diffusion.forward_context import get_forward_context
 from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNorm
 from vllm_omni.diffusion.layers.fused_qk_norm_rope import (
+    prepare_rocm_aiter_fused_qk_norm_rope_2way_cache,
     rocm_aiter_fused_qk_norm_rope_2way,
     rocm_aiter_fused_qk_norm_rope_2way_supported,
 )
@@ -620,6 +621,7 @@ class QwenImageCrossAttention(nn.Module):
         encoder_hidden_states: torch.Tensor,
         vid_freqs: torch.Tensor,
         txt_freqs: torch.Tensor,
+        aiter_rope_cache: tuple[torch.Tensor, torch.Tensor] | None,
         hidden_states_mask: torch.Tensor | None = None,
         encoder_hidden_states_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -641,28 +643,26 @@ class QwenImageCrossAttention(nn.Module):
         txt_key = txt_key.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
         txt_value = txt_value.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
 
-        img_cos = torch.real(vid_freqs).to(img_query.dtype)
-        img_sin = torch.imag(vid_freqs).to(img_query.dtype)
-        txt_cos = torch.real(txt_freqs).to(txt_query.dtype)
-        txt_sin = torch.imag(txt_freqs).to(txt_query.dtype)
         seq_len_txt = encoder_hidden_states.shape[1]
         sequence_parallel_size = self.parallel_config.sequence_parallel_size if self.parallel_config is not None else 1
         use_split_text_attention = sequence_parallel_size > 1 and not get_forward_context().split_text_embed_in_sp
 
-        if self.qk_norm and rocm_aiter_fused_qk_norm_rope_2way_supported(
-            txt_query,
-            txt_key,
-            img_query,
-            img_key,
-            self.norm_added_q.weight,
-            self.norm_added_k.weight,
-            self.norm_q.weight,
-            self.norm_k.weight,
-            txt_cos,
-            txt_sin,
-            img_cos,
-            img_sin,
-            sequence_parallel_size=sequence_parallel_size,
+        if (
+            self.qk_norm
+            and aiter_rope_cache is not None
+            and rocm_aiter_fused_qk_norm_rope_2way_supported(
+                txt_query,
+                txt_key,
+                img_query,
+                img_key,
+                self.norm_added_q.weight,
+                self.norm_added_k.weight,
+                self.norm_q.weight,
+                self.norm_k.weight,
+                aiter_rope_cache[0],
+                aiter_rope_cache[1],
+                sequence_parallel_size=sequence_parallel_size,
+            )
         ):
             joint_query, joint_key = rocm_aiter_fused_qk_norm_rope_2way(
                 txt_query,
@@ -673,13 +673,15 @@ class QwenImageCrossAttention(nn.Module):
                 self.norm_added_k.weight,
                 self.norm_q.weight,
                 self.norm_k.weight,
-                txt_cos,
-                txt_sin,
-                img_cos,
-                img_sin,
+                aiter_rope_cache[0],
+                aiter_rope_cache[1],
                 self.eps,
             )
         else:
+            img_cos = torch.real(vid_freqs).to(img_query.dtype)
+            img_sin = torch.imag(vid_freqs).to(img_query.dtype)
+            txt_cos = torch.real(txt_freqs).to(txt_query.dtype)
+            txt_sin = torch.imag(txt_freqs).to(txt_query.dtype)
             img_query = self.norm_q(img_query)
             img_key = self.norm_k(img_key)
             txt_query = self.norm_added_q(txt_query)
@@ -864,6 +866,7 @@ class QwenImageTransformerBlock(nn.Module):
         encoder_hidden_states_mask: torch.Tensor,
         temb: torch.Tensor,
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor],
+        aiter_rope_cache: tuple[torch.Tensor, torch.Tensor] | None,
         joint_attention_kwargs: dict[str, Any] | None = None,
         modulate_index: list[int] | None = None,
         hidden_states_mask: torch.Tensor | None = None,
@@ -899,6 +902,7 @@ class QwenImageTransformerBlock(nn.Module):
             encoder_hidden_states=txt_modulated,  # Text stream (will be processed as "context")
             vid_freqs=image_rotary_emb[0],
             txt_freqs=image_rotary_emb[1],
+            aiter_rope_cache=aiter_rope_cache,
             hidden_states_mask=hidden_states_mask,
             encoder_hidden_states_mask=encoder_hidden_states_mask,
         )
@@ -1161,6 +1165,12 @@ class QwenImageTransformer2DModel(CachedTransformer):
         # txt_freqs is kept replicated for dual-stream attention
         hidden_states, vid_freqs, txt_freqs = self.image_rope_prepare(hidden_states, img_shapes, txt_seq_lens)
         image_rotary_emb = (vid_freqs, txt_freqs)
+        aiter_rope_cache = prepare_rocm_aiter_fused_qk_norm_rope_2way_cache(
+            txt_freqs,
+            vid_freqs,
+            hidden_states.dtype,
+            sequence_parallel_size=self.parallel_config.sequence_parallel_size,
+        )
 
         # Ensure timestep tensor is on the same device and dtype as hidden_states
         timestep = timestep.to(device=hidden_states.device, dtype=hidden_states.dtype)
@@ -1233,6 +1243,7 @@ class QwenImageTransformer2DModel(CachedTransformer):
                 encoder_hidden_states_mask=encoder_hidden_states_mask,
                 temb=temb,
                 image_rotary_emb=image_rotary_emb,
+                aiter_rope_cache=aiter_rope_cache,
                 joint_attention_kwargs=attention_kwargs,
                 modulate_index=modulate_index,
                 hidden_states_mask=hidden_states_mask,

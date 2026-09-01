@@ -360,6 +360,22 @@ def _rocm_aiter_fused_qk_norm_rope_2way_available() -> bool:
 _ROCM_AITER_FUSED_QK_NORM_ROPE_2WAY_AVAILABLE = _rocm_aiter_fused_qk_norm_rope_2way_available()
 
 
+def prepare_rocm_aiter_fused_qk_norm_rope_2way_cache(
+    freqs0: torch.Tensor,
+    freqs1: torch.Tensor,
+    dtype: torch.dtype,
+    sequence_parallel_size: int = 1,
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+    """Pack complex RoPE frequencies for the AITER two-stream operation."""
+    if not _ROCM_AITER_FUSED_QK_NORM_ROPE_2WAY_AVAILABLE or sequence_parallel_size != 1 or dtype != torch.bfloat16:
+        return None
+
+    return (
+        torch.cat((freqs0.real.to(dtype), freqs0.imag.to(dtype)), dim=-1),
+        torch.cat((freqs1.real.to(dtype), freqs1.imag.to(dtype)), dim=-1),
+    )
+
+
 def rocm_aiter_fused_qk_norm_rope_2way_supported(
     q0: torch.Tensor,
     k0: torch.Tensor,
@@ -369,10 +385,8 @@ def rocm_aiter_fused_qk_norm_rope_2way_supported(
     k_weight0: torch.Tensor,
     q_weight1: torch.Tensor,
     k_weight1: torch.Tensor,
-    cos0: torch.Tensor,
-    sin0: torch.Tensor,
-    cos1: torch.Tensor,
-    sin1: torch.Tensor,
+    rope_cache0: torch.Tensor,
+    rope_cache1: torch.Tensor,
     sequence_parallel_size: int = 1,
 ) -> bool:
     """Return whether two streams satisfy the AITER kernel contract."""
@@ -404,15 +418,15 @@ def rocm_aiter_fused_qk_norm_rope_2way_supported(
     ):
         return False
 
-    half_dim = _AITER_QK_NORM_ROPE_2WAY_HEAD_DIM // 2
     frequencies = (
-        (cos0, q0.shape[1]),
-        (sin0, q0.shape[1]),
-        (cos1, q1.shape[1]),
-        (sin1, q1.shape[1]),
+        (rope_cache0, q0.shape[1]),
+        (rope_cache1, q1.shape[1]),
     )
     return all(
-        frequency.shape == (tokens, half_dim) and frequency.dtype == q0.dtype and frequency.device == q0.device
+        frequency.shape == (tokens, _AITER_QK_NORM_ROPE_2WAY_HEAD_DIM)
+        and frequency.dtype == q0.dtype
+        and frequency.device == q0.device
+        and frequency.is_contiguous()
         for frequency, tokens in frequencies
     )
 
@@ -426,10 +440,8 @@ def _rocm_aiter_fused_qk_norm_rope_2way_impl(
     k_weight0: torch.Tensor,
     q_weight1: torch.Tensor,
     k_weight1: torch.Tensor,
-    cos0: torch.Tensor,
-    sin0: torch.Tensor,
-    cos1: torch.Tensor,
-    sin1: torch.Tensor,
+    rope_cache0: torch.Tensor,
+    rope_cache1: torch.Tensor,
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     fused_qk_norm_rope_2way = import_module("aiter.ops.fused_qk_norm_rope_cache_quant").fused_qk_norm_rope_2way
@@ -450,8 +462,8 @@ def _rocm_aiter_fused_qk_norm_rope_2way_impl(
         k_weight0.contiguous(),
         q_weight1.contiguous(),
         k_weight1.contiguous(),
-        torch.cat((cos0, sin0), dim=-1),
-        torch.cat((cos1, sin1), dim=-1),
+        rope_cache0,
+        rope_cache1,
         batch_size,
         tokens0,
         tokens1,
@@ -475,13 +487,11 @@ def _rocm_aiter_fused_qk_norm_rope_2way_fake(
     k_weight0: torch.Tensor,
     q_weight1: torch.Tensor,
     k_weight1: torch.Tensor,
-    cos0: torch.Tensor,
-    sin0: torch.Tensor,
-    cos1: torch.Tensor,
-    sin1: torch.Tensor,
+    rope_cache0: torch.Tensor,
+    rope_cache1: torch.Tensor,
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    del q_weight0, k_weight0, q_weight1, k_weight1, cos0, sin0, cos1, sin1, eps
+    del q_weight0, k_weight0, q_weight1, k_weight1, rope_cache0, rope_cache1, eps
     q_shape = (q0.shape[0], q0.shape[1] + q1.shape[1], q0.shape[2], q0.shape[3])
     k_shape = (k0.shape[0], k0.shape[1] + k1.shape[1], k0.shape[2], k0.shape[3])
     return q0.new_empty(q_shape), k0.new_empty(k_shape)
@@ -506,10 +516,8 @@ def rocm_aiter_fused_qk_norm_rope_2way(
     k_weight0: torch.Tensor,
     q_weight1: torch.Tensor,
     k_weight1: torch.Tensor,
-    cos0: torch.Tensor,
-    sin0: torch.Tensor,
-    cos1: torch.Tensor,
-    sin1: torch.Tensor,
+    rope_cache0: torch.Tensor,
+    rope_cache1: torch.Tensor,
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Fuse two Q/K RMSNorm and interleaved RoPE streams with AITER."""
@@ -522,10 +530,8 @@ def rocm_aiter_fused_qk_norm_rope_2way(
         k_weight0,
         q_weight1,
         k_weight1,
-        cos0,
-        sin0,
-        cos1,
-        sin1,
+        rope_cache0,
+        rope_cache1,
         eps,
     )
 
@@ -604,6 +610,7 @@ def fused_qk_norm_rope(
 
 __all__ = [
     "fused_qk_norm_rope",
+    "prepare_rocm_aiter_fused_qk_norm_rope_2way_cache",
     "rocm_aiter_fused_qk_norm_rope_2way",
     "rocm_aiter_fused_qk_norm_rope_2way_supported",
 ]
