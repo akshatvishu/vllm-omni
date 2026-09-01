@@ -14,9 +14,9 @@ from vllm.utils.torch_utils import direct_register_custom_op
 
 _HIDDEN_SIZE = 3072
 _FP8_MAX = 224.0
-# The fused path wins through 1024 tokens on MI300X. Larger image streams keep
-# the existing compiled AdaLN and AITER quantization path.
-_MAX_SEQUENCE_LENGTH = 1024
+# Production profiling shows a win for Qwen's 512-token text stream but a
+# regression for its 1024-token image stream on MI300X.
+_MAX_SEQUENCE_LENGTH = 512
 
 
 if HAS_TRITON:
