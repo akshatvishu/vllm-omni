@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from __future__ import annotations
 
@@ -45,6 +45,10 @@ from vllm_omni.diffusion.distributed.sp_plan import (
 )
 from vllm_omni.diffusion.forward_context import get_forward_context
 from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNorm
+from vllm_omni.diffusion.layers.fused_linear_gelu import (
+    fused_linear_gelu_tanh,
+    fused_linear_gelu_tanh_supported,
+)
 from vllm_omni.diffusion.layers.rope import RotaryEmbedding
 
 logger = init_logger(__name__)
@@ -466,6 +470,12 @@ class ColumnParallelApproxGELU(nn.Module):
         self.approximate = approximate
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.approximate == "tanh" and fused_linear_gelu_tanh_supported(self.proj, x):
+            return fused_linear_gelu_tanh(
+                x,
+                self.proj.weight,
+                self.proj.bias,
+            )
         x = self.proj(x)
         return F.gelu(x, approximate=self.approximate)
 
