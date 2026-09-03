@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 from typing import Any
 
 import torch
@@ -88,18 +88,18 @@ def regionally_compile(
         for submod, original_forward, compiled_forward in compiled_forwards:
             if original_forward is None:
                 submod.forward = compiled_forward
-                continue
-
-            # Keep HookRegistry's dispatcher as ``forward`` and replace only
-            # the callable it dispatches to.  Hooks such as MagCache retain a
-            # reference to the original callable as well, so update those
-            # references when they still point at the pre-compile function.
-            submod._omni_original_forward = compiled_forward
-            registry = getattr(submod, "_hook_registry", None)
-            for hook in getattr(registry, "_hooks", {}).values():
-                fn_ref = getattr(hook, "fn_ref", None)
-                if fn_ref is not None and fn_ref.original_forward is original_forward:
-                    fn_ref.original_forward = compiled_forward
+            else:
+                # Keep HookRegistry's dispatcher as ``forward`` and replace only
+                # the callable it dispatches to.  Hooks such as MagCache retain a
+                # reference to the original callable as well, so update those
+                # references when they still point at the pre-compile function.
+                submod._omni_original_forward = compiled_forward
+                registry = getattr(submod, "_hook_registry", None)
+                for hook in getattr(registry, "_hooks", {}).values():
+                    fn_ref = getattr(hook, "fn_ref", None)
+                    if fn_ref is not None and fn_ref.original_forward is original_forward:
+                        fn_ref.original_forward = compiled_forward
+            submod._omni_is_regionally_compiled = True
         logger.info(
             "Regional compilation applied to %d module(s) for repeated blocks %s.",
             len(compiled_forwards),

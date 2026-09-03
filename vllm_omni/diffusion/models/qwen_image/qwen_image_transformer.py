@@ -796,6 +796,7 @@ class _QwenModulationCacheHook(ModelHook):
             or not isinstance(temb, torch.Tensor)
             or torch.is_grad_enabled()
             or torch.compiler.is_compiling()
+            or getattr(module, "_omni_is_regionally_compiled", False)
             or self._is_stream_capturing(temb)
         ):
             self._cache = None

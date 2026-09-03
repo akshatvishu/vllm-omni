@@ -315,7 +315,7 @@ def test_denoise_kwargs_share_pair_inputs(monkeypatch: pytest.MonkeyPatch) -> No
     assert next_positive["modulation_cache_key"] is not positive["modulation_cache_key"]
 
 
-def test_modulation_cache_hook_stays_outside_regional_compile(
+def test_modulation_cache_is_disabled_during_regional_compile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = _CacheTestModel()
@@ -331,17 +331,23 @@ def test_modulation_cache_hook_stays_outside_regional_compile(
 
         return compiled
 
-    monkeypatch.setattr(compile_module.torch, "compile", fake_compile)
-    regionally_compile(model)
-
     cache_key = torch.tensor(1)
     temb = torch.randn(1, 4)
     with torch.inference_mode():
         first = model(temb, cache_key)
+
+    monkeypatch.setattr(compile_module.torch, "compile", fake_compile)
+    regionally_compile(model)
+    assert model.blocks[0]._omni_is_regionally_compiled  # type: ignore[attr-defined]
+
+    with torch.inference_mode():
         second = model(temb, cache_key)
+        third = model(temb, cache_key)
 
     assert compiled_calls == 2
-    assert model.blocks[0].img_mod.calls == 1
-    assert model.blocks[0].txt_mod.calls == 1
+    assert model.blocks[0].img_mod.calls == 3
+    assert model.blocks[0].txt_mod.calls == 3
     torch.testing.assert_close(first[0], second[0])
     torch.testing.assert_close(first[1], second[1])
+    torch.testing.assert_close(second[0], third[0])
+    torch.testing.assert_close(second[1], third[1])
