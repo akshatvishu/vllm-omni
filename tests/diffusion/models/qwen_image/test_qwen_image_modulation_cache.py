@@ -8,6 +8,7 @@ import torch
 from torch import nn
 
 import vllm_omni.diffusion.compile as compile_module
+import vllm_omni.diffusion.distributed.cfg_parallel as base_cfg_parallel_module
 import vllm_omni.diffusion.models.qwen_image.cfg_parallel as cfg_parallel_module
 from vllm_omni.diffusion.compile import regionally_compile
 from vllm_omni.diffusion.hooks import HookRegistry
@@ -216,6 +217,22 @@ def test_zero_condition_text_modulation_uses_first_half() -> None:
     assert block.txt_mod.last_input_shape == (2, 4)
 
 
+def test_prepare_qwen_cfg_inputs_without_initialized_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        base_cfg_parallel_module,
+        "is_cfg_group_initialized",
+        lambda: False,
+    )
+    timestep = torch.tensor([500.0])
+
+    model_timestep, cache_key = _prepare_qwen_cfg_inputs(timestep, True)
+
+    torch.testing.assert_close(model_timestep, torch.tensor([0.5]))
+    assert cache_key is model_timestep
+
+
 @pytest.mark.parametrize(
     ("do_true_cfg", "cfg_world_size", "expect_cache_key"),
     [
@@ -232,7 +249,7 @@ def test_prepare_qwen_cfg_inputs(
 ) -> None:
     monkeypatch.setattr(
         cfg_parallel_module,
-        "get_classifier_free_guidance_world_size",
+        "_get_cfg_world_size_or_one",
         lambda: cfg_world_size,
     )
     timestep = torch.tensor([500.0])
@@ -248,7 +265,7 @@ def test_prepare_qwen_cfg_inputs(
 def test_denoise_kwargs_share_pair_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         cfg_parallel_module,
-        "get_classifier_free_guidance_world_size",
+        "_get_cfg_world_size_or_one",
         lambda: 1,
     )
     latents = torch.randn(1, 2, 4)

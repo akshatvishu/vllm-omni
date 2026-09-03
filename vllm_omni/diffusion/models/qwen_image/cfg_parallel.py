@@ -13,8 +13,10 @@ from typing import Any
 
 import torch
 
-from vllm_omni.diffusion.distributed.cfg_parallel import CFGParallelMixin
-from vllm_omni.diffusion.distributed.parallel_state import get_classifier_free_guidance_world_size
+from vllm_omni.diffusion.distributed.cfg_parallel import (
+    CFGParallelMixin,
+    _get_cfg_world_size_or_one,
+)
 from vllm_omni.diffusion.models.progress_bar import ProgressBarMixin
 
 logger = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ def _prepare_qwen_cfg_inputs(
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
     """Prepare values shared by the two serial CFG transformer calls."""
     model_timestep = timestep / 1000
-    modulation_cache_key = model_timestep if do_true_cfg and get_classifier_free_guidance_world_size() == 1 else None
+    modulation_cache_key = model_timestep if do_true_cfg and _get_cfg_world_size_or_one() == 1 else None
     return model_timestep, modulation_cache_key
 
 
@@ -165,7 +167,7 @@ class QwenImageCFGParallelMixin(CFGParallelMixin, ProgressBarMixin):
             When CFG parallel is disabled (world_size == 1), this method always returns True
             as no parallel-specific validation is needed.
         """
-        if get_classifier_free_guidance_world_size() == 1:
+        if _get_cfg_world_size_or_one() == 1:
             return True
 
         if true_cfg_scale <= 1:
