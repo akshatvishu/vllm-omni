@@ -162,6 +162,48 @@ def test_grad_enabled_calls_do_not_cache() -> None:
     assert block.txt_mod.calls == 2
 
 
+def test_stream_capture_disables_and_clears_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    block = _CacheTestBlock()
+    _apply_qwen_modulation_cache_hook(block)
+    cache_key = torch.tensor(1)
+    temb = torch.randn(1, 4)
+
+    with torch.inference_mode():
+        _call_block(block, temb, cache_key)
+
+    registry = HookRegistry.get_or_create(block)
+    hook = registry.get_hook("qwen_cfg_modulation_cache")
+    assert hook is not None
+    assert hook._cache is not None  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(hook, "_is_stream_capturing", lambda _temb: True)
+    with torch.inference_mode():
+        _call_block(block, temb, cache_key)
+
+    assert block.img_mod.calls == 2
+    assert block.txt_mod.calls == 2
+    assert hook._cache is None  # type: ignore[attr-defined]
+
+
+def test_modulation_cache_reset_between_requests() -> None:
+    block = _CacheTestBlock()
+    _apply_qwen_modulation_cache_hook(block)
+    cache_key = torch.tensor(1)
+    temb = torch.randn(1, 4)
+
+    with torch.inference_mode():
+        _call_block(block, temb, cache_key)
+
+    registry = HookRegistry.get_or_create(block)
+    registry.reset_hook("qwen_cfg_modulation_cache")
+
+    with torch.inference_mode():
+        _call_block(block, temb, cache_key)
+
+    assert block.img_mod.calls == 2
+    assert block.txt_mod.calls == 2
+
+
 def test_zero_condition_text_modulation_uses_first_half() -> None:
     block = _CacheTestBlock(zero_cond_t=True)
     _apply_qwen_modulation_cache_hook(block)

@@ -23,6 +23,9 @@ from vllm.model_executor.layers.linear import (
     ReplicatedLinear,
     RowParallelLinear,
 )
+from vllm.model_executor.layers.quantization.online.fp8 import (
+    Fp8PerTensorOnlineLinearMethod,
+)
 from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.quantization.component_config import safe_quant_config
@@ -46,11 +49,22 @@ from vllm_omni.diffusion.distributed.sp_plan import (
 from vllm_omni.diffusion.forward_context import get_forward_context
 from vllm_omni.diffusion.hooks import HookRegistry, ModelHook
 from vllm_omni.diffusion.layers.adalayernorm import AdaLayerNorm
+from vllm_omni.diffusion.layers.fused_qkv_norm_rope import (
+    rocm_aiter_fused_qkv_norm_rope_available,
+    try_rocm_aiter_fused_qkv_norm_rope,
+)
 from vllm_omni.diffusion.layers.rope import RotaryEmbedding
 
 logger = init_logger(__name__)
 
 _ModulationParams = tuple[torch.Tensor, torch.Tensor]
+
+
+def _prepare_qwen_rope_table(freqs: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.cat(
+        (torch.real(freqs).to(dtype), torch.imag(freqs).to(dtype)),
+        dim=-1,
+    )
 
 
 def _normalize_qwen_image_weight_name(name: str) -> str:
@@ -610,8 +624,26 @@ class QwenImageCrossAttention(nn.Module):
         try:
             config = get_forward_context().omni_diffusion_config
             self.parallel_config = config.parallel_config
+            enforce_eager = config.enforce_eager
         except Exception:
             self.parallel_config = None
+            enforce_eager = False
+        self.use_rocm_aiter_qkv_epilogue = bool(
+            qk_norm
+            and enforce_eager
+            and self.parallel_config is not None
+            and self.parallel_config.tensor_parallel_size == 1
+            and self.parallel_config.sequence_parallel_size == 1
+            and isinstance(
+                self.to_qkv.quant_method,
+                Fp8PerTensorOnlineLinearMethod,
+            )
+            and isinstance(
+                self.add_kv_proj.quant_method,
+                Fp8PerTensorOnlineLinearMethod,
+            )
+            and rocm_aiter_fused_qkv_norm_rope_available()
+        )
 
     def forward(
         self,
@@ -621,44 +653,67 @@ class QwenImageCrossAttention(nn.Module):
         txt_freqs: torch.Tensor,
         hidden_states_mask: torch.Tensor | None = None,
         encoder_hidden_states_mask: torch.Tensor | None = None,
+        qkv_rope_tables: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         img_qkv, _ = self.to_qkv(hidden_states)
-        q_size = self.query_num_heads * self.head_dim
-        kv_size = self.kv_num_heads * self.head_dim
-        img_query, img_key, img_value = img_qkv.split([q_size, kv_size, kv_size], dim=-1)
-
         txt_qkv, _ = self.add_kv_proj(encoder_hidden_states)
-        add_q_size = self.add_query_num_heads * self.head_dim
-        add_kv_size = self.add_kv_num_heads * self.head_dim
-        txt_query, txt_key, txt_value = txt_qkv.split([add_q_size, add_kv_size, add_kv_size], dim=-1)
-
-        img_query = img_query.unflatten(-1, (self.query_num_heads, self.head_dim))
-        img_key = img_key.unflatten(-1, (self.kv_num_heads, self.head_dim))
-        img_value = img_value.unflatten(-1, (self.kv_num_heads, self.head_dim))
-
-        txt_query = txt_query.unflatten(-1, (self.add_query_num_heads, self.head_dim))
-        txt_key = txt_key.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
-        txt_value = txt_value.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
-
-        img_query = self.norm_q(img_query)
-        img_key = self.norm_k(img_key)
-        txt_query = self.norm_added_q(txt_query)
-        txt_key = self.norm_added_k(txt_key)
-
-        img_cos = torch.real(vid_freqs).to(img_query.dtype)
-        img_sin = torch.imag(vid_freqs).to(img_query.dtype)
-        txt_cos = torch.real(txt_freqs).to(txt_query.dtype)
-        txt_sin = torch.imag(txt_freqs).to(txt_query.dtype)
-
-        img_query = self.rope(img_query, img_cos, img_sin)
-        img_key = self.rope(img_key, img_cos, img_sin)
-        txt_query = self.rope(txt_query, txt_cos, txt_sin)
-        txt_key = self.rope(txt_key, txt_cos, txt_sin)
-
         seq_len_txt = encoder_hidden_states.shape[1]
-        joint_query = torch.cat([txt_query, img_query], dim=1)
-        joint_key = torch.cat([txt_key, img_key], dim=1)
-        joint_value = torch.cat([txt_value, img_value], dim=1)
+        joint_qkv = None
+        if qkv_rope_tables is not None:
+            joint_qkv = try_rocm_aiter_fused_qkv_norm_rope(
+                img_qkv,
+                txt_qkv,
+                self.norm_q.weight,
+                self.norm_k.weight,
+                self.norm_added_q.weight,
+                self.norm_added_k.weight,
+                qkv_rope_tables[0],
+                qkv_rope_tables[1],
+                self.eps,
+                enabled=(
+                    self.use_rocm_aiter_qkv_epilogue
+                    and hidden_states_mask is None
+                    and encoder_hidden_states_mask is None
+                ),
+            )
+
+        if joint_qkv is None:
+            q_size = self.query_num_heads * self.head_dim
+            kv_size = self.kv_num_heads * self.head_dim
+            img_query, img_key, img_value = img_qkv.split([q_size, kv_size, kv_size], dim=-1)
+
+            add_q_size = self.add_query_num_heads * self.head_dim
+            add_kv_size = self.add_kv_num_heads * self.head_dim
+            txt_query, txt_key, txt_value = txt_qkv.split([add_q_size, add_kv_size, add_kv_size], dim=-1)
+
+            img_query = img_query.unflatten(-1, (self.query_num_heads, self.head_dim))
+            img_key = img_key.unflatten(-1, (self.kv_num_heads, self.head_dim))
+            img_value = img_value.unflatten(-1, (self.kv_num_heads, self.head_dim))
+
+            txt_query = txt_query.unflatten(-1, (self.add_query_num_heads, self.head_dim))
+            txt_key = txt_key.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
+            txt_value = txt_value.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
+
+            img_query = self.norm_q(img_query)
+            img_key = self.norm_k(img_key)
+            txt_query = self.norm_added_q(txt_query)
+            txt_key = self.norm_added_k(txt_key)
+
+            img_cos = torch.real(vid_freqs).to(img_query.dtype)
+            img_sin = torch.imag(vid_freqs).to(img_query.dtype)
+            txt_cos = torch.real(txt_freqs).to(txt_query.dtype)
+            txt_sin = torch.imag(txt_freqs).to(txt_query.dtype)
+
+            img_query = self.rope(img_query, img_cos, img_sin)
+            img_key = self.rope(img_key, img_cos, img_sin)
+            txt_query = self.rope(txt_query, txt_cos, txt_sin)
+            txt_key = self.rope(txt_key, txt_cos, txt_sin)
+
+            joint_query = torch.cat([txt_query, img_query], dim=1)
+            joint_key = torch.cat([txt_key, img_key], dim=1)
+            joint_value = torch.cat([txt_value, img_value], dim=1)
+        else:
+            joint_query, joint_key, joint_value = joint_qkv
 
         if (
             self.parallel_config is not None
@@ -724,6 +779,10 @@ class _QwenModulationCacheHook(ModelHook):
     def __init__(self) -> None:
         self._cache: tuple[torch.Tensor, _ModulationParams] | None = None
 
+    @staticmethod
+    def _is_stream_capturing(temb: torch.Tensor) -> bool:
+        return temb.device.type == "cuda" and torch.cuda.is_current_stream_capturing()
+
     def pre_forward(
         self,
         module: nn.Module,
@@ -737,7 +796,7 @@ class _QwenModulationCacheHook(ModelHook):
             or not isinstance(temb, torch.Tensor)
             or torch.is_grad_enabled()
             or torch.compiler.is_compiling()
-            or (temb.device.type == "cuda" and torch.cuda.is_current_stream_capturing())
+            or self._is_stream_capturing(temb)
         ):
             self._cache = None
             return args, kwargs
@@ -893,6 +952,7 @@ class QwenImageTransformerBlock(nn.Module):
         encoder_hidden_states_mask: torch.Tensor,
         temb: torch.Tensor,
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor],
+        qkv_rope_tables: tuple[torch.Tensor, torch.Tensor] | None = None,
         joint_attention_kwargs: dict[str, Any] | None = None,
         modulate_index: list[int] | None = None,
         hidden_states_mask: torch.Tensor | None = None,
@@ -922,14 +982,27 @@ class QwenImageTransformerBlock(nn.Module):
         # 2. Applies QK normalization and RoPE
         # 3. Concatenates and runs joint attention
         # 4. Splits results back to separate streams
-        attn_output = self.attn(
-            hidden_states=img_modulated,  # Image stream (will be processed as "sample")
-            encoder_hidden_states=txt_modulated,  # Text stream (will be processed as "context")
-            vid_freqs=image_rotary_emb[0],
-            txt_freqs=image_rotary_emb[1],
-            hidden_states_mask=hidden_states_mask,
-            encoder_hidden_states_mask=encoder_hidden_states_mask,
-        )
+        # Passing the optional tables through regional compilation changed the
+        # Qwen Image result on gfx942, so keep the fallback call unchanged.
+        if qkv_rope_tables is None:
+            attn_output = self.attn(
+                hidden_states=img_modulated,  # Image stream (will be processed as "sample")
+                encoder_hidden_states=txt_modulated,  # Text stream (will be processed as "context")
+                vid_freqs=image_rotary_emb[0],
+                txt_freqs=image_rotary_emb[1],
+                hidden_states_mask=hidden_states_mask,
+                encoder_hidden_states_mask=encoder_hidden_states_mask,
+            )
+        else:
+            attn_output = self.attn(
+                hidden_states=img_modulated,
+                encoder_hidden_states=txt_modulated,
+                vid_freqs=image_rotary_emb[0],
+                txt_freqs=image_rotary_emb[1],
+                hidden_states_mask=hidden_states_mask,
+                encoder_hidden_states_mask=encoder_hidden_states_mask,
+                qkv_rope_tables=qkv_rope_tables,
+            )
 
         # QwenAttnProcessor2_0 returns (img_output, txt_output) when encoder_hidden_states is provided
         img_attn_output, txt_attn_output = attn_output
@@ -1192,6 +1265,15 @@ class QwenImageTransformer2DModel(CachedTransformer):
         # txt_freqs is kept replicated for dual-stream attention
         hidden_states, vid_freqs, txt_freqs = self.image_rope_prepare(hidden_states, img_shapes, txt_seq_lens)
         image_rotary_emb = (vid_freqs, txt_freqs)
+        use_rocm_aiter_qkv_epilogue = bool(
+            self.transformer_blocks and self.transformer_blocks[0].attn.use_rocm_aiter_qkv_epilogue
+        )
+        qkv_rope_tables = None
+        if use_rocm_aiter_qkv_epilogue:
+            qkv_rope_tables = (
+                _prepare_qwen_rope_table(vid_freqs, hidden_states.dtype),
+                _prepare_qwen_rope_table(txt_freqs, hidden_states.dtype),
+            )
 
         # Ensure timestep tensor is on the same device and dtype as hidden_states
         timestep = timestep.to(device=hidden_states.device, dtype=hidden_states.dtype)
@@ -1258,17 +1340,32 @@ class QwenImageTransformer2DModel(CachedTransformer):
             encoder_hidden_states_mask = None
 
         for index_block, block in enumerate(self.transformer_blocks):
-            encoder_hidden_states, hidden_states = block(
-                hidden_states=hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_hidden_states_mask=encoder_hidden_states_mask,
-                temb=temb,
-                image_rotary_emb=image_rotary_emb,
-                joint_attention_kwargs=attention_kwargs,
-                modulate_index=modulate_index,
-                hidden_states_mask=hidden_states_mask,
-                modulation_cache_key=modulation_cache_key,
-            )
+            # Do not expose the optional table input to the compiled fallback.
+            if qkv_rope_tables is None:
+                encoder_hidden_states, hidden_states = block(
+                    hidden_states=hidden_states,
+                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states_mask=encoder_hidden_states_mask,
+                    temb=temb,
+                    image_rotary_emb=image_rotary_emb,
+                    joint_attention_kwargs=attention_kwargs,
+                    modulate_index=modulate_index,
+                    hidden_states_mask=hidden_states_mask,
+                    modulation_cache_key=modulation_cache_key,
+                )
+            else:
+                encoder_hidden_states, hidden_states = block(
+                    hidden_states=hidden_states,
+                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states_mask=encoder_hidden_states_mask,
+                    temb=temb,
+                    image_rotary_emb=image_rotary_emb,
+                    qkv_rope_tables=qkv_rope_tables,
+                    joint_attention_kwargs=attention_kwargs,
+                    modulate_index=modulate_index,
+                    hidden_states_mask=hidden_states_mask,
+                    modulation_cache_key=modulation_cache_key,
+                )
 
         if self.zero_cond_t:
             temb = temb.chunk(2, dim=0)[0]
