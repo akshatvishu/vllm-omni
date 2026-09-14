@@ -30,13 +30,13 @@ from vllm.logger import init_logger
 from vllm.outputs import CompletionOutput, RequestOutput
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import RequestOutputKind, SamplingParams
-from vllm.v1.engine import EngineCoreOutputs
+from vllm.v1.engine import EngineCoreOutput, EngineCoreOutputs
 from vllm.v1.engine.exceptions import EngineDeadError
 from vllm.v1.metrics.stats import IterationStats
 
 from vllm_omni.config.stage_config import DuplexSessionRuntimeConfig
 from vllm_omni.distributed.omni_connectors.utils.config import stage_receives_chunks
-from vllm_omni.engine import OmniEngineCoreRequest
+from vllm_omni.engine import OmniEngineCoreOutput, OmniEngineCoreRequest
 from vllm_omni.engine.cfg_companion_tracker import CfgCompanionTracker
 from vllm_omni.engine.duplex.contracts import (
     DuplexControlPlanePort,
@@ -1092,7 +1092,7 @@ class Orchestrator:
         self,
         stage_id: int,
         replica_id: int,
-        raw_outputs: Any,
+        raw_outputs: EngineCoreOutputs,
         raw_terminal_request_ids: set[str],
     ) -> list[Any]:
         """Process one raw LLM poll result; returns processed request outputs.
@@ -1106,11 +1106,11 @@ class Orchestrator:
         """
         pool = self.stage_pools[stage_id]
         await self._handle_kv_ready_raw_outputs(stage_id, raw_outputs)
-        terminal_candidates: list[tuple[Any, OrchestratorRequestState]] = []
-        for eco in raw_outputs.outputs:
+        terminal_candidates: list[tuple[EngineCoreOutput, OrchestratorRequestState]] = []
+        for engine_core_output in raw_outputs.outputs:
             # Emit kv_wait_s before _handle_kv_ready_raw_outputs'
             # async_chunk early-return so it lands in all modes.
-            kv_params = getattr(eco, "kv_transfer_params", None)
+            kv_params = engine_core_output.kv_transfer_params
             if (
                 self._prom_metrics is not None
                 and isinstance(kv_params, dict)
@@ -1120,33 +1120,37 @@ class Orchestrator:
                     kv_params.get("connector_type") or "unknown",
                     float(kv_wait_s),
                 )
-            req_state = self.request_states.get(getattr(eco, "request_id", None))
+            req_state = self.request_states.get(engine_core_output.request_id)
             if req_state is None or not req_state.streaming.enabled:
                 continue
-            segment_finished = bool(getattr(eco, "is_segment_finished", False))
-            raw_mm = self._completion_multimodal_output(eco, None)
+            segment_finished = (
+                isinstance(engine_core_output, OmniEngineCoreOutput) and engine_core_output.is_segment_finished
+            )
+            raw_mm = (
+                engine_core_output.multimodal_output if isinstance(engine_core_output, OmniEngineCoreOutput) else None
+            )
             req_state.streaming.segments[stage_id] = StreamingSegmentState(
-                finished=segment_finished,
-                token_ids=(self._coerce_int_list(getattr(eco, "new_token_ids", None)) if segment_finished else []),
+                finished=bool(segment_finished),
+                token_ids=list(engine_core_output.new_token_ids) if segment_finished else [],
                 output_metadata=(dict(raw_mm) if segment_finished and isinstance(raw_mm, dict) else {}),
             )
-            req_state.streaming.new_prompt_len_snapshot = getattr(
-                eco,
-                "new_prompt_len_snapshot",
-                None,
+            req_state.streaming.new_prompt_len_snapshot = (
+                engine_core_output.new_prompt_len_snapshot
+                if isinstance(engine_core_output, OmniEngineCoreOutput)
+                else None
             )
-            if getattr(eco, "finish_reason", None) is not None:
-                terminal_candidates.append((eco, req_state))
+            if engine_core_output.finish_reason is not None:
+                terminal_candidates.append((engine_core_output, req_state))
         iteration_stats = IterationStats() if (self._stat_logger is not None and raw_outputs.outputs) else None
         processed = await pool.process_llm_raw_outputs(
             replica_id,
             raw_outputs,
             iteration_stats=iteration_stats,
         )
-        for eco, req_state in terminal_candidates:
-            if eco.request_id in pool.output_processor.request_states:
+        for engine_core_output, req_state in terminal_candidates:
+            if engine_core_output.request_id in pool.output_processor.request_states:
                 continue
-            if await self._apply_raw_terminal_stage_finish(stage_id, eco, req_state):
+            if await self._apply_raw_terminal_stage_finish(stage_id, engine_core_output, req_state):
                 raw_terminal_request_ids.add(req_state.request_id)
         if self._stat_logger is not None and (raw_outputs.scheduler_stats is not None or iteration_stats is not None):
             self._stat_logger.record(
@@ -1852,7 +1856,7 @@ class Orchestrator:
     async def _apply_raw_terminal_stage_finish(
         self,
         stage_id: int,
-        eco: Any,
+        engine_core_output: EngineCoreOutput,
         req_state: OrchestratorRequestState,
     ) -> bool:
         """Record a session-level finish marker and report whether it was terminal.
@@ -1870,9 +1874,9 @@ class Orchestrator:
         in ``_route_output`` so downstream async-chunk stages can still deliver
         outputs after stage-0 session end.
         """
-        if getattr(eco, "finish_reason", None) is None:
+        if engine_core_output.finish_reason is None:
             return False
-        if getattr(eco, "is_segment_finished", False):
+        if isinstance(engine_core_output, OmniEngineCoreOutput) and engine_core_output.is_segment_finished:
             return False
 
         final_output_stage_ids = req_state.final_output_stage_ids or {req_state.final_stage_id}
