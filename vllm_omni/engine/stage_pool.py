@@ -1259,15 +1259,13 @@ class StagePool:
         metadata: Mapping[str, object] = payload
         if modality == "audio" and payload.get("sr") is None:
             metadata = {"sr": payload.get("audio_sample_rate")}
-        # TODO (Alex): Standardize stage media output types before watermarking and remove this.
-        # For now we have it to ensure watermarking doesn't modify the data type.
         tensor = torch.from_numpy(data) if isinstance(data, np.ndarray) else data
         watermarked = watermarker.watermark_output(request_id, tensor, metadata)
-        result = watermarked.numpy() if isinstance(data, np.ndarray) else watermarked
         if isinstance(payload, MultimodalPayload):
-            payload.tensors[modality] = result
+            payload.tensors[modality] = watermarked
+            payload.metadata.pop(modality, None)
         else:
-            payload[modality] = result
+            payload[modality] = watermarked.numpy() if isinstance(data, np.ndarray) else watermarked
 
     def _watermark_outputs(self, outputs: list[Any]) -> None:
         """Watermark supported payloads in a batch of stage outputs."""
