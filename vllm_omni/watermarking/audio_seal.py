@@ -28,8 +28,6 @@ except ImportError:
 class _AudioSealState:
     """Hold state retained between chunks of one AudioSeal stream."""
 
-    batch_size: int
-    sample_rate: int
     message: torch.Tensor
     streaming_state: dict[str, object] | None = None
 
@@ -46,17 +44,13 @@ class AudioSealWatermarker(AudioWatermarkerBase[_AudioSealState]):
             raise ImportError("Audio watermarking requires `pip install 'vllm-omni[watermarking]'`")
         logger.info("Loading AudioSeal watermark generator on CPU")
         self._model = self._load_generator()
+        self.frame_size = self._model.frame_size
         # Detector isn't needed at inference time, but is convenient for testing etc, so we defer loading
         self._detector: AudioSealDetector | None = None
 
     def _watermark_audio(self, data: AudioTensor, state: _AudioSealState) -> AudioTensor:
         """Watermark one chunk using retained AudioSeal state."""
         self._validate_audioseal_input(data)
-        if data.samples.shape[0] != state.batch_size or data.sample_rate != state.sample_rate:
-            raise ValueError("audio batch size and sample rate must remain stable within a stream")
-        if data.samples.shape[-1] == 0:
-            return data
-
         original_device = data.samples.device
         original_dtype = data.samples.dtype
         source = data.samples.to(device="cpu", dtype=torch.float32)
@@ -64,14 +58,14 @@ class AudioSealWatermarker(AudioWatermarkerBase[_AudioSealState]):
         # NOTE: AudioSeal >=0.2 accepts native-rate audio; we avoid resampling here to
         # avoid potential boundary artifacts across streamed chunks.
         # Furthermore, streaming handles whole / chunked output with comparable measured throughput
-        with self._model.streaming(state.batch_size):
+        with self._model.streaming(source.shape[0]):
             if state.streaming_state is not None:
-                self._model.encoder.set_streaming_state(state.streaming_state)  # type: ignore[attr-defined]
+                self._model.set_streaming_state(state.streaming_state)
             watermarked = self._model(
                 source,
                 message=state.message,
             )
-            state.streaming_state = self._model.encoder.get_streaming_state()  # type: ignore[attr-defined]
+            state.streaming_state = self._model.get_streaming_state()
 
         watermarked = self._add_residual_with_headroom(source, watermarked - source)
 
@@ -88,7 +82,7 @@ class AudioSealWatermarker(AudioWatermarkerBase[_AudioSealState]):
         nbits = msg_processor.nbits if msg_processor is not None else 16
         generator = torch.Generator(device="cpu").manual_seed(0)
         message = torch.randint(0, 2, (batch_size, nbits), device="cpu", generator=generator)
-        return _AudioSealState(batch_size, data.sample_rate, message)
+        return _AudioSealState(message)
 
     @staticmethod
     def _load_generator() -> AudioSealWM:

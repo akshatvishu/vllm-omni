@@ -36,7 +36,7 @@ classifiers = [
 [project.optional-dependencies]
 
 watermarking = [
-    "audioseal>=0.2,<1.0",
+    "audioseal @ git+https://github.com/akshatvishu/audioseal.git@ab35ea6add4856f2a4ae0668230e6d69697d3f6a",
 ]
 
 dev = [

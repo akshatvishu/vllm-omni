@@ -77,12 +77,12 @@ def test_audio_base_round_trips_common_layouts(
 
 
 @pytest.mark.parametrize("bad_sampling_rate", [None, 24_000.0])
-def test_audio_output_requires_integer_sample_rate(bad_sampling_rate: object) -> None:
-    """Ensure audio output rejects missing or non-integer sample rates."""
+def test_audio_output_falls_back_for_invalid_sample_rate(bad_sampling_rate: object) -> None:
+    """Return generated audio when watermarking cannot use its sample rate."""
     watermarker = _RecordingAudioWatermarker()
-
-    with pytest.raises(TypeError, match="integer 'sr'"):
-        watermarker.watermark_output("request", torch.zeros(100), {"sr": bad_sampling_rate})
+    samples = torch.zeros(100)
+    assert watermarker.watermark_output("request", samples, {"sr": bad_sampling_rate}) is samples
+    assert not watermarker._request_states
 
 
 def test_missing_audioseal_names_install_extra(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,6 +247,10 @@ def test_audioseal_watermarks_native_sample_rates(
             watermarker.watermark("request", AudioTensor(chunk, sample_rate))
             for chunk in source.split(chunk_samples, dim=-1)
         ]
+        final = watermarker.finish_request_output("request")
+        if final is not None:
+            samples, metadata = final
+            chunks.append(AudioTensor(samples, metadata["sr"]))
         watermarked = AudioTensor(
             torch.cat([chunk.samples for chunk in chunks], dim=-1),
             sample_rate,

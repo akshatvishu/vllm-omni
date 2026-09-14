@@ -30,7 +30,7 @@ class NoopWatermarker(Watermarker[bool, _RequestState]):
         self.created.append(state)
         return state
 
-    def _watermark(self, data: bool, state: _RequestState) -> bool:
+    def _watermark(self, data: bool, state: _RequestState, *, finished: bool = False) -> bool:
         assert torch.is_inference_mode_enabled()
         if not data:
             raise ValueError("cannot watermark invalid data")

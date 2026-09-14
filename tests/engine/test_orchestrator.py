@@ -246,6 +246,7 @@ class FakeCollectiveRpcStageClient(FakeStageClient):
 class FakeOutputProcessor:
     def __init__(self, *, request_outputs: list[object] | None = None) -> None:
         self.request_outputs = list(request_outputs or [])
+        self.request_states: dict[str, Any] = {}
         self.add_request_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self.abort_calls: list[list[str]] = []
 
@@ -2651,7 +2652,7 @@ async def test_stage_pool_watermark_cancellation_waits_before_abort() -> None:
     release_worker = threading.Event()
     worker_finished = threading.Event()
 
-    def watermark_output(_request_id, samples, _metadata):
+    def watermark_output(_request_id, samples, _metadata, *, finished=False):
         worker_started.set()
         try:
             release_worker.wait()

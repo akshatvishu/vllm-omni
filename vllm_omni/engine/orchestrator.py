@@ -1106,6 +1106,7 @@ class Orchestrator:
         """
         pool = self.stage_pools[stage_id]
         await self._handle_kv_ready_raw_outputs(stage_id, raw_outputs)
+        terminal_candidates: list[tuple[Any, OrchestratorRequestState]] = []
         for eco in raw_outputs.outputs:
             # Emit kv_wait_s before _handle_kv_ready_raw_outputs'
             # async_chunk early-return so it lands in all modes.
@@ -1134,14 +1135,19 @@ class Orchestrator:
                 "new_prompt_len_snapshot",
                 None,
             )
-            if await self._apply_raw_terminal_stage_finish(stage_id, eco, req_state):
-                raw_terminal_request_ids.add(req_state.request_id)
+            if getattr(eco, "finish_reason", None) is not None:
+                terminal_candidates.append((eco, req_state))
         iteration_stats = IterationStats() if (self._stat_logger is not None and raw_outputs.outputs) else None
         processed = await pool.process_llm_raw_outputs(
             replica_id,
             raw_outputs,
             iteration_stats=iteration_stats,
         )
+        for eco, req_state in terminal_candidates:
+            if eco.request_id in pool.output_processor.request_states:
+                continue
+            if await self._apply_raw_terminal_stage_finish(stage_id, eco, req_state):
+                raw_terminal_request_ids.add(req_state.request_id)
         if self._stat_logger is not None and (raw_outputs.scheduler_stats is not None or iteration_stats is not None):
             self._stat_logger.record(
                 raw_outputs.scheduler_stats,
@@ -1850,6 +1856,9 @@ class Orchestrator:
         req_state: OrchestratorRequestState,
     ) -> bool:
         """Record a session-level finish marker and report whether it was terminal.
+
+        Called after output processing, only when the processor has released
+        the request. A raw finish marker alone can still precede more audio.
 
         Streaming segment stops set ``is_segment_finished=True`` and are handled
         via processed outputs. Session termination (e.g. ``finish_requests`` after

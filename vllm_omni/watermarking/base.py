@@ -8,6 +8,7 @@ from threading import Lock
 from typing import ClassVar, Generic, TypeVar
 
 import torch
+import torch.nn.functional as F
 from vllm.logger import init_logger
 
 from vllm_omni.watermarking.types import AudioTensor
@@ -30,38 +31,90 @@ class Watermarker(ABC, Generic[MediaT, RequestStateT]):
         self._lock = Lock()
         self._closed = False
 
-    def watermark(self, request_id: str, data: MediaT) -> MediaT:
+    def watermark(self, request_id: str, data: MediaT, *, finished: bool = False) -> MediaT:
         """Watermark the next media chunk for a request."""
         self._validate_type(data)
         # Implementations may swap request state on one model; async callers must offload this entire call.
         with self._lock, torch.inference_mode():
             self._ensure_open()
-            if request_id not in self._request_states:
-                self._request_states[request_id] = self._new_state(data)
-                logger.debug("Created %s state for request %s", type(self).__name__, request_id)
-            completed = False
-            try:
-                result = self._watermark(data, self._request_states[request_id])
-                self._validate_output(data, result)
-                completed = True
-                return result
-            finally:
-                if not completed:
-                    self._close_state(self._request_states.pop(request_id))
+            return self._watermark_request(request_id, data, finished=finished)
+
+    def _watermark_request(self, request_id: str, data: MediaT, *, finished: bool) -> MediaT:
+        if request_id not in self._request_states:
+            self._request_states[request_id] = self._new_state(data)
+            logger.debug("Created %s state for request %s", type(self).__name__, request_id)
+        completed = False
+        try:
+            result = self._watermark(data, self._request_states[request_id], finished=finished)
+            self._validate_output(data, result)
+            completed = True
+            return result
+        finally:
+            if not completed or finished:
+                self._close_state(self._request_states.pop(request_id))
 
     def watermark_output(
         self,
         request_id: str,
         data: torch.Tensor,
         metadata: Mapping[str, object],
+        *,
+        finished: bool = False,
     ) -> torch.Tensor:
-        """Watermark a generated tensor using its output metadata."""
+        """Watermark generated output, returning original samples on expected failures."""
         # NOTE: We currently have a layer of canonicalization in the watermarker
         # to ensure formats are standardized. This is arguable the wrong place to do
         # this in the long term (i.e., the output format of models should be consistent).
-        std_tensor = self._from_output(data, metadata)
-        wm_tensor = self.watermark(request_id, std_tensor)
-        return self._to_output(wm_tensor)
+        with self._lock, torch.inference_mode():
+            self._ensure_open()
+            state = self._request_states.get(request_id)
+            pending = self._pending_output(state) if state is not None else None
+            try:
+                std_tensor = self._from_output(data, metadata)
+                wm_tensor = self._watermark_request(request_id, std_tensor, finished=finished)
+            except (RuntimeError, TypeError, ValueError):
+                state = self._request_states.pop(request_id, None)
+                if state is not None:
+                    self._close_state(state)
+                original = self._fallback_output(data, metadata, pending)
+                logger.warning(
+                    "Watermarking failed for request %s; returning original samples", request_id, exc_info=True
+                )
+                return original
+            return self._to_output(wm_tensor)
+
+    def _pending_output(self, state: RequestStateT) -> tuple[torch.Tensor, Mapping[str, object]] | None:
+        """Snapshot buffered originals before processing can replace the request state."""
+        return None
+
+    def _fallback_output(
+        self,
+        data: torch.Tensor,
+        metadata: Mapping[str, object],
+        pending: tuple[torch.Tensor, Mapping[str, object]] | None,
+    ) -> torch.Tensor:
+        return data
+
+    def finish_request_output(self, request_id: str) -> tuple[torch.Tensor, Mapping[str, object]] | None:
+        """Return buffered output before releasing a completed request."""
+        with self._lock, torch.inference_mode():
+            self._ensure_open()
+            state = self._request_states.pop(request_id, None)
+            if state is None:
+                return None
+            pending = self._pending_output(state)
+            try:
+                return self._finish_state(state)
+            except (RuntimeError, TypeError, ValueError):
+                logger.warning(
+                    "Final watermark failed for request %s; returning original samples", request_id, exc_info=True
+                )
+                return pending
+            finally:
+                self._close_state(state)
+
+    def _finish_state(self, state: RequestStateT) -> tuple[torch.Tensor, Mapping[str, object]] | None:
+        return None
 
     def is_watermarked(self, data: MediaT) -> bool:
         """Return whether every batch item contains a watermark."""
@@ -117,7 +170,7 @@ class Watermarker(ABC, Generic[MediaT, RequestStateT]):
         """Create state for a new request."""
 
     @abstractmethod
-    def _watermark(self, data: MediaT, state: RequestStateT) -> MediaT:
+    def _watermark(self, data: MediaT, state: RequestStateT, *, finished: bool = False) -> MediaT:
         """Watermark data using its request state."""
 
     @abstractmethod
@@ -137,6 +190,9 @@ class _AudioRequestState(Generic[AudioImplStateT]):
 
     channels: int
     audio_state: AudioImplStateT
+    sample_rate: int
+    input_ndim: int
+    pending: torch.Tensor
 
 
 class AudioWatermarkerBase(Watermarker[AudioTensor, _AudioRequestState[AudioImplStateT]], Generic[AudioImplStateT]):
@@ -145,6 +201,33 @@ class AudioWatermarkerBase(Watermarker[AudioTensor, _AudioRequestState[AudioImpl
     # Audio watermarkers operate on float waveforms & media boundaries handle PCM quantization
     supported_types = (AudioTensor,)
     supports_stereo: ClassVar[bool]
+    frame_size: int = 1
+
+    def _pending_output(
+        self, state: _AudioRequestState[AudioImplStateT]
+    ) -> tuple[torch.Tensor, Mapping[str, object]] | None:
+        if state.pending.shape[-1] == 0:
+            return None
+        shape = state.pending.shape[3 - state.input_ndim :]
+        return state.pending.reshape(shape), {"sr": state.sample_rate}
+
+    def _fallback_output(
+        self,
+        data: torch.Tensor,
+        metadata: Mapping[str, object],
+        pending: tuple[torch.Tensor, Mapping[str, object]] | None,
+    ) -> torch.Tensor:
+        if pending is None:
+            return data
+        samples, previous_metadata = pending
+        if (
+            data.shape[:-1] != samples.shape[:-1]
+            or data.dtype != samples.dtype
+            or data.device != samples.device
+            or metadata.get("sr") != previous_metadata["sr"]
+        ):
+            raise ValueError("Cannot return buffered audio with a different layout, sample rate, device or dtype")
+        return torch.cat((samples, data), dim=-1)
 
     def _from_output(self, data: torch.Tensor, metadata: Mapping[str, object]) -> AudioTensor:
         """Attach the sampling rate to the generated audio."""
@@ -163,27 +246,69 @@ class AudioWatermarkerBase(Watermarker[AudioTensor, _AudioRequestState[AudioImpl
 
     def _new_state(self, data: AudioTensor) -> _AudioRequestState[AudioImplStateT]:
         """Prepare audio and create implementation state for a request."""
+        input_ndim = data.samples.ndim
         data = self._canonicalize_audio(data)
         self._validate_audio(data)
         if data.samples.shape[1] == 2 and not self.supports_stereo:
             logger.warning("%s does not support stereo; watermarking the mono mid signal", type(self).__name__)
         prepared = data if data.samples.shape[1] == 1 or self.supports_stereo else self._to_mono(data)
-        return _AudioRequestState(data.samples.shape[1], self._new_audio_state(prepared))
+        return _AudioRequestState(
+            data.samples.shape[1],
+            self._new_audio_state(prepared),
+            data.sample_rate,
+            input_ndim,
+            data.samples[..., :0].clone(),
+        )
 
-    def _watermark(self, data: AudioTensor, state: _AudioRequestState[AudioImplStateT]) -> AudioTensor:
+    def _watermark(
+        self, data: AudioTensor, state: _AudioRequestState[AudioImplStateT], *, finished: bool = False
+    ) -> AudioTensor:
         """Prepare, watermark, and restore one audio chunk."""
         source = data
         data = self._canonicalize_audio(data)
         self._validate_audio(data)
         if data.samples.shape[1] != state.channels:
             raise ValueError("audio channel count must remain stable within a stream")
+        if (
+            data.sample_rate != state.sample_rate
+            or data.samples.shape[:-1] != state.pending.shape[:-1]
+            or source.samples.ndim != state.input_ndim
+            or data.samples.device != state.pending.device
+            or data.samples.dtype != state.pending.dtype
+        ):
+            raise ValueError("audio layout, sample rate, device and dtype must remain stable within a stream")
+        samples = torch.cat((state.pending, data.samples), dim=-1) if state.pending.numel() else data.samples
+        length = samples.shape[-1]
+        if finished:
+            samples = F.pad(samples, (0, -length % self.frame_size))
+            state.pending = samples[..., :0].clone()
+        else:
+            length -= length % self.frame_size
+            state.pending = samples[..., length:].clone()
+            samples = samples[..., :length]
+        if samples.shape[-1] == 0:
+            return AudioTensor(samples.reshape(*source.samples.shape[:-1], 0), data.sample_rate)
+        data = AudioTensor(samples, data.sample_rate)
         prepared = data if state.channels == 1 or self.supports_stereo else self._to_mono(data)
         watermarked = self._watermark_audio(prepared, state.audio_state)
         self._validate_output(prepared, watermarked)
+        if watermarked.samples.shape != prepared.samples.shape:
+            raise ValueError("audio watermarker changed the audio shape")
         if prepared is not data:
             residual = watermarked.samples - prepared.samples
             watermarked = AudioTensor(self._add_residual_with_headroom(data.samples, residual), data.sample_rate)
-        return AudioTensor(watermarked.samples.reshape(source.samples.shape), watermarked.sample_rate)
+        samples = watermarked.samples[..., :length]
+        return AudioTensor(samples.reshape(*source.samples.shape[:-1], length), watermarked.sample_rate)
+
+    def _finish_state(
+        self, state: _AudioRequestState[AudioImplStateT]
+    ) -> tuple[torch.Tensor, Mapping[str, object]] | None:
+        if state.pending.shape[-1] == 0:
+            return None
+        shape = state.pending.shape[3 - state.input_ndim : -1]
+        empty = state.pending[..., :0].reshape(*shape, 0)
+        result = self._watermark(AudioTensor(empty, state.sample_rate), state, finished=True)
+        return result.samples, {"sr": result.sample_rate}
 
     def _is_watermarked(self, data: AudioTensor) -> bool:
         """Prepare audio and check it for a watermark."""
@@ -229,7 +354,9 @@ class AudioWatermarkerBase(Watermarker[AudioTensor, _AudioRequestState[AudioImpl
     def _validate_output(self, source: AudioTensor, watermarked: AudioTensor) -> None:
         """Ensure watermarking preserved audio shape and sample rate."""
         super()._validate_output(source, watermarked)
-        if watermarked.samples.shape != source.samples.shape:
+        if watermarked.samples.shape[:-1] != source.samples.shape[:-1] or (
+            self.frame_size == 1 and watermarked.samples.shape != source.samples.shape
+        ):
             raise ValueError("audio watermarker changed the audio shape")
         if watermarked.sample_rate != source.sample_rate:
             raise ValueError("audio watermarker changed the sample rate")
