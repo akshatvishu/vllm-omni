@@ -84,7 +84,7 @@ class Watermarker(ABC, Generic[MediaT, RequestStateT]):
             return self._to_output(wm_tensor)
 
     def _pending_output(self, state: RequestStateT) -> tuple[torch.Tensor, Mapping[str, object]] | None:
-        """Snapshot buffered originals before processing can replace the request state."""
+        """Return buffered original samples in their output layout."""
         return None
 
     def _fallback_output(

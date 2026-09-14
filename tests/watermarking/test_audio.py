@@ -100,7 +100,6 @@ def test_audioseal_message_preserves_cpu_rng_and_does_not_seed_cuda(
     watermarker = AudioSealWatermarker.__new__(AudioSealWatermarker)
     watermarker._model = SimpleNamespace(
         msg_processor=SimpleNamespace(nbits=nbits) if nbits is not None else None,
-        random_message=lambda batch_size: torch.randint(0, 2, (batch_size, nbits if nbits is not None else 16)),
     )
     cuda_seed = Mock()
     monkeypatch.setattr(torch.cuda, "manual_seed_all", cuda_seed)
@@ -123,7 +122,6 @@ def test_audioseal_message_preserves_cuda_rng() -> None:
     watermarker = AudioSealWatermarker.__new__(AudioSealWatermarker)
     watermarker._model = SimpleNamespace(
         msg_processor=SimpleNamespace(nbits=16),
-        random_message=lambda batch_size: torch.randint(0, 2, (batch_size, 16)),
     )
     source = AudioTensor(torch.zeros((1, 1, 100)), TEST_SAMPLE_RATE)
     device = current_omni_platform.current_device()
