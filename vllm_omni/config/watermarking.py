@@ -11,6 +11,8 @@ ALGORITHM_KEY = "algorithm"
 
 @dataclass
 class WatermarkConfig:
+    """Select a registered algorithm per modality; additional options are not yet supported."""
+
     modality_configs: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -23,6 +25,12 @@ class WatermarkConfig:
                 raise ValueError(f"unsupported watermark modality {modality}; supported: {supported_modalities}")
             if not isinstance(config, Mapping):
                 raise ValueError(f"watermark config for {modality} must be an object")
+            unknown_keys = set(config) - {ALGORITHM_KEY}
+            if unknown_keys:
+                names = ", ".join(sorted(map(str, unknown_keys)))
+                raise ValueError(
+                    f"unsupported watermark config keys for {modality}: {names}; supported: {ALGORITHM_KEY}"
+                )
             algorithm = config.get(ALGORITHM_KEY)
             if not isinstance(algorithm, str) or algorithm not in registered_algorithms:
                 valid_algorithms = ", ".join(sorted(registered_algorithms))
