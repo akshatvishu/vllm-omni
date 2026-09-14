@@ -84,9 +84,10 @@ class AudioSealWatermarker(AudioWatermarkerBase[_AudioSealState]):
         """Create a deterministic random message for an AudioSeal stream."""
         self._validate_audioseal_input(data)
         batch_size = data.samples.shape[0]
-        with torch.random.fork_rng(devices=[]):
-            torch.manual_seed(0)
-            message = self._model.random_message(batch_size)
+        msg_processor = self._model.msg_processor
+        nbits = msg_processor.nbits if msg_processor is not None else 16
+        generator = torch.Generator(device="cpu").manual_seed(0)
+        message = torch.randint(0, 2, (batch_size, nbits), device="cpu", generator=generator)
         return _AudioSealState(batch_size, data.sample_rate, message)
 
     @staticmethod

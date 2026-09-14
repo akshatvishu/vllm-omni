@@ -2,12 +2,15 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import soundfile
 import torch
 from vllm.utils.import_utils import PlaceholderModule
 
+from vllm_omni.platforms import current_omni_platform
 from vllm_omni.watermarking import AudioSealWatermarker, AudioTensor, AudioWatermarkerBase, audio_seal
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
@@ -88,6 +91,52 @@ def test_missing_audioseal_names_install_extra(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(ImportError, match=r"vllm-omni\[watermarking\]"):
         AudioSealWatermarker()
+
+
+@pytest.mark.parametrize("nbits", [7, None])
+def test_audioseal_message_preserves_cpu_rng_and_does_not_seed_cuda(
+    monkeypatch: pytest.MonkeyPatch, nbits: int | None
+) -> None:
+    watermarker = AudioSealWatermarker.__new__(AudioSealWatermarker)
+    watermarker._model = SimpleNamespace(
+        msg_processor=SimpleNamespace(nbits=nbits) if nbits is not None else None,
+        random_message=lambda batch_size: torch.randint(0, 2, (batch_size, nbits if nbits is not None else 16)),
+    )
+    cuda_seed = Mock()
+    monkeypatch.setattr(torch.cuda, "manual_seed_all", cuda_seed)
+    source = AudioTensor(torch.zeros((2, 1, 100)), TEST_SAMPLE_RATE)
+    rng_state = torch.random.get_rng_state()
+
+    state = watermarker._new_audio_state(source)
+    repeated_state = watermarker._new_audio_state(source)
+
+    assert torch.equal(torch.random.get_rng_state(), rng_state)
+    cuda_seed.assert_not_called()
+    assert state.message.shape == (2, nbits if nbits is not None else 16)
+    assert state.message.device.type == "cpu"
+    assert torch.all((state.message == 0) | (state.message == 1))
+    assert torch.equal(state.message, repeated_state.message)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA RNG preservation requires a GPU")
+def test_audioseal_message_preserves_cuda_rng() -> None:
+    watermarker = AudioSealWatermarker.__new__(AudioSealWatermarker)
+    watermarker._model = SimpleNamespace(
+        msg_processor=SimpleNamespace(nbits=16),
+        random_message=lambda batch_size: torch.randint(0, 2, (batch_size, 16)),
+    )
+    source = AudioTensor(torch.zeros((1, 1, 100)), TEST_SAMPLE_RATE)
+    device = current_omni_platform.current_device()
+    with torch.random.fork_rng(devices=[device]):
+        generator = torch.Generator(device=current_omni_platform.device_type).manual_seed(1234)
+        torch.cuda.set_rng_state(generator.get_state(), device)
+        cpu_state = torch.random.get_rng_state()
+        cuda_state = torch.cuda.get_rng_state(device)
+
+        watermarker._new_audio_state(source)
+
+        assert torch.equal(torch.random.get_rng_state(), cpu_state)
+        assert torch.equal(torch.cuda.get_rng_state(device), cuda_state)
 
 
 @pytest.mark.local_model
