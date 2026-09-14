@@ -1300,7 +1300,7 @@ class StagePool:
         metadata: Mapping[str, object] = payload
         if modality == "audio" and payload.get("sr") is None:
             metadata = {"sr": payload.get("audio_sample_rate")}
-        tensor = torch.from_numpy(data) if isinstance(data, np.ndarray) else data
+        tensor = torch.from_numpy(np.ascontiguousarray(data)) if isinstance(data, np.ndarray) else data
         watermarked = watermarker.watermark_output(request_id, tensor, metadata, finished=finished)
         if isinstance(payload, MultimodalPayload):
             payload.tensors[modality] = watermarked
@@ -1377,7 +1377,7 @@ class StagePool:
     ) -> None:
         previous = payload.get(modality)
         if isinstance(payload, MultimodalPayload) and isinstance(previous, np.ndarray):
-            previous = torch.from_numpy(previous)
+            previous = torch.from_numpy(np.ascontiguousarray(previous))
         samples: torch.Tensor | np.ndarray = tail
         if isinstance(previous, np.ndarray):
             samples = np.concatenate((previous, tail.numpy()), axis=-1)
