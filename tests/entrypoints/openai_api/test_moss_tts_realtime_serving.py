@@ -9,9 +9,10 @@ from unittest.mock import AsyncMock
 import pytest
 import torch
 
-from vllm_omni.entrypoints.openai import serving_speech as serving_speech_module
 from vllm_omni.entrypoints.openai.protocol.audio import OpenAICreateSpeechRequest
-from vllm_omni.entrypoints.openai.serving_speech import OmniOpenAIServingSpeech
+from vllm_omni.entrypoints.openai.tts_adapters import moss_tts as adapter_module
+from vllm_omni.entrypoints.openai.tts_adapters.base import SpeechServingContext
+from vllm_omni.entrypoints.openai.tts_adapters.moss_tts import MossTTSAdapter
 from vllm_omni.model_executor.models.moss_tts import reference_encoder
 from vllm_omni.utils.speaker_cache import SpeakerEmbeddingCache
 
@@ -34,13 +35,14 @@ def test_realtime_components_use_the_realtime_model_and_codec(
     hf_config: SimpleNamespace,
     expected_codec_path: str,
 ) -> None:
-    server = object.__new__(OmniOpenAIServingSpeech)
-    server.engine_client = SimpleNamespace(
+    engine_client = SimpleNamespace(
         model_config=SimpleNamespace(
             model="OpenMOSS-Team/MOSS-TTS-Realtime",
             hf_config=hf_config,
         )
     )
+
+    server = MossTTSAdapter(SpeechServingContext(server=object(), engine_client=engine_client))
 
     tokenizer = object()
     codec = type("Codec", (), {"to": lambda self, device: self, "eval": lambda self: self})()
@@ -66,9 +68,9 @@ def test_realtime_components_use_the_realtime_model_and_codec(
         codec_calls.append((model_id, trust_remote_code))
         return codec
 
-    monkeypatch.setattr(serving_speech_module, "get_class_from_dynamic_module", fake_get_class)
-    monkeypatch.setattr(serving_speech_module.AutoTokenizer, "from_pretrained", fake_load_tokenizer)
-    monkeypatch.setattr(serving_speech_module.AutoModel, "from_pretrained", fake_load_codec)
+    monkeypatch.setattr(adapter_module, "get_class_from_dynamic_module", fake_get_class)
+    monkeypatch.setattr(adapter_module.AutoTokenizer, "from_pretrained", fake_load_tokenizer)
+    monkeypatch.setattr(adapter_module.AutoModel, "from_pretrained", fake_load_codec)
 
     components = server._get_moss_realtime_components()
 
@@ -87,36 +89,22 @@ def test_realtime_components_use_the_realtime_model_and_codec(
 
 
 def test_realtime_serving_builds_the_talker_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
-    server = object.__new__(OmniOpenAIServingSpeech)
+    server = MossTTSAdapter(SpeechServingContext(server=SimpleNamespace(uploaded_speakers={})))
     server._moss_variant = "realtime"
-    server._moss_realtime_components_lock = asyncio.Lock()
-    server._speaker_cache = object()
     tokenizer = object()
     processor = object()
     codec = object()
     request_thread = threading.get_ident()
 
     def load_components():
-        assert server._moss_realtime_components_lock.locked()
         assert threading.get_ident() != request_thread
         return tokenizer, processor, codec
 
     server._get_moss_realtime_components = load_components
 
-    async def fake_resolve(ref_audio):
-        assert ref_audio == "data:audio/wav;base64,AAAA"
-        return [[0.0]], 24_000, "reference-cache-key"
-
-    server._resolve_ref_audio = fake_resolve
-
     reference_codes = torch.arange(64, dtype=torch.int64).reshape(4, 16)
-    encode_call = None
-
-    async def fake_encode(ref_audio, **kwargs):
-        nonlocal encode_call
-        encode_call = (ref_audio, kwargs)
-        assert await kwargs["resolve_ref_audio"](ref_audio) == ([[0.0]], 24_000, "reference-cache-key")
-        return reference_codes
+    encode = AsyncMock(return_value=([reference_codes], {0: "reference-cache-key"}))
+    monkeypatch.setattr(server, "_encode_moss_references", encode)
 
     build_call = None
 
@@ -129,8 +117,7 @@ def test_realtime_serving_builds_the_talker_prompt(monkeypatch: pytest.MonkeyPat
             "ids": {"all": [12]},
         }
 
-    monkeypatch.setattr(serving_speech_module, "encode_realtime_reference_codes", fake_encode)
-    monkeypatch.setattr(serving_speech_module, "build_realtime_prompt", fake_build)
+    monkeypatch.setattr(adapter_module, "build_realtime_prompt", fake_build)
 
     params = asyncio.run(
         server._build_moss_tts_params(
@@ -142,12 +129,9 @@ def test_realtime_serving_builds_the_talker_prompt(monkeypatch: pytest.MonkeyPat
         )
     )
 
-    assert encode_call is not None
-    assert encode_call[0] == "data:audio/wav;base64,AAAA"
-    assert encode_call[1]["codec"] is codec
-    assert encode_call[1]["speaker_cache"] is server._speaker_cache
-    assert encode_call[1]["voice_name"] is None
-    assert encode_call[1]["voice_created_at"] == 0
+    encode.assert_awaited_once()
+    assert encode.call_args.kwargs == {"has_inline_ref_audio": False, "two_speaker": False}
+    assert encode.call_args.args[0].ref_audio == "data:audio/wav;base64,AAAA"
     assert build_call == (tokenizer, processor, "speak this text", reference_codes)
     assert params == {
         "prompt_token_ids": [10, 11],
@@ -159,75 +143,160 @@ def test_realtime_serving_builds_the_talker_prompt(monkeypatch: pytest.MonkeyPat
     assert "prompt_audio_array" not in params
 
 
-@pytest.mark.parametrize("realtime", [False, True])
+def test_cancelled_component_waiter_does_not_duplicate_codec_load(monkeypatch):
+    adapter = MossTTSAdapter(
+        SpeechServingContext(
+            server=object(),
+            engine_client=SimpleNamespace(
+                model_config=SimpleNamespace(model="OpenMOSS-Team/MOSS-TTS-Realtime", hf_config=SimpleNamespace())
+            ),
+        )
+    )
+    started = threading.Event()
+    release = threading.Event()
+    second_started = threading.Event()
+    loads = []
+    codec = type("Codec", (), {"to": lambda self, device: self, "eval": lambda self: self})()
+
+    def load_codec(*args, **kwargs):
+        loads.append(args)
+        started.set()
+        assert release.wait(5), "codec loader was not released"
+        return codec
+
+    monkeypatch.setattr(adapter_module, "get_class_from_dynamic_module", lambda *args: lambda **kwargs: object())
+    monkeypatch.setattr(adapter_module.AutoTokenizer, "from_pretrained", lambda *args, **kwargs: object())
+    monkeypatch.setattr(adapter_module.AutoModel, "from_pretrained", load_codec)
+
+    def second_load():
+        second_started.set()
+        return adapter._get_moss_realtime_components()
+
+    async def run():
+        first = asyncio.create_task(asyncio.to_thread(adapter._get_moss_realtime_components))
+        try:
+            assert await asyncio.to_thread(started.wait, 5)
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            second = asyncio.create_task(asyncio.to_thread(second_load))
+            try:
+                assert await asyncio.to_thread(second_started.wait, 5)
+            finally:
+                release.set()
+            components = await asyncio.wait_for(second, 5)
+            assert components[2] is codec
+            assert adapter._get_moss_realtime_components() is components
+            assert len(loads) == 1
+        finally:
+            release.set()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("voice_name", [None, "speaker"])
-def test_reference_cache_reuses_codes(monkeypatch, realtime, voice_name):
+def test_realtime_reference_cache_reuses_codes(voice_name):
     cache = SpeakerEmbeddingCache()
     resolve = AsyncMock(return_value=([0.0], 24000, "audio-key"))
     request_thread = threading.get_ident()
     encode_calls = []
     expected = torch.arange(64).reshape(4, 16)
 
-    def encode(*args, **kwargs):
+    def batch_encode(wavs, *, num_quantizers):
         assert threading.get_ident() != request_thread
-        encode_calls.append((args, kwargs))
-        return expected.clone()
+        assert num_quantizers == 16
+        encode_calls.append(wavs)
+        return SimpleNamespace(audio_codes=expected.T.unsqueeze(1), audio_codes_lengths=torch.tensor([4]))
 
-    if realtime:
-        monkeypatch.setattr(reference_encoder, "_encode_realtime_wav_sync", encode)
-        encode_reference = reference_encoder.encode_realtime_reference_codes
-        encoder_kwargs = {"codec": object()}
-    else:
-        monkeypatch.setattr(reference_encoder, "_encode_wav_sync", encode)
-        encode_reference = reference_encoder.encode_reference_codes
-        encoder_kwargs = {"processor": object(), "variant": "tts", "n_vq": 16, "sr_target": 24000}
+    encoder = reference_encoder.build_reference_encoder(
+        SimpleNamespace(batch_encode=batch_encode), variant="realtime", speaker_cache=cache
+    )
 
     async def run():
         kwargs = dict(
-            **encoder_kwargs,
             resolve_ref_audio=resolve,
-            speaker_cache=cache,
+            get_artifact_key=lambda key: "content-key",
             voice_name=voice_name,
             voice_created_at=1,
         )
-        first = await encode_reference("reference", **kwargs)
-        second = await encode_reference("reference", **kwargs)
-        assert torch.equal(first, expected)
-        assert torch.equal(second, expected)
-        second.zero_()
-        third = await encode_reference("reference", **kwargs)
-        assert torch.equal(third, expected)
-        assert len(encode_calls) == 1
-        assert resolve.await_count == (1 if voice_name else 3)
-        model_type = "moss_tts_realtime_nq16" if realtime else "moss_tts_tts_nq16"
-        key = cache.make_cache_key(voice_name or "ref:audio-key", model_type, 1 if voice_name else 0)
-        assert torch.equal(cache.get(key)["codes"], expected)
-        if voice_name:
-            kwargs["voice_created_at"] = 2
-            await encode_reference("reference", **kwargs)
-            assert len(encode_calls) == 2
-            assert resolve.await_count == 2
+        try:
+            first, first_key = await encoder.encode("reference", **kwargs)
+            second, second_key = await encoder.encode("reference", **kwargs)
+            assert torch.equal(first, expected)
+            assert torch.equal(second, expected)
+            assert first.dtype == torch.int64
+            assert first_key == "audio-key"
+            assert second_key == (None if voice_name else "audio-key")
+            second.zero_()
+            third, _ = await encoder.encode("another-reference", **kwargs)
+            assert torch.equal(third, expected)
+            assert len(encode_calls) == 1
+            assert resolve.await_count == (1 if voice_name else 3)
+            key = cache.make_cache_key(
+                voice_name or "ref:content-key", "moss_tts_realtime_nq16", 1 if voice_name else 0
+            )
+            assert cache.get(key)["codes"].dtype == torch.int32
+            if voice_name:
+                kwargs["voice_created_at"] = 2
+                await encoder.encode("reference", **kwargs)
+                assert len(encode_calls) == 2
+                assert resolve.await_count == 2
+        finally:
+            await encoder.aclose()
 
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("realtime", [False, True])
-def test_failed_reference_encoding_does_not_populate_cache(monkeypatch, realtime):
+def test_realtime_reference_batch_trims_each_item():
+    cache = SpeakerEmbeddingCache()
+    codes = torch.arange(16 * 2 * 5).reshape(16, 2, 5)
+    calls = []
+
+    def batch_encode(wavs, *, num_quantizers):
+        calls.append(wavs)
+        assert num_quantizers == 16
+        assert [wav.shape for wav in wavs] == [torch.Size([8]), torch.Size([12])]
+        return SimpleNamespace(audio_codes=codes, audio_codes_lengths=torch.tensor([3, 5]))
+
+    encoder = reference_encoder.build_reference_encoder(
+        SimpleNamespace(batch_encode=batch_encode), variant="realtime", speaker_cache=cache
+    )
+
+    async def resolve(ref):
+        return [0.0] * (8 if ref == "short" else 12), 24000, ref
+
+    async def run():
+        try:
+            short, long = await asyncio.gather(
+                encoder.encode("short", resolve_ref_audio=resolve, get_artifact_key=lambda key: key),
+                encoder.encode("long", resolve_ref_audio=resolve, get_artifact_key=lambda key: key),
+            )
+            torch.testing.assert_close(short[0], codes[:, 0, :3].T)
+            torch.testing.assert_close(long[0], codes[:, 1, :5].T)
+            assert len(calls) == 1
+        finally:
+            await encoder.aclose()
+
+    asyncio.run(run())
+
+
+def test_failed_realtime_reference_encoding_does_not_populate_cache():
     cache = SpeakerEmbeddingCache()
     resolve = AsyncMock(return_value=([0.0], 24000, "audio-key"))
 
     def fail(*args, **kwargs):
         raise ValueError("invalid reference")
 
-    if realtime:
-        monkeypatch.setattr(reference_encoder, "_encode_realtime_wav_sync", fail)
-        encode_reference = reference_encoder.encode_realtime_reference_codes
-        kwargs = {"codec": object()}
-    else:
-        monkeypatch.setattr(reference_encoder, "_encode_wav_sync", fail)
-        encode_reference = reference_encoder.encode_reference_codes
-        kwargs = {"processor": object(), "variant": "tts", "n_vq": 16, "sr_target": 24000}
+    encoder = reference_encoder.build_reference_encoder(
+        SimpleNamespace(batch_encode=fail), variant="realtime", speaker_cache=cache
+    )
 
-    with pytest.raises(ValueError, match="invalid reference"):
-        asyncio.run(encode_reference("reference", resolve_ref_audio=resolve, speaker_cache=cache, **kwargs))
-    assert cache.memory_bytes() == 0
+    async def run():
+        try:
+            with pytest.raises(ValueError, match="invalid reference"):
+                await encoder.encode("reference", resolve_ref_audio=resolve, get_artifact_key=lambda key: None)
+            assert cache.memory_bytes() == 0
+        finally:
+            await encoder.aclose()
+
+    asyncio.run(run())
