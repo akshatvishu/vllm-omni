@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,11 +8,43 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from vllm_omni.diffusion.attention import selector
+from vllm_omni.diffusion.attention.backends.sdpa import SDPABackend
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
+from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
 from vllm_omni.diffusion.request import OmniDiffusionRequest
+from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
 from vllm_omni.inputs.data import OmniDiffusionSamplingParams
+from vllm_omni.platforms import current_omni_platform
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu, pytest.mark.diffusion]
+
+
+@pytest.mark.parametrize(
+    "offload_args",
+    [
+        {"enable_cpu_offload": True},
+        {"enable_layerwise_offload": True},
+        {"enable_distributed_layerwise_offload": True},
+        {"diffusion_offload_config": {"mode": "module", "components": ["dit"]}},
+        {
+            "diffusion_offload_config": {
+                "mode": "layer",
+                "components": ["dit"],
+                "layer_options": {"dit": {"weight_transfer": "rank-local"}},
+            }
+        },
+    ],
+)
+def test_native_anima_rejects_offload(offload_args):
+    config = OmniDiffusionConfig(model="anima.safetensors", **offload_args)
+    with pytest.raises(NotImplementedError, match="offload"):
+        AnimaPipeline(od_config=config, device=torch.device("cpu"))
+
+
+def test_native_anima_initializes_without_offload():
+    config = OmniDiffusionConfig(model="anima.safetensors")
+    AnimaPipeline(od_config=config, device=torch.device("cpu"))
 
 
 def test_anima_registration() -> None:
@@ -41,8 +73,6 @@ def test_enrich_config_native_anima_checkpoint(tmp_path: Path, model_class_name:
 
 def test_native_anima_component_paths_use_custom_pipeline_args() -> None:
     """Anima resolves shared and component-specific paths from native args."""
-    from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
-
     pipeline = AnimaPipeline.__new__(AnimaPipeline)
     pipeline.od_config = SimpleNamespace(
         custom_pipeline_args={
@@ -59,8 +89,6 @@ def test_native_anima_component_paths_use_custom_pipeline_args() -> None:
 
 def test_native_anima_converts_original_cosmos_transformer_keys() -> None:
     """Original Cosmos checkpoint names map to native module names."""
-    from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
-
     converted = AnimaPipeline._convert_original_transformer_state_dict(
         {
             "net.x_embedder.proj.1.weight": "patch",
@@ -123,6 +151,7 @@ def test_native_anima_loads_synthetic_checkpoint(tmp_path: Path, monkeypatch: py
     monkeypatch.setattr(pipeline_anima, "ANIMA_TRANSFORMER_CONFIG", tiny_transformer_config)
     monkeypatch.setattr(pipeline_anima, "ANIMA_TEXT_CONDITIONER_CONFIG", tiny_text_conditioner_config)
 
+    monkeypatch.setattr(selector, "_cached_get_backend_cls", lambda *_args, **_kwargs: SDPABackend)
     transformer = AnimaTransformer3DModel(**tiny_transformer_config)
     text_conditioner = AnimaTextConditioner(**tiny_text_conditioner_config)
     transformer_state = {name: tensor.detach().clone() for name, tensor in transformer.state_dict().items()}
@@ -152,16 +181,15 @@ def test_native_anima_loads_synthetic_checkpoint(tmp_path: Path, monkeypatch: py
     assert_loaded(loaded_transformer, loaded_text_conditioner)
 
 
-def test_native_anima_profiler_setup_is_deferred_and_idempotent() -> None:
+def test_native_anima_profiler_setup_is_deferred_and_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Profiler targets are wrapped once, after deferred components are loaded."""
-    from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
-
     pipeline = AnimaPipeline.__new__(AnimaPipeline)
     pipeline.od_config = SimpleNamespace(enable_diffusion_pipeline_profiler=True)
     pipeline._profiler_initialized = False
     pipeline.vae = SimpleNamespace(decode=lambda: "decoded")
     pipeline.text_encoder = SimpleNamespace(forward=lambda: "encoded")
 
+    monkeypatch.setattr(current_omni_platform, "is_available", lambda: False)
     pipeline._setup_profiler()
     wrapped_decode = pipeline.vae.decode
     wrapped_text_encoder = pipeline.text_encoder.forward
@@ -176,8 +204,6 @@ def test_native_anima_profiler_setup_is_deferred_and_idempotent() -> None:
 
 
 def _make_anima_forward_probe():
-    from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
-
     pipeline = AnimaPipeline.__new__(AnimaPipeline)
     pipeline.device = torch.device("cpu")
     pipeline.vae_scale_factor = 8
@@ -229,12 +255,12 @@ def test_native_anima_forward_uses_official_default_resolution() -> None:
     """Forward uses Anima's reference resolution when none is requested."""
     pipeline, captured = _make_anima_forward_probe()
     req = OmniDiffusionRequest(
-        prompts=["a red cube"],
+        prompt="a red cube",
         sampling_params=OmniDiffusionSamplingParams(),
         request_id="anima-defaults",
     )
 
-    pipeline.forward(req)
+    pipeline.forward(DiffusionRequestBatch([req]))
 
     assert captured["prepare_latents"]["height"] == 1024
     assert captured["prepare_latents"]["width"] == 1024
@@ -244,26 +270,47 @@ def test_native_anima_forward_honors_sampling_output_type() -> None:
     """Request-level output type controls Anima decoding."""
     pipeline, captured = _make_anima_forward_probe()
     req = OmniDiffusionRequest(
-        prompts=["a red cube"],
+        prompt="a red cube",
         sampling_params=OmniDiffusionSamplingParams(output_type="latent"),
         request_id="anima-output-type",
     )
 
-    pipeline.forward(req)
+    outputs = pipeline.forward(DiffusionRequestBatch([req]))
 
+    assert len(outputs) == 1
+    assert isinstance(outputs[0], DiffusionOutput)
+    assert outputs[0].output.shape == (1, 16, 1, 128, 128)
     assert captured["output_type"] == "latent"
+
+
+@pytest.mark.parametrize("request_count", [0, 2])
+def test_native_anima_forward_rejects_non_single_request_batches(request_count: int) -> None:
+    pipeline, captured = _make_anima_forward_probe()
+    requests = [
+        OmniDiffusionRequest(
+            prompt="a red cube",
+            sampling_params=OmniDiffusionSamplingParams(),
+            request_id=f"anima-{index}",
+        )
+        for index in range(request_count)
+    ]
+
+    with pytest.raises(ValueError, match="supports one request per forward"):
+        pipeline.forward(DiffusionRequestBatch(requests))
+
+    assert captured == {}
 
 
 def test_native_anima_explicit_guidance_scale_drives_cfg_multiplier() -> None:
     """An explicit guidance scale controls native classifier-free guidance."""
     pipeline, captured = _make_anima_forward_probe()
     req = OmniDiffusionRequest(
-        prompts=["a red cube"],
+        prompt="a red cube",
         sampling_params=OmniDiffusionSamplingParams(guidance_scale=5.0),
         request_id="anima-guidance",
     )
 
-    pipeline.forward(req)
+    pipeline.forward(DiffusionRequestBatch([req]))
 
     assert captured["diffuse"]["do_true_cfg"] is True
     assert captured["diffuse"]["true_cfg_scale"] == 5.0
@@ -273,12 +320,12 @@ def test_native_anima_true_cfg_scale_overrides_guidance_multiplier() -> None:
     """An explicit true-CFG scale overrides the guidance-scale multiplier."""
     pipeline, captured = _make_anima_forward_probe()
     req = OmniDiffusionRequest(
-        prompts=["a red cube"],
+        prompt="a red cube",
         sampling_params=OmniDiffusionSamplingParams(guidance_scale=5.0, true_cfg_scale=3.0),
         request_id="anima-true-cfg",
     )
 
-    pipeline.forward(req)
+    pipeline.forward(DiffusionRequestBatch([req]))
 
     assert captured["diffuse"]["do_true_cfg"] is True
     assert captured["diffuse"]["true_cfg_scale"] == 3.0
@@ -286,8 +333,6 @@ def test_native_anima_true_cfg_scale_overrides_guidance_multiplier() -> None:
 
 def test_native_anima_cfg_equation() -> None:
     """The denoising loop applies the standard true-CFG equation."""
-    from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
-
     pipeline = AnimaPipeline.__new__(AnimaPipeline)
     pipeline.device = torch.device("cpu")
     pipeline._interrupt = False

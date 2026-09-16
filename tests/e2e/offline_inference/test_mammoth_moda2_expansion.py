@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+
 """
 End-to-end test for MammothModa2 text-to-image generation.
 
@@ -5,7 +8,7 @@ Verifies that the AR->DiT pipeline produces an image tensor whose pixel values
 match a golden reference.
 
 Model Hub repo id: ``bytedance-research/MammothModa2-Preview``.
-Stage config: ``get_deploy_config_path("mammoth_moda2.yaml")`` → ``vllm_omni/deploy/mammoth_moda2.yaml``
+Deploy config: ``get_deploy_config_path("mammoth_moda2.yaml")`` -> ``vllm_omni/deploy/mammoth_moda2.yaml``
 
 Golden pixel file: ``tests/e2e/offline_inference/fixtures/mammoth_moda2_t2i_golden.json``
   Regenerate with: ``UPDATE_GOLDEN=1 pytest tests/e2e/offline_inference/test_mammoth_moda2_expansion.py``
@@ -19,12 +22,12 @@ from pathlib import Path
 
 import pytest
 import torch
-from huggingface_hub import snapshot_download
 from vllm.sampling_params import SamplingParams
 
 from tests.helpers.mark import hardware_test
 from tests.helpers.runtime import OmniRunner
 from tests.helpers.stage_config import get_deploy_config_path
+from vllm_omni.transformers_utils.repo_utils import hf_api
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -36,9 +39,9 @@ _VISION_END_TOKEN_ID = 151653  # "<|vision_end|>"
 _AR_PATCH_SIZE = 16
 
 MODEL_PATH = "bytedance-research/MammothModa2-Preview"
-T2I_STAGE_CONFIG = get_deploy_config_path("mammoth_moda2.yaml")
+T2I_DEPLOY_CONFIG = get_deploy_config_path("mammoth_moda2.yaml")
 
-_OMNI_RUNNER_PARAM = (MODEL_PATH, T2I_STAGE_CONFIG)
+_OMNI_RUNNER_PARAM = (MODEL_PATH, T2I_DEPLOY_CONFIG)
 
 # Golden pixel reference file.  Set UPDATE_GOLDEN=1 to regenerate.
 _GOLDEN_T2I_PATH = Path(__file__).parent / "fixtures" / "mammoth_moda2_t2i_golden.json"
@@ -64,7 +67,7 @@ _PIXEL_SAMPLE_COORDS = [
 # Helpers
 # ---------------------------------------------------------------------------
 def _load_t2i_gen_config(repo_id: str) -> dict:
-    weights_dir = Path(snapshot_download(repo_id))
+    weights_dir = Path(hf_api().snapshot_download(repo_id))
     cfg_path = weights_dir / "t2i_generation_config.json"
     if not cfg_path.exists():
         pytest.skip(f"t2i_generation_config.json not found at {cfg_path}")
@@ -99,7 +102,7 @@ def _sample_pixels(img_tensor: torch.Tensor) -> list[float]:
 # End-to-end test
 # ---------------------------------------------------------------------------
 pytestmark = [
-    pytest.mark.full_model,
+    pytest.mark.slow,
     pytest.mark.diffusion,
     pytest.mark.parametrize("omni_runner", [_OMNI_RUNNER_PARAM], indirect=True),
 ]
@@ -172,7 +175,7 @@ def test_mammothmoda2_t2i_e2e(omni_runner: OmniRunner):
 
     found_image = False
     for out in outputs:
-        ro_list = getattr(out, "request_output", out)
+        ro_list = out
         if not isinstance(ro_list, list):
             ro_list = [ro_list]
         for ro in ro_list:

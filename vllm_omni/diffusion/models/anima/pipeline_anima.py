@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 import inspect
 import logging
@@ -25,9 +25,10 @@ from vllm_omni.diffusion.models.anima.anima_text_conditioner import (
 )
 from vllm_omni.diffusion.models.anima.anima_transformer import ANIMA_TRANSFORMER_CONFIG, AnimaTransformer3DModel
 from vllm_omni.diffusion.models.progress_bar import ProgressBarMixin
+from vllm_omni.diffusion.offloader.config import OffloadStrategy, resolve_offload_strategy
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
-from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.utils.size_utils import normalize_min_aligned_size
+from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
 
 logger = logging.getLogger(__name__)
 
@@ -167,10 +168,8 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
             raise NotImplementedError("AnimaPipeline does not yet support TeaCache or Cache-DiT.")
         if self.od_config.quantization_config is not None:
             raise NotImplementedError("AnimaPipeline does not yet support quantized checkpoints.")
-        if self.od_config.enable_cpu_offload:
+        if resolve_offload_strategy(self.od_config) is not OffloadStrategy.NONE:
             raise NotImplementedError("AnimaPipeline does not yet support CPU offload.")
-        if self.od_config.enable_layerwise_offload:
-            raise NotImplementedError("AnimaPipeline does not yet support layer-wise offload.")
 
     @staticmethod
     def _sub_state_dict(state_dict: dict[str, torch.Tensor], prefix: str) -> dict[str, torch.Tensor]:
@@ -617,7 +616,7 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
 
     def forward(
         self,
-        req: OmniDiffusionRequest,
+        req: DiffusionRequestBatch,
         prompt: str | list[str] | None = None,
         negative_prompt: str | list[str] | None = None,
         true_cfg_scale: float = 4.0,
@@ -631,7 +630,9 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         latents: torch.Tensor | None = None,
         output_type: str | None = "pil",
         max_sequence_length: int = 512,
-    ) -> DiffusionOutput:
+    ) -> list[DiffusionOutput]:
+        if req.num_reqs != 1:
+            raise ValueError("AnimaPipeline supports one request per forward.")
         extracted_prompt, negative_prompt = self._extract_prompts(req.prompts)
         prompt = extracted_prompt or prompt
         if prompt is None:
@@ -769,7 +770,7 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         )
 
         self._current_timestep = None
-        return self.decode_latents(latents, output_type=output_type)
+        return [self.decode_latents(latents, output_type=output_type)]
 
     @property
     def guidance_scale(self) -> float:

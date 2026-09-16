@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 import gc
 import math
 import typing
@@ -29,7 +29,7 @@ from vllm.distributed import (
 )
 from vllm.inputs import MultiModalDataDict
 from vllm.logger import init_logger
-from vllm.model_executor.layers.fused_moe import FusedMoE as SharedFusedMoE
+from vllm.model_executor.layers.fused_moe import FusedMoEFactory as SharedFusedMoE
 from vllm.model_executor.layers.fused_moe import fused_moe_make_expert_params_mapping
 from vllm.model_executor.layers.linear import (
     ColumnParallelLinear,
@@ -45,13 +45,6 @@ from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader,
     maybe_remap_kv_scale_name,
 )
-from vllm.model_executor.models.hunyuan_v1 import (
-    HunYuanMLP,
-    HunYuanModel,
-    HunYuanSparseMoeBlock,
-    _get_cla_factor,
-    _is_moe,
-)
 from vllm.model_executor.models.interfaces import (
     MultiModalEmbeddings,
     SupportsLoRA,
@@ -63,6 +56,7 @@ from vllm.model_executor.models.interfaces import (
 from vllm.model_executor.models.utils import (
     AutoWeightsLoader,
     PPMissingLayer,
+    WeightsMapper,
     _merge_multimodal_embeddings,
     is_pp_missing_parameter,
     maybe_prefix,
@@ -78,7 +72,6 @@ from vllm.multimodal.parse import (
 )
 from vllm.multimodal.processing import (
     BaseDummyInputsBuilder,
-    BaseMultiModalProcessor,
     BaseProcessingInfo,
     PromptReplacement,
     PromptUpdate,
@@ -91,6 +84,14 @@ from vllm.v1.outputs import SamplerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.sampler import Sampler
 
+from vllm_omni.inputs.mm_processor import OmniMultiModalProcessor
+from vllm_omni.model_executor.models.hunyuan_image3._hunyuan_v1_vendored import (
+    HunYuanMLP,
+    HunYuanModel,
+    HunYuanSparseMoeBlock,
+    _get_cla_factor,
+    _is_moe,
+)
 from vllm_omni.model_executor.models.hunyuan_image3.autoencoder_kl_3d import AutoencoderKLConv3D
 from vllm_omni.model_executor.models.hunyuan_image3.siglip2 import LightProjector, Siglip2VisionTransformer
 
@@ -128,25 +129,29 @@ class HunyuanModel(HunYuanModel):
         v = v.reshape(-1, hidden_size)
         return torch.concat((q, k, v))
 
-    def get_expert_mapping(self) -> tuple[list[tuple[str, str, int, str]], dict[str, tuple[str, int, int]]]:
-        if _is_moe(self.config):
-            # Params for weights, fp8 weight scales, fp8 activation scales
-            # (param_name, weight_name, expert_id, shard_id)
-            fused_moe_expert_mapping = fused_moe_make_expert_params_mapping(
-                model=self,
-                ckpt_gate_proj_name="gate_proj",
-                ckpt_down_proj_name="down_proj",
-                ckpt_up_proj_name="up_proj",
-                num_experts=self.config.num_experts,
-                num_redundant_experts=self.num_redundant_experts,
-            )
-            expert_weights_remapping = {
-                "gate_proj": ("gate_and_up_proj", 1, 2),
-                "up_proj": ("gate_and_up_proj", 0, 2),
-            }
-            return fused_moe_expert_mapping, expert_weights_remapping
-        else:
-            return [], {}
+    def get_expert_mapping(self) -> list[tuple[str, str, int, str]]:
+        if not _is_moe(self.config):
+            return []
+
+        # Params for weights, fp8 weight scales, fp8 activation scales
+        # (param_name, weight_name, expert_id, shard_id)
+        return fused_moe_make_expert_params_mapping(
+            model=self,
+            ckpt_gate_proj_name="gate_proj",
+            ckpt_down_proj_name="down_proj",
+            ckpt_up_proj_name="up_proj",
+            num_experts=self.config.num_experts,
+            num_redundant_experts=self.num_redundant_experts,
+        )
+
+    def _get_expert_weights_remapping(self) -> dict[str, tuple[str, int, int]]:
+        """Return the vLLM-Omni-local remapping for Hunyuan checkpoint weights."""
+        if not _is_moe(self.config):
+            return {}
+        return {
+            "gate_proj": ("gate_and_up_proj", 1, 2),
+            "up_proj": ("gate_and_up_proj", 0, 2),
+        }
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]):
         cla_factor = _get_cla_factor(self.config)
@@ -174,7 +179,8 @@ class HunyuanModel(HunYuanModel):
 
         params_dict = dict(self.named_parameters())
         loaded_params: set[str] = set()
-        expert_params_mapping, expert_weights_remapping = self.get_expert_mapping()
+        expert_params_mapping = self.get_expert_mapping()
+        expert_weights_remapping = self._get_expert_weights_remapping()
 
         # List of unexpected keywords in weight names
         unexpected_keywords = [
@@ -222,14 +228,8 @@ class HunyuanModel(HunYuanModel):
             if self.config.tie_word_embeddings and "lm_head.weight" in name:
                 continue
 
-            if self.quant_config is not None and (scale_name := self.quant_config.get_cache_scale(name)):
-                # Loading kv cache scales for compressed-tensors quantization
-                param = params_dict[scale_name]
-                weight_loader = getattr(param, "weight_loader", default_weight_loader)
-                loaded_weight = loaded_weight[0]
-                weight_loader(param, loaded_weight)
-                continue
-
+            # KV-cache scales are renamed to .attn.{k,v,q}_scale by the
+            # quant_config mapper in the outer AutoWeightsLoader.
             is_found = False
             for param_name, weight_name, shard_id in stacked_params_mapping:
                 if weight_name not in name:
@@ -1028,7 +1028,7 @@ class HunyuanImage3DummyInputsBuilder(BaseDummyInputsBuilder[HunyuanImage3Proces
         }
 
 
-class HunyuanImage3MultiModalProcessor(BaseMultiModalProcessor[HunyuanImage3ProcessingInfo]):
+class HunyuanImage3MultiModalProcessor(OmniMultiModalProcessor[HunyuanImage3ProcessingInfo]):
     """Multimodal processor for HunyuanImage3 model."""
 
     def _call_hf_processor(
@@ -1046,15 +1046,6 @@ class HunyuanImage3MultiModalProcessor(BaseMultiModalProcessor[HunyuanImage3Proc
         if vae_generator_seed is not None and images:
             batch_feature["vae_generator_seed"] = torch.full((len(images),), int(vae_generator_seed), dtype=torch.long)
         return batch_feature
-
-    def _hf_processor_applies_updates(
-        self,
-        prompt_text: str,
-        mm_items: MultiModalDataItems,
-        hf_processor_mm_kwargs: Mapping[str, object],
-        tokenization_kwargs: Mapping[str, object],
-    ) -> bool:
-        return False
 
     def _get_mm_fields_config(
         self,
@@ -2008,10 +1999,9 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
         # the bidirectional MM region and biased AR ratio prediction toward
         # the first image's bucket.
         timestep_mask = input_ids == self._timestep_token_id
-        n_timestep = int(timestep_mask.sum().item())
-        if n_timestep > 0:
-            timestep_input = torch.zeros((n_timestep,), device=inputs_embeds.device, dtype=inputs_embeds.dtype)
-            inputs_embeds[timestep_mask] = self._timestep_encode(timestep_input)
+        timestep_input = torch.zeros((), device=inputs_embeds.device, dtype=inputs_embeds.dtype)
+        timestep_embed = self._timestep_encode(timestep_input).to(inputs_embeds.dtype)
+        inputs_embeds = torch.where(timestep_mask.unsqueeze(-1), timestep_embed, inputs_embeds)
 
         if multimodal_embeddings is None or len(multimodal_embeddings) == 0:
             return inputs_embeds
@@ -2182,12 +2172,11 @@ class HunyuanImage3ForConditionalGeneration(nn.Module, SupportsMultiModal, Suppo
             "timestep_r_emb",
         ]
         skip_prefixes.extend(unexpected_keywords)
-        loader = AutoWeightsLoader(
-            self,
-            skip_prefixes=skip_prefixes,
-        )
+        loader = AutoWeightsLoader(self)
 
-        loaded_params = loader.load_weights(weights)
+        loaded_params = loader.load_weights(
+            weights, mapper=WeightsMapper(orig_to_new_prefix={name: None for name in (skip_prefixes or ())})
+        )
         return loaded_params
 
     def get_language_model(self) -> torch.nn.Module:

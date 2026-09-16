@@ -11,10 +11,12 @@ Regression test for: https://github.com/vllm-project/vllm/issues/34506
 """
 
 import functools
+from types import SimpleNamespace
 
 import pytest
 import torch
 from pytest_mock import MockerFixture
+from vllm.multimodal.utils import set_mm_embedding_modality
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
@@ -117,15 +119,31 @@ class TestCheckInterleavedAudioVideo:
 # ---------------------------------------------------------------------------
 
 
-def make_mock_model(mocker: MockerFixture, hidden: int = 8):
+@functools.lru_cache(maxsize=1)
+def _omni_qwen2_5_thinker_cls():
+    """vllm_omni's thinker override, loaded lazily like the upstream one."""
+    from vllm_omni.model_executor.models.qwen2_5_omni.qwen2_5_omni_thinker import (
+        Qwen2_5OmniThinkerForConditionalGeneration,
+    )
+
+    return Qwen2_5OmniThinkerForConditionalGeneration
+
+
+def make_mock_model(mocker: MockerFixture, hidden: int = 8, thinker_cls=None):
     """
     Return a minimal mock of Qwen2_5OmniThinkerForConditionalGeneration
     that has enough structure to run embed_input_ids.
+
+    ``thinker_cls`` selects whose ``embed_input_ids`` the mock dispatches to.
+    It defaults to upstream's. Use the selected class as the mock spec so
+    zero-argument ``super()`` in omni's override resolves correctly.
     """
     m = _qwen2_5_omni_thinker_mod()
     Qwen2_5OmniThinkerForConditionalGeneration = m.Qwen2_5OmniThinkerForConditionalGeneration
+    if thinker_cls is None:
+        thinker_cls = Qwen2_5OmniThinkerForConditionalGeneration
 
-    model = mocker.Mock(spec=Qwen2_5OmniThinkerForConditionalGeneration)
+    model = mocker.Mock(spec=thinker_cls)
 
     # Config with token IDs
     cfg = mocker.Mock()
@@ -139,8 +157,7 @@ def make_mock_model(mocker: MockerFixture, hidden: int = 8):
         # view with shared memory, which masked_scatter_ cannot handle).
         return ids.float().unsqueeze(-1).expand(-1, hidden).clone()
 
-    lang_model = mocker.Mock()
-    lang_model.embed_input_ids = fake_lm_embed
+    lang_model = SimpleNamespace(embed_input_ids=fake_lm_embed)
     model.get_language_model = mocker.Mock(return_value=lang_model)
 
     from vllm.model_executor.models.interfaces import SupportsMultiModal
@@ -155,9 +172,7 @@ def make_mock_model(mocker: MockerFixture, hidden: int = 8):
             is_multimodal=is_multimodal,
         )
 
-    model.embed_input_ids = lambda *a, **kw: m.Qwen2_5OmniThinkerForConditionalGeneration.embed_input_ids(  # noqa: E501
-        model, *a, **kw
-    )
+    model.embed_input_ids = lambda *a, **kw: thinker_cls.embed_input_ids(model, *a, **kw)
 
     model._super_embed_input_ids = fake_super_embed
 
@@ -171,11 +186,11 @@ def build_mm_embeds(audio_n, image_n, video_n, hidden, audio_val=10.0, image_val
     """
     embs = []
     if audio_n:
-        embs.append(torch.full((audio_n, hidden), audio_val))
+        embs.append(set_mm_embedding_modality(torch.full((audio_n, hidden), audio_val), "audio"))
     if image_n:
-        embs.append(torch.full((image_n, hidden), image_val))
+        embs.append(set_mm_embedding_modality(torch.full((image_n, hidden), image_val), "image"))
     if video_n:
-        embs.append(torch.full((video_n, hidden), video_val))
+        embs.append(set_mm_embedding_modality(torch.full((video_n, hidden), video_val), "video"))
     return embs
 
 
@@ -255,10 +270,36 @@ class TestEmbedInputIds:
             "Text positions should keep text embeddings"
         )
 
+    @pytest.mark.parametrize(
+        "audio_n,image_n,video_n",
+        [(5, 0, 0), (0, 4, 0), (0, 0, 6), (5, 4, 6)],
+        ids=["audio", "image", "video", "mixed"],
+    )
+    def test_non_interleaved_multimodal_single_embedding(self, mocker: MockerFixture, audio_n, image_n, video_n):
+        """Omni's regular path embeds once through super() and preserves placement."""
+        hidden = 8
+        input_ids, is_multimodal = make_token_seq(audio_n, image_n, video_n)
+        mm_embeds = build_mm_embeds(audio_n, image_n, video_n, hidden)
+        model, _ = make_mock_model(mocker, hidden, thinker_cls=_omni_qwen2_5_thinker_cls())
+        embed = mocker.spy(model.get_language_model(), "embed_input_ids")
+
+        result = model.embed_input_ids(input_ids, mm_embeds, is_multimodal=is_multimodal)
+
+        embed.assert_called_once()
+        expected = input_ids.float().unsqueeze(-1).expand(-1, hidden).clone()
+        for token_id, value in ((AUDIO_TOKEN_ID, 10.0), (IMAGE_TOKEN_ID, 20.0), (VIDEO_TOKEN_ID, 30.0)):
+            expected[input_ids == token_id] = value
+        assert torch.equal(result, expected)
+
     def test_interleaved_use_audio_in_video(self, mocker: MockerFixture):
         """
         Interleaved (use_audio_in_video): video chunks interleaved with audio.
         Video embeddings must go to video positions, audio to audio positions.
+
+        Runs against **omni's** thinker override, not upstream's: this is the
+        only unit-level coverage of omni's call into
+        ``merge_interleaved_embeddings``, whose upstream signature dropped
+        ``num_video``/``num_audio`` in vLLM #46213.
         """
         hidden = 8
         audio_val, video_val = 10.0, 30.0
@@ -270,12 +311,14 @@ class TestEmbedInputIds:
         audio_n = sum(audio_chunks)  # 6
 
         mm_embeds = [
-            torch.full((video_n, hidden), video_val),
-            torch.full((audio_n, hidden), audio_val),
+            set_mm_embedding_modality(torch.full((video_n, hidden), video_val), "video"),
+            set_mm_embedding_modality(torch.full((audio_n, hidden), audio_val), "audio"),
         ]
 
-        model, _ = make_mock_model(mocker, hidden)
+        model, _ = make_mock_model(mocker, hidden, thinker_cls=_omni_qwen2_5_thinker_cls())
+        embed = mocker.spy(model.get_language_model(), "embed_input_ids")
         result = model.embed_input_ids(input_ids, mm_embeds, is_multimodal=is_multimodal)
+        embed.assert_called_once()
 
         video_pos = (input_ids == VIDEO_TOKEN_ID).nonzero(as_tuple=True)[0]
         audio_pos = (input_ids == AUDIO_TOKEN_ID).nonzero(as_tuple=True)[0]
@@ -308,8 +351,8 @@ class TestMergeInterleavedEmbeddings:
 
         inputs_embeds = torch.zeros(len(input_ids), hidden)
         mm_embeds = [
-            torch.full((num_video, hidden), 30.0),
-            torch.full((num_audio, hidden), 10.0),
+            set_mm_embedding_modality(torch.full((num_video, hidden), 30.0), "video"),
+            set_mm_embedding_modality(torch.full((num_audio, hidden), 10.0), "audio"),
         ]
 
         result = m.merge_interleaved_embeddings(
@@ -318,8 +361,6 @@ class TestMergeInterleavedEmbeddings:
             is_video,
             is_audio,
             is_multimodal,
-            num_video,
-            num_audio,
         )
 
         video_pos = is_video.nonzero(as_tuple=True)[0]

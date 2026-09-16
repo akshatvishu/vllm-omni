@@ -17,6 +17,8 @@ from vllm_omni.model_executor.models.qwen3_tts.qwen3_tts_talker import (
     Qwen3TTSTalkerForConditionalGeneration,
 )
 
+pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
+
 
 def _make_minimal_talker(
     tts_pad_embed: torch.Tensor | None = None,
@@ -34,6 +36,7 @@ def _make_minimal_talker(
     """
     model = Qwen3TTSTalkerForConditionalGeneration.__new__(Qwen3TTSTalkerForConditionalGeneration)
     model.talker_config = SimpleNamespace(codec_pad_id=7, num_code_groups=16)
+    model._embedding_dtype = torch.bfloat16
     if tts_pad_embed is None:
         tts_pad_embed = torch.zeros((1, 4), dtype=torch.bfloat16)
     model._tts_pad_embed = tts_pad_embed
@@ -41,6 +44,7 @@ def _make_minimal_talker(
     def _default_raise(**_kwargs):
         raise AssertionError("build_prompt_embeds was not stubbed in this test")
 
+    model._embedding_dtype = torch.bfloat16
     model._prompt_builder = SimpleNamespace(
         build_prompt_embeds=build_prompt_embeds if build_prompt_embeds is not None else _default_raise,
     )
@@ -74,6 +78,7 @@ def _make_minimal_builder(
         codec_bos_id=8,
         num_code_groups=2,
         spk_is_dialect={},
+        hidden_size=4,
     )
     builder._model_path = ""
     builder._text_embedding = None
@@ -81,6 +86,7 @@ def _make_minimal_builder(
     builder._codec_embed = lambda ids: torch.zeros((*ids.shape, 4), device=ids.device)
     builder._residual_code_embeddings = lambda: []
     builder._speaker_encoder = None
+    builder._embedding_dtype = torch.bfloat16
     builder._tts_pad_embed_buffer = (
         tts_pad_embed if tts_pad_embed is not None else torch.zeros((1, 4), dtype=torch.bfloat16)
     )
@@ -89,6 +95,7 @@ def _make_minimal_builder(
     )
     builder._speaker_cache = None
     builder._text_tokenizer = None
+    builder._embedding_dtype = torch.bfloat16
     builder._ref_audio_artifact_cache_max_entries = 256
     builder._ref_audio_artifact_cache = OrderedDict()
     builder._resampler_cache = OrderedDict()
@@ -252,6 +259,36 @@ def test_decode_compacts_long_trailing_text_after_large_offset():
     assert torch.equal(update["hidden_states"]["trailing_text"], trailing_text[65:])
 
 
+def test_decode_replay_span_embeds_all_tokens_without_mutating_decode_state():
+    model = _make_minimal_talker()
+
+    def fake_embed_input_ids(input_ids):
+        return input_ids.to(torch.float32).reshape(-1, 1, 1).expand(-1, 1, 4)
+
+    model.embed_input_ids = fake_embed_input_ids
+    trailing_text = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+    last_hidden = torch.full((4,), 2.0, dtype=torch.float32)
+
+    out_ids, out_embeds, update = model.preprocess(
+        input_ids=torch.tensor([101, 202, 303], dtype=torch.long),
+        input_embeds=None,
+        text=["hello"],
+        task_type=["Base"],
+        hidden_states={"trailing_text": trailing_text, "last": last_hidden},
+        meta={"talker_text_offset": 1, "codec_streaming": True},
+        _omni_is_prefill=False,
+        _omni_num_computed_tokens=2400,
+        _omni_prompt_len=213,
+    )
+
+    assert out_ids.tolist() == [101, 202, 303]
+    assert torch.equal(
+        out_embeds.cpu(),
+        torch.tensor([[101.0] * 4, [202.0] * 4, [303.0] * 4], dtype=torch.bfloat16),
+    )
+    assert update == {"meta": {"codec_streaming": True}}
+
+
 def test_decode_batch_preprocess_matches_decode_state_updates():
     tts_pad = torch.full((1, 4), -1.0, dtype=torch.bfloat16)
     model = _make_minimal_talker(tts_pad_embed=tts_pad)
@@ -352,6 +389,34 @@ def test_base_voice_clone_normalizes_ref_audio_once_for_ref_code_and_speaker():
     assert ref_audio_ids == [id(ref_audio), id(ref_audio)]
     assert ref_code_len == 2
     assert torch.equal(ref_code, torch.ones((2, 2), dtype=torch.long))
+
+
+def test_base_voice_clone_rejects_speaker_embedding_dimension_before_cat():
+    """Keep a worker-side guard for callers that bypass the Speech API."""
+    builder = _make_minimal_builder()
+    device_param = torch.nn.Parameter(torch.empty(0))
+    builder._text_embedding = _stub_text_embedding(device_param)
+    builder._text_projection = lambda embeds: embeds
+    builder._codec_embed = lambda ids: torch.zeros((*ids.shape, 4), device=ids.device)
+
+    class FakeTokenizer:
+        def __call__(self, *_args, **_kwargs):
+            return {"input_ids": torch.arange(8, dtype=torch.long).reshape(1, -1)}
+
+    builder._text_tokenizer = FakeTokenizer()
+    builder.normalize_ref_audio = lambda _raw: (np.arange(1024, dtype=np.float32), 16000)
+    builder.extract_speaker_embedding = lambda _wav, _sr: torch.ones(3, dtype=torch.bfloat16)
+
+    with pytest.raises(ValueError, match="got 3, but the talker requires 4"):
+        builder.build_prompt_embeds(
+            task_type="Base",
+            info_dict={
+                "text": ["hello"],
+                "ref_audio": ["ref.wav"],
+                "x_vector_only_mode": [True],
+                "non_streaming_mode": [False],
+            },
+        )
 
 
 def test_base_voice_clone_batch_preprocess_encodes_ref_code_by_sample_rate():
