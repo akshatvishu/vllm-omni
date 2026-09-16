@@ -35,7 +35,6 @@ _END_PUNCTUATION = {
     "！",
     "？",
     "、",
-    "……",
     "）",
     "】",
 }
@@ -309,10 +308,10 @@ def prepare_reference_audio(
         waveform = waveform[np.newaxis, :]
     elif waveform.ndim != 2:
         raise ValueError(f"OmniVoice reference audio must be 1D or 2D, got {waveform.ndim} dimensions.")
-    if not waveform.size or not np.any(waveform):
-        raise ValueError("Reference audio is empty after silence removal.")
     if waveform.shape[0] > 1:
         waveform = waveform.mean(axis=0, keepdims=True)
+    if not waveform.size or not np.any(waveform):
+        raise ValueError("Reference audio is empty after silence removal.")
 
     if sample_rate != target_sample_rate:
         waveform = torchaudio.functional.resample(
@@ -385,7 +384,7 @@ def postprocess_generated_audio(
     )
 
     if audio.shape[-1] == 0:
-        return np.ascontiguousarray(audio, dtype=np.float32)
+        return audio
 
     if reference_rms < 0.1:
         audio = audio * (reference_rms / 0.1)

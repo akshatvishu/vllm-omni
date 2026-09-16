@@ -75,8 +75,6 @@ def _parse_asr_config(additional_config: Mapping[str, object] | None) -> tuple[b
         raise TypeError(f"additional_config must be a mapping or None, got {type(additional_config)!r}")
 
     raw_config = additional_config.get("omnivoice_asr", {})
-    if raw_config is None:
-        raise TypeError("additional_config['omnivoice_asr'] must be a mapping")
     if not isinstance(raw_config, Mapping):
         raise TypeError(f"additional_config['omnivoice_asr'] must be a mapping, got {type(raw_config)!r}")
 
@@ -252,9 +250,9 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
         self.sample_rate = self.config.sample_rate
 
     def _initialize_asr(self, additional_config: Mapping[str, object] | None) -> None:
-        self._load_asr_on_startup, self._asr_model_name, self._asr_device = _parse_asr_config(additional_config)
+        load_asr_on_startup, self._asr_model_name, self._asr_device = _parse_asr_config(additional_config)
         self._asr_pipeline = None
-        if self._load_asr_on_startup:
+        if load_asr_on_startup:
             self._load_asr_pipeline()
 
     def _load_asr_pipeline(self):
@@ -275,7 +273,7 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
             asr_device,
         )
         try:
-            self._asr_pipeline = hf_pipeline(
+            asr_pipeline = hf_pipeline(
                 "automatic-speech-recognition",
                 model=self._asr_model_name,
                 dtype=asr_dtype,
@@ -286,12 +284,13 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
             # workers always have one, so explicitly honor the configured
             # device after construction, as other auxiliary models do here.
             target_device = torch.device(asr_device)
-            self._asr_pipeline.model = self._asr_pipeline.model.to(target_device)
-            self._asr_pipeline.device = target_device
+            asr_pipeline.model = asr_pipeline.model.to(target_device)
+            asr_pipeline.device = target_device
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load OmniVoice ASR model {self._asr_model_name!r} on device {asr_device}: {exc}"
             ) from exc
+        self._asr_pipeline = asr_pipeline
         logger.info("OmniVoice ASR model loaded on %s", asr_device)
         return self._asr_pipeline
 

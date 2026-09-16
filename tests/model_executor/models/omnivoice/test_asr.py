@@ -20,9 +20,6 @@ class _FakeASRModel:
         self.to_calls.append(device)
         return self
 
-    def parameters(self):
-        return iter(())
-
 
 class _FakeASRPipeline:
     def __init__(self, result):
@@ -41,7 +38,6 @@ def pipeline() -> pipeline_omnivoice.OmniVoicePipeline:
     model = pipeline_omnivoice.OmniVoicePipeline.__new__(pipeline_omnivoice.OmniVoicePipeline)
     torch.nn.Module.__init__(model)
     model.device = torch.device("cpu")
-    model._load_asr_on_startup = False
     model._asr_model_name = pipeline_omnivoice._ASR_MODEL_NAME
     model._asr_device = "cpu"
     model._asr_pipeline = None
@@ -133,8 +129,8 @@ def test_asr_load_failure_includes_checkpoint_and_device(pipeline, monkeypatch):
     assert "download failed" in message
 
 
-def test_asr_device_placement_failure_includes_checkpoint_and_device(pipeline, monkeypatch):
-    asr, _ = _install_fake_asr(monkeypatch)
+def test_asr_device_placement_failure_is_reported_and_can_be_retried(pipeline, monkeypatch):
+    asr, load_calls = _install_fake_asr(monkeypatch)
     pipeline._asr_device = "cuda:1"
 
     def move_model(device):
@@ -149,6 +145,12 @@ def test_asr_device_placement_failure_includes_checkpoint_and_device(pipeline, m
     assert pipeline_omnivoice._ASR_MODEL_NAME in message
     assert "cuda:1" in message
     assert "cannot move" in message
+    assert pipeline._asr_pipeline is None
+
+    monkeypatch.setattr(asr.model, "to", lambda device: asr.model)
+    assert pipeline._load_asr_pipeline() is asr
+    assert len(load_calls) == 2
+    assert asr.device == torch.device("cuda:1")
 
 
 @pytest.mark.parametrize(
@@ -182,6 +184,7 @@ def test_asr_config_defaults_and_values(additional_config, expected):
         {"omnivoice_asr": {"asr_model_name": "  "}},
         {"omnivoice_asr": {"asr_device": ""}},
         {"omnivoice_asr": []},
+        {"omnivoice_asr": None},
     ],
 )
 def test_asr_config_rejects_invalid_values(additional_config):
@@ -227,7 +230,6 @@ def test_eager_asr_is_loaded_during_initialization(monkeypatch):
         }
     )
 
-    assert model._load_asr_on_startup is True
     assert load_calls == [("local/whisper", "cpu")]
 
 
@@ -243,7 +245,6 @@ def test_lazy_asr_is_not_loaded_during_initialization(monkeypatch):
 
     model._initialize_asr({"omnivoice_asr": {"load_asr_on_startup": False}})
 
-    assert model._load_asr_on_startup is False
     assert load_calls == []
 
 

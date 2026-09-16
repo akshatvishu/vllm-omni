@@ -96,6 +96,13 @@ def test_reference_audio_rejects_empty_after_silence_removal():
         _prepare(np.zeros(960, dtype=np.float32))
 
 
+def test_reference_audio_rejects_channels_that_cancel_when_downmixed():
+    waveform = np.stack([np.full(960, 0.1), np.full(960, -0.1)])
+
+    with pytest.raises(ValueError, match="empty after silence removal"):
+        _prepare(waveform)
+
+
 def test_reference_audio_matches_official_asset_preparation():
     asset_path = Path(__file__).resolve().parents[4] / "tests/assets/qwen3_tts/clone_2.wav"
     waveform, sample_rate = sf.read(asset_path, always_2d=False)

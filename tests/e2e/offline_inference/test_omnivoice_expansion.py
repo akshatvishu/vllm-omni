@@ -50,8 +50,6 @@ def test_omnivoice_text_to_audio(omni_runner: OmniRunner) -> None:
     Input Modal: text
     Output Modal: audio
     """
-    from vllm_omni.inputs.data import OmniDiffusionSamplingParams
-
     prompts = {"prompt": "Hello, this is a test for text to audio."}
     sampling_params_list = [OmniDiffusionSamplingParams()]
 
