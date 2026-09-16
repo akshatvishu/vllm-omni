@@ -477,6 +477,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         # differ per HF repo (voice-clone vs dialogue vs ambient-sound vs
         # instruction vs streaming voice-clone).
         self._moss_variant = self._detect_moss_variant() if self._tts_model_type == "moss_tts" else None
+        self._moss_realtime_components_lock = asyncio.Lock()
 
         # GLM-TTS lazy-cached resources (populated on first GLM-TTS request)
         self._glm_tts_text_tokenizer: object | None = None
@@ -1486,7 +1487,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
         if v == "realtime":
             ref_audio = request.ref_audio
             assert isinstance(ref_audio, str)
-            tokenizer, processor, codec = self._get_moss_realtime_components()
+            async with self._moss_realtime_components_lock:
+                tokenizer, processor, codec = await asyncio.to_thread(self._get_moss_realtime_components)
             raw_voice = request.voice.strip() if isinstance(request.voice, str) else ""
             voice_lower = raw_voice.lower() if raw_voice else ""
             use_named_voice = bool(voice_lower) and voice_lower in self.uploaded_speakers and not has_inline_ref_audio

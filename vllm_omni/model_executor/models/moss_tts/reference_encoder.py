@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any
 
 import torch
@@ -63,36 +64,15 @@ async def encode_realtime_reference_codes(
     voice_created_at: int = 0,
 ) -> torch.Tensor:
     """Encode and cache the 16-channel reference grid for Realtime."""
-    model_type = "moss_tts_realtime_nq16"
-
-    if voice_name:
-        speaker_name = voice_name
-        created_at = int(voice_created_at)
-        cache_key = speaker_cache.make_cache_key(
-            speaker_name,
-            model_type=model_type,
-            created_at=created_at,
-        )
-        cached = speaker_cache.get(cache_key)
-        if cached is not None:
-            return cached["codes"].clone()
-        wav_list, sr, _ = await resolve_ref_audio(ref_str)
-    else:
-        wav_list, sr, resolve_cache_key = await resolve_ref_audio(ref_str)
-        speaker_name = "ref:" + resolve_cache_key
-        created_at = 0
-        cache_key = speaker_cache.make_cache_key(
-            speaker_name,
-            model_type=model_type,
-            created_at=created_at,
-        )
-        cached = speaker_cache.get(cache_key)
-        if cached is not None:
-            return cached["codes"].clone()
-
-    codes = await asyncio.to_thread(_encode_realtime_wav_sync, codec, wav_list, sr)
-    speaker_cache.put(cache_key, {"codes": codes.detach().cpu()})
-    return codes
+    return await _encode_cached_reference_codes(
+        ref_str,
+        encode_wav=partial(_encode_realtime_wav_sync, codec),
+        model_type="moss_tts_realtime_nq16",
+        resolve_ref_audio=resolve_ref_audio,
+        speaker_cache=speaker_cache,
+        voice_name=voice_name,
+        voice_created_at=voice_created_at,
+    )
 
 
 async def encode_reference_codes(
@@ -137,8 +117,27 @@ async def encode_reference_codes(
     Returns:
         The reference RVQ codes tensor (CPU), ready to pass to the processor.
     """
-    model_type = f"moss_tts_{variant}_nq{n_vq}"
+    return await _encode_cached_reference_codes(
+        ref_str,
+        encode_wav=partial(_encode_wav_sync, processor, sr_target=sr_target, n_vq=n_vq),
+        model_type=f"moss_tts_{variant}_nq{n_vq}",
+        resolve_ref_audio=resolve_ref_audio,
+        speaker_cache=speaker_cache,
+        voice_name=voice_name,
+        voice_created_at=voice_created_at,
+    )
 
+
+async def _encode_cached_reference_codes(
+    ref_str: str,
+    *,
+    encode_wav: Callable[[list, int], torch.Tensor],
+    model_type: str,
+    resolve_ref_audio: Callable[[str], Awaitable[tuple[list, int, str]]],
+    speaker_cache: Any,
+    voice_name: str | None,
+    voice_created_at: int,
+) -> torch.Tensor:
     # ---- Named-voice branch: check cache *before* resolving ----
     # When voice_name is set, the cache key is (voice_name, created_at) which
     # does not depend on the resolved audio content.  The serving layer only
@@ -176,7 +175,7 @@ async def encode_reference_codes(
             return cached["codes"].clone()
 
     # ---- Cold miss: encode in a worker thread and store ----
-    codes = await asyncio.to_thread(_encode_wav_sync, processor, wav_list, sr, sr_target, n_vq)
+    codes = await asyncio.to_thread(encode_wav, wav_list, sr)
     speaker_cache.put(cache_key, {"codes": codes.detach().cpu()})
     logger.debug("Speaker cache STORE for MOSS-TTS reference '%s'", speaker_name)
     return codes
