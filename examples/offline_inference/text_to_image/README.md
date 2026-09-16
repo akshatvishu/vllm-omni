@@ -218,6 +218,8 @@ python examples/offline_inference/text_to_image/text_to_image.py \
 
 ### Anima Single-File Checkpoints
 
+Anima uses the official model dimensions by default. A checkpoint may provide a JSON file with the same stem (for example, `anima.json` beside `anima.safetensors`) containing `transformer` and `text_conditioner` configuration objects. These override the default dimensions and must match the checkpoint weights. The shared tiny-model tests use this to load small random-weight models. Components in `text_encoder/`, `vae/`, `tokenizer/`, `t5_tokenizer/`, and `scheduler/` beside the checkpoint are discovered automatically.
+
 To load Anima, point `--model` to the single-file checkpoint path, pass the native pipeline class name using `--model-class-name`, and supply the converted components directory using `--custom-pipeline-args`:
 
 ```bash

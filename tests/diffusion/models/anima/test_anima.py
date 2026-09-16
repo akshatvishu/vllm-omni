@@ -1,16 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
+import json
 from pathlib import Path
+from shutil import rmtree
 from types import SimpleNamespace
 
 import pytest
 import torch
 from safetensors.torch import save_file
 
+from tests.model_tests.diffusion.anima_builder import CHECKPOINT_FILENAME, tiny_anima_builder
 from vllm_omni.diffusion.attention import selector
 from vllm_omni.diffusion.attention.backends.sdpa import SDPABackend
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
+from vllm_omni.diffusion.distributed.autoencoders.autoencoder_kl_qwenimage import DistributedAutoencoderKLQwenImage
+from vllm_omni.diffusion.models.anima import pipeline_anima
+from vllm_omni.diffusion.models.anima.anima_text_conditioner import AnimaTextConditioner
+from vllm_omni.diffusion.models.anima.anima_transformer import AnimaTransformer3DModel
 from vllm_omni.diffusion.models.anima.pipeline_anima import AnimaPipeline
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
@@ -118,12 +125,11 @@ def test_native_anima_resolves_vae_scale_factor_from_loaded_vae() -> None:
     assert _anima_vae_scale_factor_from_vae(vae) == 16
 
 
-def test_native_anima_loads_synthetic_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("use_config_file", [False, True])
+def test_native_anima_loads_synthetic_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_config_file: bool
+) -> None:
     """Native modules load exact weights from an Anima safetensors checkpoint."""
-    import vllm_omni.diffusion.models.anima.pipeline_anima as pipeline_anima
-    from vllm_omni.diffusion.models.anima.anima_text_conditioner import AnimaTextConditioner
-    from vllm_omni.diffusion.models.anima.anima_transformer import AnimaTransformer3DModel
-
     tiny_transformer_config = {
         "in_channels": 1,
         "out_channels": 1,
@@ -148,8 +154,13 @@ def test_native_anima_loads_synthetic_checkpoint(tmp_path: Path, monkeypatch: py
         "target_vocab_size": 8,
         "min_sequence_length": 4,
     }
-    monkeypatch.setattr(pipeline_anima, "ANIMA_TRANSFORMER_CONFIG", tiny_transformer_config)
-    monkeypatch.setattr(pipeline_anima, "ANIMA_TEXT_CONDITIONER_CONFIG", tiny_text_conditioner_config)
+    if use_config_file:
+        (tmp_path / "anima.json").write_text(
+            json.dumps({"transformer": tiny_transformer_config, "text_conditioner": tiny_text_conditioner_config})
+        )
+    else:
+        monkeypatch.setattr(pipeline_anima, "ANIMA_TRANSFORMER_CONFIG", tiny_transformer_config)
+        monkeypatch.setattr(pipeline_anima, "ANIMA_TEXT_CONDITIONER_CONFIG", tiny_text_conditioner_config)
 
     monkeypatch.setattr(selector, "_cached_get_backend_cls", lambda *_args, **_kwargs: SDPABackend)
     transformer = AnimaTransformer3DModel(**tiny_transformer_config)
@@ -164,7 +175,7 @@ def test_native_anima_loads_synthetic_checkpoint(tmp_path: Path, monkeypatch: py
     checkpoint_path = tmp_path / "anima.safetensors"
     save_file(checkpoint_state, str(checkpoint_path))
 
-    pipeline = pipeline_anima.AnimaPipeline.__new__(pipeline_anima.AnimaPipeline)
+    pipeline = AnimaPipeline.__new__(AnimaPipeline)
     pipeline.od_config = SimpleNamespace(model=str(checkpoint_path), dtype=torch.float32)
     pipeline.device = torch.device("cpu")
 
@@ -179,6 +190,55 @@ def test_native_anima_loads_synthetic_checkpoint(tmp_path: Path, monkeypatch: py
 
     loaded_transformer, loaded_text_conditioner = pipeline._load_native_denoiser_components()
     assert_loaded(loaded_transformer, loaded_text_conditioner)
+
+    if use_config_file:
+        tiny_transformer_config["num_layers"] = 2
+        (tmp_path / "anima.json").write_text(
+            json.dumps({"transformer": tiny_transformer_config, "text_conditioner": tiny_text_conditioner_config})
+        )
+        with pytest.raises(RuntimeError, match="Missing key"):
+            pipeline._load_native_denoiser_components()
+
+
+def test_tiny_anima_generates_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Load every saved component and exercise CFG, decoding, and multiple outputs on CPU."""
+    monkeypatch.setattr(selector, "_cached_get_backend_cls", lambda *_args, **_kwargs: SDPABackend)
+    monkeypatch.setattr(current_omni_platform, "is_available", lambda: False)
+    monkeypatch.setattr(
+        DistributedAutoencoderKLQwenImage,
+        "init_distributed",
+        lambda self: setattr(self, "distributed_executor", SimpleNamespace(parallel_size=1)),
+    )
+    model_dir = tiny_anima_builder()
+    try:
+        config = OmniDiffusionConfig(
+            model=str(Path(model_dir) / CHECKPOINT_FILENAME), model_class_name="AnimaPipeline", dtype=torch.float32
+        )
+        pipeline = AnimaPipeline(od_config=config, device=torch.device("cpu"))
+        pipeline.load_weights()
+        pipeline.eval()
+        outputs = []
+        with torch.inference_mode():
+            for _ in range(2):
+                request = OmniDiffusionRequest(
+                    prompt="Dummy prompt",
+                    request_id="tiny-anima",
+                    sampling_params=OmniDiffusionSamplingParams(
+                        height=32,
+                        width=32,
+                        num_inference_steps=2,
+                        guidance_scale=4.0,
+                        num_outputs_per_prompt=2,
+                        generator=torch.Generator(device="cpu").manual_seed(42),
+                    ),
+                )
+                outputs.append(pipeline(DiffusionRequestBatch([request]))[0].output)
+        assert outputs[0].shape == (2, 3, 32, 32)
+        assert torch.isfinite(outputs[0]).all()
+        assert torch.equal(outputs[0], outputs[1])
+        assert not torch.equal(outputs[0][0], outputs[0][1])
+    finally:
+        rmtree(model_dir)
 
 
 def test_native_anima_profiler_setup_is_deferred_and_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:

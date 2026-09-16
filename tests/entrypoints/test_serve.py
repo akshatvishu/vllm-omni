@@ -118,6 +118,37 @@ def test_omni_serve_accepts_explicit_model(argv: list[str], mocker: MockerFixtur
     cmd.validate(args)
 
 
+@pytest.mark.parametrize(
+    "model_class,exists,native",
+    [
+        ("AnimaPipeline", True, True),
+        ("AnimaModularPipeline", True, True),
+        ("AnimaPipeline", False, False),
+        ("FluxPipeline", True, False),
+        (None, True, False),
+    ],
+)
+def test_serve_native_checkpoint_validation(model_class, exists, native, tmp_path, mocker):
+    checkpoint = tmp_path / "anima.safetensors"
+    if exists:
+        checkpoint.touch()
+    argv = ["serve", str(checkpoint), "--omni"]
+    if model_class is not None:
+        argv.extend(["--model-class-name", model_class])
+    args = _parse_serve_args(argv)
+    detect_model = mocker.patch("vllm_omni.diffusion.utils.hf_utils.is_diffusion_model", return_value=False)
+    validate_llm = mocker.patch("vllm_omni.entrypoints.cli.serve.validate_parsed_serve_args")
+
+    OmniServeCommand().validate(args)
+
+    if native:
+        detect_model.assert_not_called()
+        validate_llm.assert_not_called()
+    else:
+        detect_model.assert_called_once_with(str(checkpoint))
+        validate_llm.assert_called_once_with(args)
+
+
 def test_serve_parser_accepts_strategy_config() -> None:
     """``--strategy-config`` must parse onto the ``strategy_config`` dest and be
     forwarded as an explicit kwarg so the engine can overlay the strategy."""

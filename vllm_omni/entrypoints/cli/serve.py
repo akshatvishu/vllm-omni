@@ -22,6 +22,7 @@ from vllm.entrypoints.launchers.cli_args import make_arg_parser, validate_parsed
 from vllm.entrypoints.serve.utils.api_utils import VLLM_SUBCMD_PARSER_EPILOG
 from vllm.logger import init_logger
 
+from vllm_omni.diffusion.registry import resolve_native_single_file
 from vllm_omni.entrypoints.cli.logo import log_logo
 from vllm_omni.entrypoints.openai.api_server import omni_run_server
 from vllm_omni.entrypoints.utils import parse_stage_overrides
@@ -260,7 +261,8 @@ class OmniServeCommand(CLISubcommand):
         from vllm_omni.diffusion.utils.hf_utils import is_diffusion_model
 
         model = getattr(args, "model_tag", None) or getattr(args, "model", None)
-        if model and is_diffusion_model(model):
+        native_single_file = resolve_native_single_file(getattr(args, "model_class_name", None))
+        if model and ((native_single_file is not None and os.path.isfile(model)) or is_diffusion_model(model)):
             logger.info("Detected diffusion model: %s", model)
             return
         validate_parsed_serve_args(args)

@@ -2,9 +2,11 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 import inspect
+import json
 import logging
 import os
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -12,6 +14,7 @@ import torch
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils.torch_utils import randn_tensor
+from safetensors.torch import load_file
 from torch import nn
 from transformers import AutoTokenizer, Qwen3Model, T5TokenizerFast
 
@@ -221,8 +224,6 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         state_dict: dict[str, torch.Tensor] | None = None,
     ) -> tuple[AnimaTransformer3DModel, AnimaTextConditioner]:
         if state_dict is None:
-            from safetensors.torch import load_file
-
             model_path = self.od_config.model
             if not isinstance(model_path, str) or not os.path.isfile(model_path):
                 raise ValueError(f"AnimaPipeline currently requires a local file path, got: {model_path}")
@@ -232,12 +233,17 @@ class AnimaPipeline(nn.Module, DiffusionPipelineProfilerMixin, ProgressBarMixin)
         del state_dict
         transformer_state_dict = self._convert_original_transformer_state_dict(transformer_state_dict)
 
-        native_text_conditioner = AnimaTextConditioner(**cast(dict[str, Any], ANIMA_TEXT_CONDITIONER_CONFIG))
+        config_path = Path(self.od_config.model).with_suffix(".json")
+        config = json.loads(config_path.read_text()) if config_path.is_file() else {}
+        text_conditioner_config = {**ANIMA_TEXT_CONDITIONER_CONFIG, **config.get("text_conditioner", {})}
+        transformer_config = {**ANIMA_TRANSFORMER_CONFIG, **config.get("transformer", {})}
+
+        native_text_conditioner = AnimaTextConditioner(**cast(dict[str, Any], text_conditioner_config))
         native_text_conditioner.load_state_dict(text_conditioner_state_dict, strict=True)
         native_text_conditioner.to(device=self.device, dtype=self.od_config.dtype)
         del text_conditioner_state_dict
 
-        native_transformer = AnimaTransformer3DModel(**cast(dict[str, Any], ANIMA_TRANSFORMER_CONFIG))
+        native_transformer = AnimaTransformer3DModel(**cast(dict[str, Any], transformer_config))
         native_transformer.load_state_dict(transformer_state_dict, strict=True)
         native_transformer.to(device=self.device, dtype=self.od_config.dtype)
         del transformer_state_dict
