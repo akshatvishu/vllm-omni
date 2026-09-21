@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 #
 # Copyright 2025 Black Forest Labs and The HuggingFace Team. All rights reserved.
 #
@@ -1003,6 +1003,9 @@ class Flux2KleinPipeline(
                     f"steps is {num_inference_steps} which is < 1 and not appropriate for this pipeline."
                 )
         self._num_timesteps = len(timesteps)
+
+        # TeaCache tracks positive/negative CFG branches separately via this flag.
+        self.transformer.do_true_cfg = self.do_classifier_free_guidance
 
         # 7. Denoising loop
         # We set the index here to remove DtoH sync, helpful especially during compilation.

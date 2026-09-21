@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from __future__ import annotations
 
@@ -28,6 +28,8 @@ class ForwardState(Generic[T]):
     encoder_hidden_states: torch.Tensor | None
     temb: torch.Tensor
     intermediates: T
+    # TODO: We should remove this, since everything should really be encapsulated in the model intermediates...
+    extra_states: dict[str, Any] | None = None
 
 
 @runtime_checkable

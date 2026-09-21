@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 import inspect
 import json
 import logging
@@ -1069,6 +1069,9 @@ class Flux2Pipeline(
 
         # For editing pipelines, we need to slice the output to remove condition latents
         output_slice = latents.size(1) if image_latents is not None else None
+
+        # TeaCache tracks positive/negative CFG branches separately via this flag.
+        self.transformer.do_true_cfg = do_true_cfg
 
         # 7. Denoising loop
         # We set the index here to remove DtoH sync, helpful especially during compilation.

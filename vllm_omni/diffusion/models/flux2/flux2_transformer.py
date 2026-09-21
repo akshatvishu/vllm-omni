@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 from collections.abc import Iterable
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -1009,19 +1009,19 @@ class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
             if hidden_states_mask.all():
                 hidden_states_mask = None
         elif (
-            ctx is not None
+            fwd_ctx is not None
             and self.parallel_config.sequence_parallel_size > 1
             and not self.parallel_config.mask_sp_padding
-            and ctx.sp_original_seq_len is not None
-            and ctx.sp_padding_size > 0
+            and fwd_ctx.sp_original_seq_len is not None
+            and fwd_ctx.sp_padding_size > 0
         ):
             logger.warning_once(
                 "SP auto-padding applied %d token(s) (seq_len=%d, ulysses_degree=%d). "
                 "Padding tokens are not masked from attention (mask_sp_padding=False), "
                 "which avoids the varlen attention path but may produce minor numerical differences. "
                 "Set parallel_config.mask_sp_padding=True to restore strict masking.",
-                ctx.sp_padding_size,
-                ctx.sp_original_seq_len,
+                fwd_ctx.sp_padding_size,
+                fwd_ctx.sp_original_seq_len,
                 self.parallel_config.sequence_parallel_size,
             )
 
