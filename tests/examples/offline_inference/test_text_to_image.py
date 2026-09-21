@@ -41,8 +41,12 @@ README_SNIPPETS = ReadmeSnippet.extract_readme_snippets(README_PATH, skipif=_ski
 
 
 def _prepare_anima_snippet(snippet: ReadmeSnippet) -> ReadmeSnippet:
-    if "/path/to/models/anima-official/split_files/diffusion_models/anima-base-v1.0.safetensors" not in snippet.code:
+    if "--model-class-name AnimaPipeline" not in snippet.code:
         return snippet
+
+    assert "/path/to/models/anima-official/split_files/diffusion_models/anima-base-v1.0.safetensors" in snippet.code, (
+        "Anima README checkpoint placeholder changed; update _prepare_anima_snippet to match"
+    )
 
     checkpoint = hf_hub_download(
         repo_id="circlestone-labs/Anima",
