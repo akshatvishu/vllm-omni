@@ -533,6 +533,8 @@ def extract_cosmos3_context(
 # on the transformer module and multiple pipelines can share the same transformer.
 EXTRACTOR_REGISTRY: dict[str, Callable] = {
     "Bagel": extract_bagel_context,
+    "Cosmos3EdgeVFMTransformer": extract_cosmos3_context,
+    "Cosmos3VFMTransformer": extract_cosmos3_context,
     "MiniMaxH3DiTModel": extract_minimax_h3_context,
     # Future models:
     # "CogVideoXTransformer3DModel": extract_cogvideox_context,

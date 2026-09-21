@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 # Copyright 2025 Black Forest Labs, The HuggingFace Team and The InstantX Team. All rights reserved.
 #
@@ -1080,6 +1080,71 @@ class Flux2Transformer2DModel(nn.Module, SupportsTeaCache):
             tuple(self.stacked_params_mapping) != _FLUX2_STACKED_PARAMS_MAPPING
         ):
             raise ValueError("FLUX.2-klein packed QKV mapping is not constructor-stable")
+
+        stack_specs = (
+            ("transformer_blocks", self.config.num_layers, Flux2TransformerBlock),
+            ("single_transformer_blocks", self.config.num_single_layers, Flux2SingleTransformerBlock),
+        )
+        for name, expected_count, block_type in stack_specs:
+            blocks = getattr(self, name, None)
+            if not isinstance(blocks, nn.ModuleList) or len(blocks) != expected_count or expected_count <= 0:
+                raise ValueError(
+                    f"FLUX.2-klein {name} is incomplete: expected {expected_count} blocks, "
+                    f"got {len(blocks) if isinstance(blocks, nn.ModuleList) else 'missing'}"
+                )
+            if any(not isinstance(block, block_type) for block in blocks):
+                raise ValueError(f"FLUX.2-klein {name} contains an unexpected block implementation")
+
+        required_modules = (
+            "pos_embed",
+            "rope_prepare",
+            "time_guidance_embed",
+            "double_stream_modulation_img",
+            "double_stream_modulation_txt",
+            "single_stream_modulation",
+            "x_embedder",
+            "context_embedder",
+            "norm_out",
+            "proj_out",
+        )
+        for name in required_modules:
+            if not isinstance(getattr(self, name, None), nn.Module):
+                raise ValueError(f"FLUX.2-klein required module {name!r} is missing")
+
+        parameter_count = 0
+        stack_parameter_coverage = {name: False for name, _, _ in stack_specs}
+        for name, parameter in self.named_parameters():
+            parameter_count += 1
+            for stack_name in stack_parameter_coverage:
+                if name.startswith(f"{stack_name}."):
+                    stack_parameter_coverage[stack_name] = True
+            if parameter.is_meta or parameter.device.type != "cpu":
+                raise ValueError(f"FLUX.2-klein parameter {name!r} is not materialized on CPU")
+            if parameter.dtype is not torch.bfloat16:
+                raise ValueError(f"FLUX.2-klein parameter {name!r} must stay bf16, got {parameter.dtype}")
+            if parameter.layout is not torch.strided or not parameter.is_contiguous():
+                raise ValueError(f"FLUX.2-klein parameter {name!r} must use contiguous strided layout")
+            if parameter.numel() == 0:
+                raise ValueError(f"FLUX.2-klein parameter {name!r} is empty")
+        if parameter_count == 0 or not all(stack_parameter_coverage.values()):
+            raise ValueError("FLUX.2-klein restore did not materialize both transformer block stacks")
+
+        for name, buffer in self.named_buffers():
+            parent_path, _, leaf_name = name.rpartition(".")
+            owner = self.get_submodule(parent_path)
+            persistent = leaf_name not in owner._non_persistent_buffers_set
+            loader_buffer = name.endswith((".beta", ".eps"))
+            if loader_buffer and not persistent:
+                raise ValueError(f"FLUX.2-klein loader buffer {name!r} must be persistent")
+            if not persistent:
+                continue
+            if buffer.is_meta or buffer.device.type != "cpu":
+                raise ValueError(f"FLUX.2-klein persistent buffer {name!r} is not materialized on CPU")
+            if buffer.layout is not torch.strided or not buffer.is_contiguous():
+                raise ValueError(f"FLUX.2-klein persistent buffer {name!r} must use contiguous strided layout")
+            if loader_buffer and (buffer.dtype is not torch.bfloat16 or buffer.numel() != 1):
+                raise ValueError(f"FLUX.2-klein loader buffer {name!r} must be a scalar bf16 tensor")
+
     def get_teacache_coefficients(self) -> list[float]:
         # Same as FLUX.1 (similar dual-stream architecture)
         return [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01]
