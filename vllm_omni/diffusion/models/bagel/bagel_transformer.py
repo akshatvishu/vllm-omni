@@ -40,7 +40,6 @@ from vllm.transformers_utils.configs.bagel import BagelConfig
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata as DiffusionAttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention as DiffusionAttention
 from vllm_omni.diffusion.cache.cachedit import BagelCachedAdapter, CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
 from vllm_omni.diffusion.data import DiffusionParallelConfig
 from vllm_omni.diffusion.distributed.cfg_parallel import CFGParallelMixin
 from vllm_omni.diffusion.distributed.parallel_state import (
@@ -1254,7 +1253,7 @@ def get_flattened_position_ids_extrapolate(img_h, img_w, patch_size, max_num_pat
     return pos_ids
 
 
-class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
+class Bagel(CFGParallelMixin, nn.Module):
     config_class = BagelConfig
     base_model_prefix = "bagel"
 
@@ -2450,19 +2449,6 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
         v_t = self.llm2vae(output.packed_query_sequence)
         v_t = v_t[packed_vae_token_indexes]
         return v_t
-
-    # SupportsTeaCache protocol stubs
-    def preprocess(self, *args, skip_modulated_input: bool, **kwargs) -> ForwardState:
-        raise NotImplementedError
-
-    def run_transformer_blocks(self, ctx: ForwardState) -> ForwardState:
-        raise NotImplementedError
-
-    def postprocess(self, ctx: ForwardState) -> torch.Tensor:
-        raise NotImplementedError
-
-    def get_teacache_coefficients(self) -> list[float]:
-        return [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00]
 
     def forward(
         self,

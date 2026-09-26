@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 """
 TeaCache: Timestep Embedding Aware Cache for diffusion model acceleration.
@@ -7,9 +7,8 @@ TeaCache: Timestep Embedding Aware Cache for diffusion model acceleration.
 TeaCache speeds up diffusion inference by reusing transformer block computations
 when consecutive timestep embeddings are similar.
 
-This implementation uses a hooks-based approach that requires zero changes to
-model code. Model developers only need to add an extractor function to support
-new models.
+This implementation uses a hook with model forward methods for migrated models.
+Legacy models use extractors until their forwards are migrated.
 
 Usage:
     from vllm_omni import Omni
@@ -34,13 +33,17 @@ from vllm_omni.diffusion.cache.teacache.extractors import (
 from vllm_omni.diffusion.cache.teacache.hook import TeaCacheHook, apply_teacache_hook
 from vllm_omni.diffusion.cache.teacache.protocol import (
     ForwardState,
+    SupportsDecomposedForward,
     SupportsTeaCache,
+    TeaCacheDefaults,
 )
 from vllm_omni.diffusion.cache.teacache.state import TeaCacheState
 
 __all__ = [
     "CacheContext",
+    "SupportsDecomposedForward",
     "SupportsTeaCache",
+    "TeaCacheDefaults",
     "TeaCacheBackend",
     "TeaCacheConfig",
     "ForwardState",

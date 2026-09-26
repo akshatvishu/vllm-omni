@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.base import CachedTransformer
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache, TeaCacheDefaults
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
     SequenceParallelOutput,
@@ -979,7 +979,6 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
             all_cap_feats_2_out,
         )
 
-    # SupportsTeaCache protocol stubs
     def preprocess(
         self,
         x: list[torch.Tensor],
@@ -1158,9 +1157,11 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         )
         return result, {}
 
-    def get_teacache_coefficients(self) -> list[float]:
+    def get_teacache_defaults(self) -> TeaCacheDefaults:
         # Copied from Qwen-Image, needs tuning for Z-Image
-        return [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02]
+        return TeaCacheDefaults(
+            [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02], rel_l1_thresh=0.2
+        )
 
     def forward(
         self,
@@ -1177,9 +1178,7 @@ class ZImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         NOTE: this is the disabled cache path; the forward is overridden by the TeaCache hook when it is
         enabled, which needs the modulated inputs for cache decision. Skipping modulated inputs is intentional.
         """
-        ctx = self.preprocess(
-            x, t, cap_feats, patch_size, f_patch_size, ref_x, cap_feats_2, skip_modulated_input=True
-        )
+        ctx = self.preprocess(x, t, cap_feats, patch_size, f_patch_size, ref_x, cap_feats_2, skip_modulated_input=True)
         ctx = self.run_transformer_blocks(ctx)
         return self.postprocess(ctx)
 

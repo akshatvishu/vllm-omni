@@ -95,6 +95,7 @@ DIFFUSION_TEST_SETTINGS = {
         model="Qwen/Qwen-Image",
         builder=diff_model_builders.tiny_qwen_image_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        extra_test_groups=[[DiffusionAccs.TEA_CACHE]],
     ),
     "LongCatImagePipeline": DiffusionModelTestOpts(
         model="meituan-longcat/LongCat-Image",
@@ -120,6 +121,7 @@ DIFFUSION_TEST_SETTINGS = {
         model="black-forest-labs/FLUX.1-schnell",
         builder=diff_model_builders.tiny_flux_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        extra_test_groups=[[DiffusionAccs.TEA_CACHE]],
     ),
     "FluxKontextPipeline": DiffusionModelTestOpts(
         model="black-forest-labs/FLUX.1-Kontext-dev",
@@ -136,6 +138,7 @@ DIFFUSION_TEST_SETTINGS = {
         builder=diff_model_builders.tiny_flux2_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
         extra_test_groups=[
+            [DiffusionAccs.TEA_CACHE],
             [DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
             [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.SEQUENCE_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
             [DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.VAE_PATCH_PARALLEL],
@@ -145,11 +148,13 @@ DIFFUSION_TEST_SETTINGS = {
         model="Qwen/Qwen-Image-Edit",
         builder=diff_model_builders.tiny_qwen_image_edit_builder,
         supported_tasks=[DiffusionTasks.IMAGE_TO_IMAGE],
+        extra_test_groups=[[DiffusionAccs.TEA_CACHE]],
     ),
     "QwenImageEditPlusPipeline": DiffusionModelTestOpts(
         model="Qwen/Qwen-Image-Edit-2511",
         builder=diff_model_builders.tiny_qwen_image_edit_plus_builder,
         supported_tasks=[DiffusionTasks.IMAGE_TO_IMAGE],
+        extra_test_groups=[[DiffusionAccs.TEA_CACHE]],
     ),
     "StableDiffusion3Pipeline": DiffusionModelTestOpts(
         model="stabilityai/stable-diffusion-3.5-medium",

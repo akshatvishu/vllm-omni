@@ -24,14 +24,14 @@ TeaCache speeds up diffusion inference by caching transformer block computations
 
 The core insight is that the modulated input (after normalization and timestep conditioning) changes gradually across timesteps. By measuring the L1 distance between consecutive modulated inputs and comparing it to a threshold, TeaCache decides whether to execute the full transformer blocks or reuse the cached residual from the previous step.
 
-vLLM-omni provides a **hook-based** TeaCache system that requires **zero changes to model code**. The hook completely intercepts the transformer's forward pass and implements adaptive caching transparently. This design allows easy integration with any transformer model by simply writing an extractor function.
+vLLM-omni supports TeaCache through model-owned `preprocess`, `run_transformer_blocks` and `postprocess` methods and through legacy extractor functions. The hook accepts both paths during the migration. The model-owned path changes model code deliberately so cached and uncached execution share one forward implementation; copied extractor forwards can drift from the model's forward. The extractor instructions below describe the legacy path until every model is ported.
 
 ### Architecture
 
 The TeaCache system consists of three main components:
 
 | Component | Purpose | Location |
-|-----------|---------|----------|
+| ----------- | --------- | ---------- |
 | [`CacheContext`](https://docs.vllm.ai/projects/vllm-omni/en/latest/api/vllm_omni/diffusion/cache/#vllm_omni.diffusion.cache.CacheContext) | Dataclass containing model-specific information for caching | `vllm_omni/diffusion/cache/teacache/context.py` |
 | [`EXTRACTOR_REGISTRY`](https://docs.vllm.ai/projects/vllm-omni/en/latest/api/vllm_omni/diffusion/cache/teacache/extractors/#vllm_omni.diffusion.cache.teacache.extractors.EXTRACTOR_REGISTRY) | Maps transformer class names to extractor functions | `vllm_omni/diffusion/cache/teacache/extractors.py` |
 | [`TeaCacheConfig`](https://docs.vllm.ai/projects/vllm-omni/en/latest/api/vllm_omni/diffusion/cache/#vllm_omni.diffusion.cache.TeaCacheConfig) | Configuration including thresholds and polynomial coefficients | `vllm_omni/diffusion/cache/teacache/config.py` |
@@ -43,12 +43,11 @@ The hook handles all caching logic automatically, including:
 - L1 distance computation with polynomial rescaling
 - Residual caching and reuse
 
-
 ---
 
 ## Step-by-Step Implementation
 
-To add TeaCache support for a new model, you need to:
+The steps below describe the legacy extractor path. New models should implement `SupportsTeaCache` so cached and uncached execution use the same model methods. See `QwenImageTransformer2DModel` in `vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py` for a complete example. Its explicit `forward` calls `preprocess`, `run_transformer_blocks` and `postprocess`, and the model defines `get_teacache_defaults()`. The Qwen extractor below is a historical example.
 
 1. Write an **extractor function** that returns a `CacheContext` object
 2. Register the extractor in the `EXTRACTOR_REGISTRY`
@@ -57,6 +56,7 @@ To add TeaCache support for a new model, you need to:
 ### Step 1: Model-Specific Preprocessing
 
 Extract and process model inputs. This typically involves:
+
 - Embedding image/latent inputs
 - Processing text encoder outputs (if dual-stream)
 - Creating timestep embeddings
@@ -196,14 +196,14 @@ Package all information into a `CacheContext` object.
 **CacheContext Fields:**
 
 | Field | Type | Purpose |
-|-------|------|---------|
+| ------- | ------ | --------- |
 | `modulated_input` | `torch.Tensor` | Tensor used for cache decision (similarity comparison) |
 | `hidden_states` | `torch.Tensor` | Current hidden states (will be modified by caching) |
-| `encoder_hidden_states` | `torch.Tensor | None` | Encoder states for dual-stream models, `None` for single-stream |
+| `encoder_hidden_states` | `torch.Tensor \| None` | Encoder states for dual-stream models, `None` for single-stream |
 | `temb` | `torch.Tensor` | Timestep embedding tensor |
 | `run_transformer_blocks` | `Callable[[], tuple]` | Executes transformer blocks, returns `(hidden_states, [encoder_hidden_states])` |
 | `postprocess` | `Callable[[torch.Tensor], Any]` | Applies final transformations to produce model output |
-| `extra_states` | `dict | None` | Optional dict for additional model-specific state |
+| `extra_states` | `dict \| None` | Optional dict for additional model-specific state |
 
 ### Step 6: Register the Extractor
 
@@ -211,9 +211,7 @@ Add your extractor to the `EXTRACTOR_REGISTRY` in `vllm_omni/diffusion/cache/tea
 
 ```python
 EXTRACTOR_REGISTRY: dict[str, Callable] = {
-    "QwenImageTransformer2DModel": extract_qwen_context,
     "Bagel": extract_bagel_context,
-    "ZImageTransformer2DModel": extract_zimage_context,
     "YourModelTransformer2DModel": extract_your_model_context,  # Add here
 }
 ```
@@ -239,7 +237,6 @@ _MODEL_COEFFICIENTS = {
 }
 ```
 
-
 **Initial approach:** Start with coefficients from a similar model architecture, then tune empirically following [Customization](#customization) section.
 
 ---
@@ -258,10 +255,10 @@ The polynomial coefficients rescale L1 distances between consecutive modulated i
 - Training data characteristics
 - Noise prediction behavior across timesteps
 
-| Approach | Performance | Effort |
-|----------|-------------|--------|
-| Using defaults from similar model | Within 5-10% of optimal | Low |
-| Estimating custom coefficients | Best performance | Medium |
+| Approach                          | Performance             | Effort |
+| --------------------------------- | ----------------------- | ------ |
+| Using defaults from similar model | Within 5-10% of optimal | Low    |
+| Estimating custom coefficients    | Best performance        | Medium |
 
 #### Implement Data Collection Adapter
 
@@ -330,6 +327,7 @@ print(f"Estimated coefficients: {coeffs}")
 ```
 
 Note: some models may require the vLLM context and config to be initialized to initialize vLLM modules. To this end, you may need a workaround like the following to be able to run coefficient estimation.
+
 ```python
 from vllm_omni.diffusion.forward_context import set_forward_context
 from vllm_omni.diffusion.distributed.parallel_state import (
@@ -360,11 +358,10 @@ if __name__ == "__main__":
         <create the estimator + run estimation here>
 ```
 
-
 **Data Statistics Guide:**
 
 | Metric | Good Range | Warning Signs |
-|--------|------------|---------------|
+| -------- | ------------ | --------------- |
 | **Count** | 2000-5000+ | < 1000: too few prompts |
 | **Input Diffs (x)** | 0.01-0.10 | Very small (<0.001): model may not modulate properly |
 | **Output Diffs (y)** | Should correlate with x | No correlation: check extractor |
@@ -417,7 +414,8 @@ See more detailed examples in [user guide for teacache](../../user_guide/diffusi
 
 **Problem:** The transformer class name doesn't exist in `EXTRACTOR_REGISTRY`.
 
-**Solution:** Check the class name and add to registry:
+**Solution:** For a new model, implement `SupportsTeaCache`. For a legacy model, check the class name and register its extractor:
+
 ```python
 # Check transformer class name
 print(pipeline.transformer.__class__.__name__)
@@ -436,9 +434,10 @@ EXTRACTOR_REGISTRY["YourTransformer2DModel"] = extract_your_context
 
 **Causes & Solutions:**
 
-- **Missing coefficients in config:**
+- **Missing coefficients:**
 
-**Solution:** Add coefficients to `_MODEL_COEFFICIENTS` in `config.py`, or pass custom coefficients:
+**Solution:** For a model that implements `SupportsTeaCache`, return the coefficients from `get_teacache_defaults()`. For a legacy extractor, add them to `_MODEL_COEFFICIENTS` in `config.py`. You can also pass custom coefficients:
+
 ```python
 omni = Omni(
     model="your-model",
@@ -458,6 +457,7 @@ omni = Omni(
 **Problem:** `rel_l1_thresh` is too aggressive, causing cache reuse when outputs differ significantly.
 
 **Solution:** Lower the threshold:
+
 ```python
 cache_config={"rel_l1_thresh": 0.1}  # Try 0.1-0.2
 ```
@@ -473,8 +473,8 @@ cache_config={"rel_l1_thresh": 0.1}  # Try 0.1-0.2
 Complete examples in the codebase:
 
 | Model | Path | Pattern | Notes |
-|-------|------|---------|-------|
-| **Qwen-Image** | `vllm_omni/diffusion/cache/teacache/extractors.py` | Dual-stream | `extract_qwen_context` |
+| ------- | ------ | --------- | ------- |
+| **Qwen-Image** | `vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py` | Decomposed forward | `preprocess`, `run_transformer_blocks`, `postprocess` |
 | **Bagel** | `vllm_omni/diffusion/cache/teacache/extractors.py` | Omni model | `extract_bagel_context` |
 | **TeaCache Core** | `vllm_omni/diffusion/cache/teacache/` | Base implementation | Hook and config |
 | **Coefficient Estimator** | `vllm_omni/diffusion/cache/teacache/coefficient_estimator.py` | Estimation tool | Adapter pattern |
@@ -483,9 +483,10 @@ Complete examples in the codebase:
 
 ## Summary
 
-Adding TeaCache support:
+Adding TeaCache support to a new model:
 
-1. ✅ **Write extractor** - Create function returning `CacheContext` with model-specific preprocessing
-2. ✅ **Register extractor** - Add to `EXTRACTOR_REGISTRY` with transformer class name
-3. ✅ **Add coefficients** - Add polynomial coefficients to `_MODEL_COEFFICIENTS`
-4. ✅ **Test** - Verify with `cache_backend="tea_cache"`
+1. Implement `preprocess`, `run_transformer_blocks`, and `postprocess` on the model.
+2. Implement `get_teacache_defaults()` with the model's coefficients and threshold.
+3. Test the split forward and cache behavior with `cache_backend="tea_cache"`.
+
+The extractor and coefficient table steps above apply to models still using the legacy path.

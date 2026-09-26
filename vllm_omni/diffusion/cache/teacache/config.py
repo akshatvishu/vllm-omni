@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from dataclasses import dataclass
 
@@ -9,6 +9,14 @@ from dataclasses import dataclass
 
 # TODO - need to move hunyuan image out of this path and onto the hook approach
 _MODEL_COEFFICIENTS = {
+    "Bagel": [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00],
+    "SenseNovaU1ForCausalLM": [
+        9.07281930e04,
+        -2.17699186e04,
+        1.83940990e03,
+        -6.30339273e01,
+        7.61309272e-01,
+    ],
     "HunyuanImage3Pipeline": [
         1.04117826e02,
         -1.26848482e02,

@@ -24,7 +24,7 @@ from vllm.triton_utils import HAS_TRITON
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache, TeaCacheDefaults
 from vllm_omni.diffusion.data import DiffusionParallelConfig, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelInput,
@@ -737,6 +737,7 @@ class LongCatState:
     """Intermediate model-specific info for LongCat Image Transformer."""
 
     image_rotary_emb: tuple[torch.Tensor, torch.Tensor]
+    return_dict: bool
 
 
 class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
@@ -837,13 +838,31 @@ class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
         self.use_checkpoint = [True] * num_layers
         self.use_single_checkpoint = [True] * num_single_layers
 
-    def forward(self, *args, **kwargs) -> Transformer2DModelOutput:
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor = None,
+        timestep: torch.LongTensor = None,
+        img_ids: torch.Tensor = None,
+        txt_ids: torch.Tensor = None,
+        guidance: torch.Tensor = None,
+        return_dict: bool = True,
+    ) -> tuple[torch.Tensor] | Transformer2DModelOutput:
         """Forward pass for the DiT, which is implemented using the methods outlined by SupportsTeaCache.
 
         NOTE: this is the disabled cache path; the forward is overridden by the TeaCache hook when it is
         enabled, which needs the modulated inputs for cache decision. Skipping modulated inputs is intentional.
         """
-        ctx = self.preprocess(*args, **kwargs, skip_modulated_input=True)
+        ctx = self.preprocess(
+            hidden_states,
+            encoder_hidden_states,
+            timestep,
+            img_ids,
+            txt_ids,
+            guidance,
+            return_dict,
+            skip_modulated_input=True,
+        )
         ctx = self.run_transformer_blocks(ctx)
         return self.postprocess(ctx)
 
@@ -855,6 +874,7 @@ class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
         img_ids: torch.Tensor = None,
         txt_ids: torch.Tensor = None,
         guidance: torch.Tensor = None,
+        return_dict: bool = True,
         *,
         skip_modulated_input: bool = False,
     ) -> ForwardState[LongCatState]:
@@ -900,6 +920,7 @@ class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
             temb,
             intermediates=LongCatState(
                 image_rotary_emb=image_rotary_emb,
+                return_dict=return_dict,
             ),
         )
 
@@ -921,14 +942,16 @@ class LongCatImageTransformer2DModel(nn.Module, SupportsTeaCache):
             )
         return ctx
 
-    def postprocess(self, ctx: ForwardState[LongCatState]) -> Transformer2DModelOutput:
+    def postprocess(self, ctx: ForwardState[LongCatState]) -> tuple[torch.Tensor] | Transformer2DModelOutput:
         ctx.hidden_states = self.norm_out(ctx.hidden_states, ctx.temb)
         # proj_out gathers for sequence parallel
         output = self.proj_out(ctx.hidden_states)
+        if not ctx.intermediates.return_dict:
+            return (output,)
         return Transformer2DModelOutput(sample=output)
 
-    def get_teacache_coefficients(self) -> list[float]:
-        return [652.5980, -424.1615, 84.5526, -4.5923, 0.1694]
+    def get_teacache_defaults(self) -> TeaCacheDefaults:
+        return TeaCacheDefaults([652.5980, -424.1615, 84.5526, -4.5923, 0.1694], rel_l1_thresh=0.2)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [

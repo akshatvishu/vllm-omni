@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -28,7 +28,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache, TeaCacheDefaults
 from vllm_omni.quantization.component_config import safe_quant_config
 
 if TYPE_CHECKING:
@@ -486,6 +486,7 @@ class FluxState:
 
     image_rotary_emb: tuple[torch.Tensor, torch.Tensor]
     joint_attention_kwargs: dict[str, Any]
+    return_dict: bool
 
 
 class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
@@ -620,13 +621,35 @@ class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
         )
         self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
 
-    def forward(self, *args, **kwargs) -> Transformer2DModelOutput:
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor = None,
+        pooled_projections: torch.Tensor = None,
+        timestep: torch.LongTensor = None,
+        img_ids: torch.Tensor = None,
+        txt_ids: torch.Tensor = None,
+        guidance: torch.Tensor | None = None,
+        joint_attention_kwargs: dict[str, Any] | None = None,
+        return_dict: bool = True,
+    ) -> tuple[torch.Tensor] | Transformer2DModelOutput:
         """Forward pass for the DiT, which is implemented using the methods outlined by SupportsTeaCache.
 
         NOTE: this is the disabled cache path; the forward is overridden by the TeaCache hook when it is
         enabled, which needs the modulated inputs for cache decision. Skipping modulated inputs is intentional.
         """
-        ctx = self.preprocess(*args, **kwargs, skip_modulated_input=True)
+        ctx = self.preprocess(
+            hidden_states,
+            encoder_hidden_states,
+            pooled_projections,
+            timestep,
+            img_ids,
+            txt_ids,
+            guidance,
+            joint_attention_kwargs,
+            return_dict,
+            skip_modulated_input=True,
+        )
         ctx = self.run_transformer_blocks(ctx)
         return self.postprocess(ctx)
 
@@ -640,6 +663,7 @@ class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
         txt_ids: torch.Tensor = None,
         guidance: torch.Tensor | None = None,
         joint_attention_kwargs: dict[str, Any] | None = None,
+        return_dict: bool = True,
         *,
         skip_modulated_input: bool = False,
     ) -> ForwardState[FluxState]:
@@ -689,6 +713,7 @@ class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
             intermediates=FluxState(
                 image_rotary_emb=image_rotary_emb,
                 joint_attention_kwargs=joint_attention_kwargs,
+                return_dict=return_dict,
             ),
         )
 
@@ -712,14 +737,18 @@ class FluxTransformer2DModel(nn.Module, SupportsTeaCache):
             )
         return ctx
 
-    def postprocess(self, ctx: ForwardState[FluxState]) -> Transformer2DModelOutput:
+    def postprocess(self, ctx: ForwardState[FluxState]) -> tuple[torch.Tensor] | Transformer2DModelOutput:
         ctx.hidden_states = self.norm_out(ctx.hidden_states, ctx.temb)
         output = self.proj_out(ctx.hidden_states)
 
+        if not ctx.intermediates.return_dict:
+            return (output,)
         return Transformer2DModelOutput(sample=output)
 
-    def get_teacache_coefficients(self) -> list[float]:
-        return [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01]
+    def get_teacache_defaults(self) -> TeaCacheDefaults:
+        return TeaCacheDefaults(
+            [4.98651651e02, -2.83781631e02, 5.58554382e01, -3.82021401e00, 2.64230861e-01], rel_l1_thresh=0.2
+        )
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [

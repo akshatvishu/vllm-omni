@@ -1,25 +1,26 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 """
 Hook-based TeaCache implementation for vLLM-Omni.
 
-This module implements a diffusers-style hook system that completely intercepts
-the transformer forward pass, eliminating the need for any TeaCache-specific
-code in model definitions. Model developers only need to add an extractor function
-to support new models.
+This module intercepts the transformer forward pass for both model forward
+protocols and the legacy extractor interface during the migration.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import numpy as np
 import torch
+from vllm.logger import init_logger
 
 from vllm_omni.diffusion.cache.teacache.config import TeaCacheConfig
-from vllm_omni.diffusion.cache.teacache.extractors import get_extractor
-from vllm_omni.diffusion.cache.teacache.protocol import SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.extractors import CacheContext, get_extractor
+from vllm_omni.diffusion.cache.teacache.protocol import SupportsTeaCache, validate_protocol_forward
 from vllm_omni.diffusion.cache.teacache.state import TeaCacheState
 from vllm_omni.diffusion.distributed.parallel_state import (
     get_classifier_free_guidance_rank,
@@ -28,6 +29,8 @@ from vllm_omni.diffusion.distributed.parallel_state import (
     model_parallel_is_initialized,
 )
 from vllm_omni.diffusion.hooks import HookRegistry, ModelHook, StateManager
+
+logger = init_logger(__name__)
 
 
 def _average_l1_stats_across_sp(mean_diff: torch.Tensor, mean_prev: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -56,13 +59,11 @@ class TeaCacheHook(ModelHook):
     ModelHook implementing TeaCache for transformer models.
 
     This hook completely intercepts the transformer's forward pass and implements
-    adaptive caching based on timestep embedding similarity. It's model-agnostic
-    and supports multiple model types through extractor functions.
+    adaptive caching based on timestep embedding similarity. Models can use a
+    decomposed forward or the legacy extractor interface.
 
     Key features:
-    - Zero changes to model code
-    - CFG-aware with separate states for positive/negative branches
-    - CFG-parallel compatible: properly detects branch identity across ranks
+    - Separate states for the existing positive and negative CFG branches
     - Model-specific polynomial rescaling
     - Auto-detection of model types
 
@@ -70,7 +71,7 @@ class TeaCacheHook(ModelHook):
         config: TeaCache configuration with thresholds and callbacks
         rescale_func: Polynomial function for rescaling L1 distances
         state_manager: Manages TeaCacheState across forward passes
-        extractor_fn: Model-specific function to extract modulated input
+        _forward_impl: Forward path chosen when the hook is initialized
     """
 
     _HOOK_NAME = "teacache"
@@ -86,25 +87,22 @@ class TeaCacheHook(ModelHook):
         self.config = config
         self.rescale_func = np.poly1d(config.coefficients)
         self.state_manager = StateManager(TeaCacheState)
-        self.extractor_fn = None
+        self._forward_impl: Callable[..., Any]
         self._forward_cnt = 0
 
-    def initialize_hook(self, module: torch.nn.Module | SupportsTeaCache) -> torch.nn.Module:
+    def initialize_hook(self, module: torch.nn.Module) -> torch.nn.Module:
         if isinstance(module, SupportsTeaCache):
-            self.extractor_fn = None
+            validate_protocol_forward(module)
+            self._forward_impl = self._protocol_forward
         else:
-            self.extractor_fn = get_extractor(self.config.transformer_type)
-
+            self._forward_impl = partial(self._legacy_forward, get_extractor(self.config.transformer_type))
         self.state_manager.set_context("teacache")
         return module
 
-    def new_forward(self, module: torch.nn.Module | SupportsTeaCache, *args: Any, **kwargs: Any) -> Any:
-        if isinstance(module, SupportsTeaCache):
-            return self._protocol_forward(module, *args, **kwargs)
-        return self._legacy_forward(module, *args, **kwargs)
+    def new_forward(self, module: torch.nn.Module, *args: Any, **kwargs: Any) -> Any:
+        return self._forward_impl(module, *args, **kwargs)
 
     def _get_cache_state(self, module: torch.nn.Module) -> TeaCacheState:
-        """Resolve CFG branch and return the corresponding cache state."""
         if getattr(module, "do_true_cfg", False):
             cfg_parallel_size = get_classifier_free_guidance_world_size()
             if cfg_parallel_size > 1:
@@ -119,84 +117,80 @@ class TeaCacheHook(ModelHook):
         return self.state_manager.get_state()
 
     def _protocol_forward(self, module: SupportsTeaCache, *args: Any, **kwargs: Any) -> Any:
-        """Forward using SupportsTeaCache protocol methods."""
         ctx = module.preprocess(*args, skip_modulated_input=False, **kwargs)
-        state = self._get_cache_state(module)
-        local_should_compute = self._should_compute_full_transformer(state, ctx.modulated_input)
-        sync_cache_decision = (ctx.extra_states or {}).get("synchronize_cache_decision")
-        if sync_cache_decision is not None:
-            should_compute = sync_cache_decision(local_should_compute)
-            # A rank that locally chose the cache path must reset its counter
-            # when another SP rank requires a full collective block execution.
-            if should_compute and not local_should_compute:
-                state.accumulated_rel_l1_distance = 0.0
-        else:
-            should_compute = local_should_compute
 
-        if not should_compute and state.previous_residual is not None:
-            ctx.hidden_states = ctx.hidden_states + state.previous_residual
-            if state.previous_residual_encoder is not None and ctx.encoder_hidden_states is not None:
-                ctx.encoder_hidden_states = ctx.encoder_hidden_states + state.previous_residual_encoder
-        else:
-            ori_hidden_states = ctx.hidden_states.clone()
-            ori_encoder_hidden_states = (
-                ctx.encoder_hidden_states.clone() if ctx.encoder_hidden_states is not None else None
-            )
-
+        def run_blocks():
+            nonlocal ctx
             ctx = module.run_transformer_blocks(ctx)
+            return ctx.hidden_states, ctx.encoder_hidden_states
 
-            state.previous_residual = (ctx.hidden_states - ori_hidden_states).detach()
-            if ori_encoder_hidden_states is not None:
-                state.previous_residual_encoder = (ctx.encoder_hidden_states - ori_encoder_hidden_states).detach()
-
-        state.previous_modulated_input = ctx.modulated_input.detach()
-        state.cnt += 1
-        self._forward_cnt += 1
-
+        ctx.hidden_states, ctx.encoder_hidden_states = self._cache_step(
+            module, ctx.modulated_input, ctx.hidden_states, ctx.encoder_hidden_states, run_blocks
+        )
         return module.postprocess(ctx)
 
-    def _legacy_forward(self, module: torch.nn.Module, *args: Any, **kwargs: Any) -> Any:
-        """Forward using legacy extractor-based CacheContext (to be removed)."""
-        ctx = self.extractor_fn(module, *args, **kwargs)
+    def _legacy_forward(
+        self, extractor: Callable[..., CacheContext], module: torch.nn.Module, *args: Any, **kwargs: Any
+    ) -> Any:
+        ctx = extractor(module, *args, **kwargs)
+        extra_states = ctx.extra_states or {}
+
+        def run_blocks():
+            outputs = ctx.run_transformer_blocks()
+            encoder = (
+                outputs[1] if len(outputs) > 1 and ctx.encoder_hidden_states is not None else ctx.encoder_hidden_states
+            )
+            return outputs[0], encoder
+
+        ctx.hidden_states, ctx.encoder_hidden_states = self._cache_step(
+            module,
+            ctx.modulated_input,
+            ctx.hidden_states,
+            ctx.encoder_hidden_states,
+            run_blocks,
+            sync_cache_decision=extra_states.get("synchronize_cache_decision"),
+        )
+        return ctx.postprocess(ctx.hidden_states)
+
+    def _cache_step(
+        self,
+        module: torch.nn.Module,
+        modulated_input: torch.Tensor | None,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor | None,
+        run_blocks: Callable[[], tuple[torch.Tensor, torch.Tensor | None]],
+        sync_cache_decision: Callable[[bool], bool] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if modulated_input is None:
+            raise ValueError("TeaCache preprocessing did not provide a modulated input")
+
         state = self._get_cache_state(module)
-        local_should_compute = self._should_compute_full_transformer(state, ctx.modulated_input)
-        sync_cache_decision = (ctx.extra_states or {}).get("synchronize_cache_decision")
+        local_should_compute = self._should_compute_full_transformer(state, modulated_input)
         if sync_cache_decision is not None:
             should_compute = sync_cache_decision(local_should_compute)
-            # A rank that locally chose the cache path must reset its counter
-            # when another SP rank requires a full collective block execution.
             if should_compute and not local_should_compute:
                 state.accumulated_rel_l1_distance = 0.0
         else:
             should_compute = local_should_compute
 
-        if not should_compute and state.previous_residual is not None:
-            ctx.hidden_states = ctx.hidden_states + state.previous_residual
-            if state.previous_residual_encoder is not None and ctx.encoder_hidden_states is not None:
-                ctx.encoder_hidden_states = ctx.encoder_hidden_states + state.previous_residual_encoder
-            output = ctx.hidden_states
+        cache_hit = not should_compute and state.previous_residual is not None
+        if cache_hit:
+            hidden_states = hidden_states + state.previous_residual
+            if state.previous_residual_encoder is not None and encoder_hidden_states is not None:
+                encoder_hidden_states = encoder_hidden_states + state.previous_residual_encoder
         else:
-            ori_hidden_states = ctx.hidden_states.clone()
-            ori_encoder_hidden_states = (
-                ctx.encoder_hidden_states.clone() if ctx.encoder_hidden_states is not None else None
-            )
+            original_hidden = hidden_states.clone()
+            original_encoder = encoder_hidden_states.clone() if encoder_hidden_states is not None else None
+            hidden_states, encoder_hidden_states = run_blocks()
+            state.previous_residual = (hidden_states - original_hidden).detach()
+            if original_encoder is not None:
+                state.previous_residual_encoder = (encoder_hidden_states - original_encoder).detach()
 
-            outputs = ctx.run_transformer_blocks()
-            ctx.hidden_states = outputs[0]
-            if len(outputs) > 1 and ctx.encoder_hidden_states is not None:
-                ctx.encoder_hidden_states = outputs[1]
-
-            output = ctx.hidden_states
-
-            state.previous_residual = (ctx.hidden_states - ori_hidden_states).detach()
-            if ori_encoder_hidden_states is not None:
-                state.previous_residual_encoder = (ctx.encoder_hidden_states - ori_encoder_hidden_states).detach()
-
-        state.previous_modulated_input = ctx.modulated_input.detach()
+        logger.debug("TeaCache step=%d cache_hit=%s", state.cnt, cache_hit)
+        state.previous_modulated_input = modulated_input.detach()
         state.cnt += 1
         self._forward_cnt += 1
-
-        return ctx.postprocess(output)
+        return hidden_states, encoder_hidden_states
 
     def _should_compute_full_transformer(self, state: TeaCacheState, modulated_inp: torch.Tensor) -> bool:
         """
@@ -269,8 +263,8 @@ def apply_teacache_hook(module: torch.nn.Module, config: TeaCacheConfig) -> None
     Apply TeaCache optimization to a transformer module.
 
     This function registers a TeaCacheHook that completely intercepts the
-    module's forward pass, implementing adaptive caching without any changes
-    to the model code.
+    module's forward pass and uses either the model's decomposed forward or a
+    legacy extractor.
 
     Args:
         module: Transformer model to optimize (e.g., QwenImageTransformer2DModel)
@@ -282,8 +276,6 @@ def apply_teacache_hook(module: torch.nn.Module, config: TeaCacheConfig) -> None
         ...     transformer_type="QwenImageTransformer2DModel"
         ... )
         >>> apply_teacache_hook(transformer, config)
-        >>> # Transformer bound to the pipeline now uses TeaCache automatically,
-        ... # no code changes needed!
     """
     registry = HookRegistry.get_or_create(module)
     hook = TeaCacheHook(config)

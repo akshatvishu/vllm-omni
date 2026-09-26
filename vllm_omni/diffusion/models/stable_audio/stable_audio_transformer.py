@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 """
 Stable Audio DiT Model for vLLM-Omni.
@@ -19,7 +19,7 @@ from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache, TeaCacheDefaults
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
 from vllm_omni.diffusion.layers.fourier import GaussianFourierProjection
@@ -80,7 +80,10 @@ class StableAudioState:
 
     original_seq_len: int
     cross_attention_hidden_states: torch.Tensor
-    rotary_embedding: tuple[torch.Tensor, torch.Tensor]
+    rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None
+    return_dict: bool
+    attention_mask: torch.Tensor | None
+    encoder_attention_mask: torch.Tensor | None
 
 
 class StableAudioSchedulerWrapper:
@@ -227,6 +230,7 @@ class StableAudioSelfAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size, seq_len, _ = hidden_states.shape
 
@@ -315,6 +319,8 @@ class StableAudioCrossAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        encoder_attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size, seq_len, _ = hidden_states.shape
         encoder_seq_len = encoder_hidden_states.shape[1]
@@ -427,12 +433,14 @@ class StableAudioDiTBlock(nn.Module):
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        rotary_embedding: tuple[torch.Tensor, torch.Tensor],
+        rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
+        attention_mask: torch.Tensor | None = None,
+        encoder_attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # Self-attention with skip connection
         residual = hidden_states
         hidden_states = self.norm1(hidden_states)
-        hidden_states = self.attn1(hidden_states, rotary_emb=rotary_embedding)
+        hidden_states = self.attn1(hidden_states, rotary_emb=rotary_embedding, attention_mask=attention_mask)
         hidden_states = residual + hidden_states
 
         # Cross-attention with skip connection
@@ -441,6 +449,8 @@ class StableAudioDiTBlock(nn.Module):
         hidden_states = self.attn2(
             hidden_states,
             encoder_hidden_states,
+            attention_mask=attention_mask,
+            encoder_attention_mask=encoder_attention_mask,
         )
         hidden_states = residual + hidden_states
 
@@ -586,16 +596,18 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
         """Return the dtype of the model parameters."""
         return next(self.parameters()).dtype
 
-    # SupportsTeaCache protocol stubs
     def preprocess(
         self,
         hidden_states: torch.Tensor,
         timestep: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        global_hidden_states: torch.Tensor | None,
-        rotary_embedding: tuple[torch.Tensor, torch.Tensor],
+        global_hidden_states: torch.Tensor | None = None,
+        rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
+        return_dict: bool = True,
+        attention_mask: torch.Tensor | None = None,
+        encoder_attention_mask: torch.Tensor | None = None,
         *,
-        skip_modulated_input: bool = True,
+        skip_modulated_input: bool = False,
     ) -> ForwardState[StableAudioState]:
         # Project cross-attention inputs
         cross_attention_hidden_states = self.cross_attention_proj(encoder_hidden_states)
@@ -624,6 +636,10 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
         # Prepend global states to hidden states: [B, 1+L, inner_dim]
         hidden_states = torch.cat([temb, hidden_states], dim=1)
 
+        if attention_mask is not None:
+            prepend_mask = torch.ones((hidden_states.shape[0], 1), device=hidden_states.device, dtype=torch.bool)
+            attention_mask = torch.cat([prepend_mask, attention_mask], dim=-1)
+
         if not skip_modulated_input:
             # Stable Audio prepends the combined global+time embedding (`temb`) to the sequence.
             # Therefore, the standard LayerNorm applied here still captures the timestep signal
@@ -642,6 +658,9 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
                 original_seq_len=original_seq_len,
                 cross_attention_hidden_states=cross_attention_hidden_states,
                 rotary_embedding=rotary_embedding,
+                return_dict=return_dict,
+                attention_mask=attention_mask,
+                encoder_attention_mask=encoder_attention_mask,
             ),
         )
 
@@ -652,25 +671,52 @@ class StableAudioDiTModel(nn.Module, SupportsTeaCache):
                 ctx.hidden_states,
                 ctx.intermediates.cross_attention_hidden_states,
                 rotary_embedding=ctx.intermediates.rotary_embedding,
+                attention_mask=ctx.intermediates.attention_mask,
+                encoder_attention_mask=ctx.intermediates.encoder_attention_mask,
             )
         return ctx
 
-    def postprocess(self, ctx: ForwardState[StableAudioState]) -> Transformer2DModelOutput:
+    def postprocess(self, ctx: ForwardState[StableAudioState]) -> tuple[torch.Tensor] | Transformer2DModelOutput:
         ctx.hidden_states = self.proj_out(ctx.hidden_states)
         ctx.hidden_states = ctx.hidden_states.transpose(1, 2)[:, :, -ctx.intermediates.original_seq_len :]
         output = self.postprocess_conv(ctx.hidden_states) + ctx.hidden_states
+        if not ctx.intermediates.return_dict:
+            return (output,)
         return Transformer2DModelOutput(sample=output)
 
-    def get_teacache_coefficients(self) -> list[float]:
-        return [121.77490545701518, -153.7449426160371, 68.05368574596551, -12.281286412689623, 1.0733905006198015]
+    def get_teacache_defaults(self) -> TeaCacheDefaults:
+        return TeaCacheDefaults(
+            [121.77490545701518, -153.7449426160371, 68.05368574596551, -12.281286412689623, 1.0733905006198015],
+            rel_l1_thresh=0.2,
+        )
 
-    def forward(self, *args, **kwargs) -> Transformer2DModelOutput:
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        global_hidden_states: torch.Tensor | None = None,
+        rotary_embedding: tuple[torch.Tensor, torch.Tensor] | None = None,
+        return_dict: bool = True,
+        attention_mask: torch.Tensor | None = None,
+        encoder_attention_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor] | Transformer2DModelOutput:
         """Forward pass for the DiT, which is implemented using the methods outlined by SupportsTeaCache.
 
         NOTE: this is the disabled cache path; the forward is overridden by the TeaCache hook when it is
         enabled, which needs the modulated inputs for cache decision. Skipping modulated inputs is intentional.
         """
-        ctx = self.preprocess(*args, **kwargs, skip_modulated_input=True)
+        ctx = self.preprocess(
+            hidden_states,
+            timestep,
+            encoder_hidden_states,
+            global_hidden_states,
+            rotary_embedding,
+            return_dict,
+            attention_mask,
+            encoder_attention_mask,
+            skip_modulated_input=True,
+        )
         ctx = self.run_transformer_blocks(ctx)
         return self.postprocess(ctx)
 

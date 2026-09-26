@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 """
 TeaCache backend implementation.
@@ -10,7 +10,6 @@ interface using the hooks-based TeaCache system.
 
 from typing import Any
 
-import torch.nn as nn
 from vllm.logger import init_logger
 
 from vllm_omni.diffusion.cache.base import CacheBackend
@@ -22,16 +21,20 @@ from vllm_omni.diffusion.data import DiffusionCacheConfig
 logger = init_logger(__name__)
 
 
-def _resolve_coefficients(
-    transformer: nn.Module,
-    config: DiffusionCacheConfig,
-) -> list[float]:
-    """User override, otherwise model provides its own."""
-    if not isinstance(transformer, SupportsTeaCache):
-        raise TypeError(f"{type(transformer).__name__} does not implement SupportsTeaCache")
-    if config.coefficients is not None:
-        return config.coefficients
-    return transformer.get_teacache_coefficients()
+def _make_teacache_config(transformer: Any, transformer_type: str, config: DiffusionCacheConfig) -> TeaCacheConfig:
+    coefficients = config.coefficients
+    rel_l1_thresh = config.rel_l1_thresh
+    if isinstance(transformer, SupportsTeaCache):
+        defaults = transformer.get_teacache_defaults()
+        if coefficients is None:
+            coefficients = defaults.coefficients
+        if rel_l1_thresh is None:
+            rel_l1_thresh = defaults.rel_l1_thresh
+    return TeaCacheConfig(
+        transformer_type=transformer_type,
+        rel_l1_thresh=rel_l1_thresh,
+        coefficients=coefficients,
+    )
 
 
 def enable_hunyuan_image3_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
@@ -54,11 +57,7 @@ def enable_hunyuan_image3_teacache(pipeline: Any, config: DiffusionCacheConfig) 
 
 def enable_bagel_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
     transformer = pipeline.bagel
-    teacache_config = TeaCacheConfig(
-        transformer_type="Bagel",
-        rel_l1_thresh=config.rel_l1_thresh,
-        coefficients=_resolve_coefficients(transformer, config),
-    )
+    teacache_config = _make_teacache_config(transformer, "Bagel", config)
     apply_teacache_hook(transformer, teacache_config)
     pipeline.transformer = transformer
 
@@ -69,12 +68,9 @@ def enable_bagel_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
 
 
 def enable_sensenova_u1_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
+    """Enable TeaCache for SenseNova-U1 denoising forwards."""
     transformer = pipeline.denoising_transformer
-    teacache_config = TeaCacheConfig(
-        transformer_type="SenseNovaU1ForCausalLM",
-        rel_l1_thresh=config.rel_l1_thresh,
-        coefficients=_resolve_coefficients(transformer, config),
-    )
+    teacache_config = _make_teacache_config(transformer, "SenseNovaU1ForCausalLM", config)
     apply_teacache_hook(transformer, teacache_config)
 
     logger.info(
@@ -93,11 +89,7 @@ def enable_minimax_h3_teacache(pipeline: Any, config: DiffusionCacheConfig) -> N
     if partition not in {"fl2va", "combined"}:
         raise ValueError(f"Unsupported MiniMax-H3 partition for TeaCache: {partition!r}")
 
-    teacache_config = TeaCacheConfig(
-        transformer_type="MiniMaxH3DiTModel",
-        rel_l1_thresh=config.rel_l1_thresh,
-        coefficients=config.coefficients,
-    )
+    teacache_config = _make_teacache_config(pipeline.transformer, "MiniMaxH3DiTModel", config)
     apply_teacache_hook(pipeline.transformer, teacache_config)
 
     if partition == "combined":
@@ -109,7 +101,6 @@ def enable_minimax_h3_teacache(pipeline: Any, config: DiffusionCacheConfig) -> N
         f"TeaCache applied with rel_l1_thresh={teacache_config.rel_l1_thresh}, "
         "transformer_class=MiniMaxH3DiTModel, partition=FL2VA"
     )
-
 
 
 CUSTOM_TEACACHE_ENABLERS = {
@@ -166,11 +157,7 @@ class TeaCacheBackend(CacheBackend):
             # Create TeaCacheConfig from DiffusionCacheConfig with transformer_type
             # Access parameters via attribute access: config.rel_l1_thresh
             try:
-                teacache_config = TeaCacheConfig(
-                    transformer_type=transformer_type,
-                    rel_l1_thresh=self.config.rel_l1_thresh,
-                    coefficients=_resolve_coefficients(transformer, self.config),
-                )
+                teacache_config = _make_teacache_config(transformer, transformer_type, self.config)
             except Exception as e:
                 logger.error(f"Failed to create TeaCacheConfig: {e}")
                 raise ValueError(

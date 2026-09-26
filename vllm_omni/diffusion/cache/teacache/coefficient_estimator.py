@@ -1,15 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 import os
-from typing import Any
+from collections.abc import Callable
+from functools import partial
+from typing import Any, ClassVar
 
 import numpy as np
 import torch
 from vllm.config import LoadConfig
 from vllm.transformers_utils.config import get_hf_file_to_dict
 
-from vllm_omni.diffusion.cache.teacache.extractors import get_extractor
+from vllm_omni.diffusion.cache.teacache.extractors import CacheContext, get_extractor
+from vllm_omni.diffusion.cache.teacache.protocol import SupportsDecomposedForward, validate_protocol_forward
 from vllm_omni.diffusion.data import OmniDiffusionConfig, TransformerConfig
 from vllm_omni.diffusion.hooks import HookRegistry, ModelHook
 from vllm_omni.diffusion.model_loader.diffusers_loader import DiffusersPipelineLoader
@@ -25,26 +28,45 @@ class DataCollectionHook(ModelHook):
     def __init__(self, transformer_type: str):
         super().__init__()
         self.transformer_type = transformer_type
-        self.extractor_fn = None
+        self._forward_impl: Callable[..., Any]
         self.current_trajectory: list[tuple[np.ndarray, np.ndarray]] = []
 
     def initialize_hook(self, module: torch.nn.Module) -> torch.nn.Module:
-        self.extractor_fn = get_extractor(self.transformer_type)
+        if isinstance(module, SupportsDecomposedForward):
+            validate_protocol_forward(module)
+            self._forward_impl = self._protocol_forward
+        else:
+            self._forward_impl = partial(self._legacy_forward, get_extractor(self.transformer_type))
         return module
 
     def new_forward(self, module: torch.nn.Module, *args: Any, **kwargs: Any) -> Any:
-        ctx = self.extractor_fn(module, *args, **kwargs)
-        # NOTE: We upcast to float32 to also handle bfloat16.
+        return self._forward_impl(module, *args, **kwargs)
+
+    def _protocol_forward(self, module: SupportsDecomposedForward, *args: Any, **kwargs: Any) -> Any:
+        ctx = module.preprocess(*args, skip_modulated_input=False, **kwargs)
+        if ctx.modulated_input is None:
+            raise ValueError("TeaCache preprocessing did not provide a modulated input")
         modulated_input_cpu = ctx.modulated_input.detach().float().cpu().numpy()
-
-        outputs = ctx.run_transformer_blocks()
-        ctx.hidden_states = outputs[0]
-        if len(outputs) > 1 and ctx.encoder_hidden_states is not None:
-            ctx.encoder_hidden_states = outputs[1]
-
+        ctx = module.run_transformer_blocks(ctx)
         model_output_cpu = ctx.hidden_states.detach().float().cpu().numpy()
         self.current_trajectory.append((modulated_input_cpu, model_output_cpu))
-        return ctx.postprocess(ctx.hidden_states)
+        return module.postprocess(ctx)
+
+    def _legacy_forward(
+        self, extractor: Callable[..., CacheContext], module: torch.nn.Module, *args: Any, **kwargs: Any
+    ) -> Any:
+        legacy_ctx = extractor(module, *args, **kwargs)
+        # NOTE: We upcast to float32 to also handle bfloat16.
+        modulated_input_cpu = legacy_ctx.modulated_input.detach().float().cpu().numpy()
+
+        outputs = legacy_ctx.run_transformer_blocks()
+        legacy_ctx.hidden_states = outputs[0]
+        if len(outputs) > 1 and legacy_ctx.encoder_hidden_states is not None:
+            legacy_ctx.encoder_hidden_states = outputs[1]
+
+        model_output_cpu = legacy_ctx.hidden_states.detach().float().cpu().numpy()
+        self.current_trajectory.append((modulated_input_cpu, model_output_cpu))
+        return legacy_ctx.postprocess(legacy_ctx.hidden_states)
 
     def start_collection(self):
         self.current_trajectory = []
@@ -56,7 +78,7 @@ class DataCollectionHook(ModelHook):
 class DefaultAdapter:
     """Default adapter for standard diffusers pipelines."""
 
-    model_class_name = None
+    model_class_name: ClassVar[str | None] = None
     uses_tf_config = True
 
     @classmethod
@@ -132,7 +154,7 @@ class StableAudioAdapter(DefaultAdapter):
     model_class_name = "StableAudioPipeline"
 
 
-_MODEL_ADAPTERS: dict[str, type] = {
+_MODEL_ADAPTERS: dict[str, type[DefaultAdapter]] = {
     "Bagel": BagelAdapter,
     "StableAudio": StableAudioAdapter,
     "Flux2": Flux2Adapter,

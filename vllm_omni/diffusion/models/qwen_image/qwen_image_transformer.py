@@ -38,7 +38,7 @@ from vllm_omni.diffusion.attention.backends.abstract import (
 )
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.base import CachedTransformer
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache, TeaCacheDefaults
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.hsdp_utils import is_transformer_block_module
 from vllm_omni.diffusion.distributed.sp_plan import (
@@ -1156,8 +1156,10 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         # Only active when zero_cond_t=True (image editing models)
         self.modulate_index_prepare = ModulateIndexPrepare(zero_cond_t=zero_cond_t)
 
-    def get_teacache_coefficients(self) -> list[float]:
-        return [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02]
+    def get_teacache_defaults(self) -> TeaCacheDefaults:
+        return TeaCacheDefaults(
+            [-4.50000000e02, 2.80000000e02, -4.50000000e01, 3.20000000e00, -2.00000000e-02], rel_l1_thresh=0.2
+        )
 
     def preprocess(
         self,
@@ -1199,7 +1201,10 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
             block = self.transformer_blocks[0]
             img_mod_params = block.img_mod(temb)
             img_mod1, _ = img_mod_params.chunk(2, dim=-1)
-            img_scale1, img_shift1, _ = block._modulate(img_mod1)
+            if modulate_index is not None:
+                img_scale1, img_shift1, _ = select01_modulation_native(img_mod1, modulate_index)
+            else:
+                img_scale1, img_shift1, _ = block._modulate(img_mod1)
             modulated_input = block.img_norm1(hidden_states, img_scale1, img_shift1)
         else:
             modulated_input = None
@@ -1288,8 +1293,32 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
             return (output,)
         return Transformer2DModelOutput(sample=output)
 
-    def forward(self, *args: Any, **kwargs: Any) -> Transformer2DModelOutput | tuple[torch.Tensor, ...]:
-        ctx = self.preprocess(*args, skip_modulated_input=True, **kwargs)
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor = None,
+        encoder_hidden_states_mask: torch.Tensor = None,
+        timestep: torch.LongTensor = None,
+        img_shapes: list[tuple[int, int, int]] | None = None,
+        txt_seq_lens: list[int] | None = None,
+        guidance: torch.Tensor = None,
+        attention_kwargs: dict[str, Any] | None = None,
+        additional_t_cond: torch.Tensor | None = None,
+        return_dict: bool = True,
+    ) -> Transformer2DModelOutput | tuple[torch.Tensor, ...]:
+        ctx = self.preprocess(
+            hidden_states,
+            encoder_hidden_states,
+            encoder_hidden_states_mask,
+            timestep,
+            img_shapes,
+            txt_seq_lens,
+            guidance,
+            attention_kwargs,
+            additional_t_cond,
+            return_dict,
+            skip_modulated_input=True,
+        )
         ctx = self.run_transformer_blocks(ctx)
         return self.postprocess(ctx)
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from unittest.mock import patch
 
@@ -9,7 +9,7 @@ from vllm.config import VllmConfig, set_current_vllm_config
 
 from tests.helpers.mark import hardware_test
 from vllm_omni.diffusion.cache.teacache.backend import TeaCacheBackend
-from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache, TeaCacheDefaults
 from vllm_omni.diffusion.data import DiffusionCacheConfig, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.parallel_state import (
     destroy_distributed_environment,
@@ -43,10 +43,9 @@ TEACACHE_TRANSFORMER_CLASSES = [
     LongCatImageTransformer2DModel,
     ZImageTransformer2DModel,
     StableAudioDiTModel,
-    Bagel,
-    SenseNovaU1ForCausalLM,
-    HunyuanImage3Model,
 ]
+
+LEGACY_TEACACHE_TRANSFORMER_CLASSES = [Bagel, SenseNovaU1ForCausalLM, HunyuanImage3Model]
 
 MODEL_COEFFICIENTS = {
     # FLUX transformer coefficients from TeaCache paper
@@ -76,17 +75,6 @@ MODEL_COEFFICIENTS = {
         3.20000000e00,
         -2.00000000e-02,
     ],
-    # Bagel transformer coefficients
-    # Using Qwen's coefficients as reasonable default given shared architecture
-    Bagel: [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00],
-    # SenseNova-U1 transformer coefficients
-    SenseNovaU1ForCausalLM: [
-        9.07281930e04,
-        -2.17699186e04,
-        1.83940990e03,
-        -6.30339273e01,
-        7.61309272e-01,
-    ],
     # Z-Image transformer coefficients
     # Copied from Qwen-Image, need to be tuned specifically for Z-Image in future
     ZImageTransformer2DModel: [
@@ -115,9 +103,6 @@ MODEL_COEFFICIENTS = {
     ],
     # LongCat Image transformer coefficients
     LongCatImageTransformer2DModel: [652.5980, -424.1615, 84.5526, -4.5923, 0.1694],
-    # HunyuanImage3 coefficients
-    # Calibrated via polyfit on 3920 data points (80 prompts x 49 steps)
-    HunyuanImage3Model: [1.04117826e02, -1.26848482e02, 5.68168652e01, -1.04182570e01, 6.78098549e-01],
 }
 
 
@@ -149,8 +134,8 @@ class MockTeaCacheModel(SupportsTeaCache):
     def postprocess(self, ctx):
         return ctx.hidden_states
 
-    def get_teacache_coefficients(self):
-        return MOCK_COEFFICIENTS
+    def get_teacache_defaults(self):
+        return TeaCacheDefaults(MOCK_COEFFICIENTS, rel_l1_thresh=0.2)
 
 
 def test_backend_uses_model_coefficients():
@@ -177,7 +162,7 @@ def test_backend_user_override_takes_precedence():
 
 
 def test_backend_raises_for_non_protocol_model():
-    """Ensure that we raise if a model that doesn't implement the protocol tries to enable teacache."""
+    """Reject a model with neither protocol defaults nor registered coefficients."""
 
     class NotTeaCacheModel:
         pass
@@ -185,7 +170,7 @@ def test_backend_raises_for_non_protocol_model():
     pipeline = FakePipeline(NotTeaCacheModel())
 
     backend = TeaCacheBackend(DiffusionCacheConfig())
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="Invalid TeaCache configuration"):
         backend.enable(pipeline)
 
 
@@ -195,11 +180,16 @@ def test_transformer_implements_protocol(cls):
     assert issubclass(cls, SupportsTeaCache)
 
 
+@pytest.mark.parametrize("cls", LEGACY_TEACACHE_TRANSFORMER_CLASSES, ids=lambda c: c.__name__)
+def test_unported_transformer_does_not_claim_protocol(cls):
+    assert not issubclass(cls, SupportsTeaCache)
+
+
 @pytest.mark.parametrize("cls", TEACACHE_TRANSFORMER_CLASSES, ids=lambda c: c.__name__)
 def test_model_coefficients_match(cls):
-    """Ensure each model's get_teacache_coefficients matches expected values."""
+    """Ensure each model supplies its expected TeaCache defaults."""
     expected = MODEL_COEFFICIENTS[cls]
-    actual = cls.get_teacache_coefficients(None)
+    actual = cls.get_teacache_defaults(None).coefficients
     assert actual == expected, f"{cls.__name__} coefficients mismatch"
     assert len(actual) == 5
 
@@ -215,11 +205,6 @@ def _assert_tensors_equal(a: torch.Tensor, b: torch.Tensor):
     nan_match = torch.isnan(a) == torch.isnan(b)
     finite_match = torch.where(torch.isnan(a), True, a == b)
     assert nan_match.all() and finite_match.all()
-
-
-def _reference_forward(model, inputs):
-    """Use a legacy saved forward when available, otherwise use the normal model path."""
-    return getattr(model, "_original_forward", model.forward)(**inputs)
 
 
 @pytest.fixture(scope="module")
@@ -387,30 +372,18 @@ EQUIVALENCE_MODELS = {
     "StableAudio": _make_stable_audio,
     "LongCat": _make_longcat,
     "Qwen": _make_qwen,
-    # TODO: ZImage (complex patchification), Bagel, SenseNova, HunyuanImage3
+    # ZImage is covered by the CPU fixture in test_teacache_pinned_forwards.py.
 }
 
 
 @hardware_test(res={"cuda": "L4"}, num_cards=1)
 @pytest.mark.parametrize("model_name", EQUIVALENCE_MODELS.keys())
-def test_decomposition_matches_original(distributed_env, model_name):
-    """Cache-disabled path: the decomposed forward matches the reference path."""
+def test_protocol_path_matches_uncached_forward(distributed_env, model_name):
+    """The split path produces the same output as the uncached forward."""
     model, inputs = EQUIVALENCE_MODELS[model_name]()
     model = model.cuda().eval()
     with set_forward_context(omni_diffusion_config=OmniDiffusionConfig()):
-        original = _reference_forward(model, inputs)
-        new = model.forward(**inputs)
-    _assert_tensors_equal(original.sample, new.sample)
-
-
-@hardware_test(res={"cuda": "L4"}, num_cards=1)
-@pytest.mark.parametrize("model_name", EQUIVALENCE_MODELS.keys())
-def test_protocol_path_matches_original(distributed_env, model_name):
-    """Cache-enabled path: preprocess -> blocks -> postprocess matches the reference path."""
-    model, inputs = EQUIVALENCE_MODELS[model_name]()
-    model = model.cuda().eval()
-    with set_forward_context(omni_diffusion_config=OmniDiffusionConfig()):
-        original = _reference_forward(model, inputs)
+        original = model.forward(**inputs)
         ctx = model.preprocess(**inputs, skip_modulated_input=False)
         assert ctx.modulated_input is not None
         ctx = model.run_transformer_blocks(ctx)

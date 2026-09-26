@@ -2,15 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 """
-Model-specific extractors for TeaCache.
-
-This module provides a registry of extractor functions that know how to extract
-modulated inputs from different transformer architectures. Adding support for
-a new model requires only adding a new extractor function to the registry.
-
-With Option B enhancement, extractors now return a CacheContext object containing
-all model-specific information needed for generic caching, including preprocessing,
-transformer execution, and postprocessing logic.
+Legacy TeaCache extractors for models awaiting decomposed forward migration.
 """
 
 import math
@@ -233,6 +225,68 @@ def extract_bagel_context(
         hidden_states=packed_sequence,  # Use full packed sequence
         encoder_hidden_states=None,
         temb=packed_timestep_embeds,  # Approximate
+        run_transformer_blocks=run_transformer_blocks,
+        postprocess=postprocess,
+    )
+
+
+def extract_sensenova_u1_context(
+    module: nn.Module,
+    input_ids: torch.Tensor | None = None,
+    indexes: torch.Tensor | None = None,
+    attention_mask: dict[str, torch.Tensor] | torch.Tensor | None = None,
+    past_key_values: Any | None = None,
+    inputs_embeds: torch.Tensor | None = None,
+    use_cache: bool | None = None,
+    embed_only: bool = False,
+    compute_logits: bool = True,
+    **kwargs: Any,
+) -> CacheContext:
+    """Extract cache context for SenseNovaU1ForCausalLM denoising forwards."""
+    from vllm_omni.diffusion.models.sensenova_u1.sensenova_u1_transformer import (
+        SenseNovaU1CausalLMOutput,
+    )
+
+    layer_kwargs = dict(kwargs)
+    layer_kwargs.pop("cache_dit_skip", None)
+    image_gen_indicators = layer_kwargs.pop("image_gen_indicators", None)
+    exist_und = (~image_gen_indicators).any().item()
+    exist_gen = image_gen_indicators.any().item()
+    causal_mask_mapping = attention_mask
+
+    first_layer = module.model.layers[0]
+    modulated_input = first_layer.input_layernorm_mot_gen(inputs_embeds)
+
+    def run_transformer_blocks():
+        h = inputs_embeds
+        for layer in module.model.layers:
+            h = layer(
+                h,
+                image_gen_indicators=image_gen_indicators,
+                exist_und=exist_und,
+                exist_gen=exist_gen,
+                indexes=indexes,
+                attention_mask=causal_mask_mapping,
+                past_key_values=past_key_values,
+                **layer_kwargs,
+            )
+        return (h,)
+
+    def postprocess(h: torch.Tensor) -> SenseNovaU1CausalLMOutput:
+        h = module.model.norm_mot_gen(h)
+
+        logits = module.logits_processor(module.lm_head, h) if compute_logits else None
+        return SenseNovaU1CausalLMOutput(
+            logits=logits,
+            past_key_values=past_key_values if use_cache else None,
+            hidden_states=h,
+        )
+
+    return CacheContext(
+        modulated_input=modulated_input,
+        hidden_states=inputs_embeds,
+        encoder_hidden_states=None,
+        temb=modulated_input,
         run_transformer_blocks=run_transformer_blocks,
         postprocess=postprocess,
     )
@@ -536,6 +590,7 @@ EXTRACTOR_REGISTRY: dict[str, Callable] = {
     "Cosmos3EdgeVFMTransformer": extract_cosmos3_context,
     "Cosmos3VFMTransformer": extract_cosmos3_context,
     "MiniMaxH3DiTModel": extract_minimax_h3_context,
+    "SenseNovaU1ForCausalLM": extract_sensenova_u1_context,
     # Future models:
     # "CogVideoXTransformer3DModel": extract_cogvideox_context,
 }
@@ -553,7 +608,7 @@ def register_extractor(transformer_cls_name: str, extractor_fn: Callable) -> Non
         extractor_fn: Function with signature (module, *args, **kwargs) -> CacheContext
 
     Example:
-        >>> def extract_flux_context(module, hidden_states, timestep, guidance=None, **kwargs):
+        >>> def extract_custom_context(module, hidden_states, timestep, guidance=None, **kwargs):
         ...     # Preprocessing
         ...     temb = module.time_text_embed(timestep, guidance)
         ...     # Extract modulated input
@@ -569,7 +624,7 @@ def register_extractor(transformer_cls_name: str, extractor_fn: Callable) -> Non
         ...         return module.proj_out(module.norm_out(h, temb))
         ...     # Return context
         ...     return CacheContext(modulated, hidden_states, None, temb, run_blocks, postprocess)
-        >>> register_extractor("FluxTransformer2DModel", extract_flux_context)
+        >>> register_extractor("CustomTransformer", extract_custom_context)
     """
     EXTRACTOR_REGISTRY[transformer_cls_name] = extractor_fn
 
@@ -591,9 +646,7 @@ def get_extractor(transformer_type: str | type) -> Callable:
         ValueError: If model type not found in registry
 
     Example:
-        >>> # Get extractor for QwenImageTransformer2DModel
-        >>> extractor = get_extractor("QwenImageTransformer2DModel")
-        >>> ctx = extractor(transformer, hidden_states, encoder_hidden_states, timestep, ...)
+        >>> extractor = get_extractor("Bagel")
     """
     candidate_names: tuple[str, ...]
     if isinstance(transformer_type, str):
@@ -608,5 +661,5 @@ def get_extractor(transformer_type: str | type) -> Callable:
     raise ValueError(
         f"Unknown model type: '{transformer_type}'. "
         f"Available types: {available_types}\n"
-        f"To add support for a new model, use register_extractor() or add to EXTRACTOR_REGISTRY."
+        "Implement SupportsTeaCache or register a legacy extractor."
     )

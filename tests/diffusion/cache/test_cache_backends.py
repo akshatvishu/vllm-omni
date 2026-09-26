@@ -27,6 +27,7 @@ from vllm_omni.diffusion.cache.cachedit import (
 from vllm_omni.diffusion.cache.magcache import MagCacheBackend
 from vllm_omni.diffusion.cache.selector import get_cache_backend
 from vllm_omni.diffusion.cache.teacache import TeaCacheBackend
+from vllm_omni.diffusion.cache.teacache.protocol import TeaCacheDefaults
 from vllm_omni.diffusion.data import DiffusionCacheConfig
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
@@ -443,6 +444,23 @@ class TestCacheDiTBackend:
         assert "cache_config" not in call_args[1]
 
 
+class _TeaCacheProtocolTransformer:
+    def __init__(self):
+        self._hook_registry: Mock | None = None
+
+    def preprocess(self, value, *, skip_modulated_input):
+        return value
+
+    def run_transformer_blocks(self, value):
+        return value
+
+    def postprocess(self, value):
+        return value
+
+    def get_teacache_defaults(self):
+        return TeaCacheDefaults([1.0, 0.5, 0.2, 0.1, 0.05], rel_l1_thresh=0.2)
+
+
 class TestTeaCacheBackend:
     """Test TeaCacheBackend implementation."""
 
@@ -459,8 +477,7 @@ class TestTeaCacheBackend:
         # Mock pipeline
         mock_pipeline = Mock()
         mock_pipeline.__class__.__name__ = "QwenImagePipeline"
-        mock_transformer = Mock()
-        mock_transformer.__class__.__name__ = "QwenImageTransformer2DModel"
+        mock_transformer = _TeaCacheProtocolTransformer()
         mock_pipeline.transformer = mock_transformer
 
         config = DiffusionCacheConfig(rel_l1_thresh=0.3)
@@ -472,11 +489,10 @@ class TestTeaCacheBackend:
         mock_apply_hook.assert_called_once()
 
     @patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook")
-    def test_enable_uses_generic_default_threshold(self, mock_apply_hook):
+    def test_enable_uses_model_default_threshold(self, mock_apply_hook):
         pipeline = Mock()
         pipeline.__class__.__name__ = "QwenImagePipeline"
-        pipeline.transformer = Mock()
-        pipeline.transformer.__class__.__name__ = "QwenImageTransformer2DModel"
+        pipeline.transformer = _TeaCacheProtocolTransformer()
 
         TeaCacheBackend(DiffusionCacheConfig()).enable(pipeline)
         assert mock_apply_hook.call_args.args[1].rel_l1_thresh == 0.2
@@ -536,8 +552,7 @@ class TestTeaCacheBackend:
         """Test enabling TeaCache with custom coefficients."""
         mock_pipeline = Mock()
         mock_pipeline.__class__.__name__ = "QwenImagePipeline"
-        mock_transformer = Mock()
-        mock_transformer.__class__.__name__ = "QwenImageTransformer2DModel"
+        mock_transformer = _TeaCacheProtocolTransformer()
         mock_pipeline.transformer = mock_transformer
 
         config = DiffusionCacheConfig(rel_l1_thresh=0.3, coefficients=[1.0, 0.5, 0.2, 0.1, 0.05])
@@ -552,8 +567,7 @@ class TestTeaCacheBackend:
         """Test refreshing TeaCache state."""
         mock_pipeline = Mock()
         mock_pipeline.__class__.__name__ = "QwenImagePipeline"
-        mock_transformer = Mock()
-        mock_transformer.__class__.__name__ = "QwenImageTransformer2DModel"
+        mock_transformer = _TeaCacheProtocolTransformer()
         mock_pipeline.transformer = mock_transformer
 
         # Mock hook registry
