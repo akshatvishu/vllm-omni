@@ -45,7 +45,7 @@ class DataCollectionHook(ModelHook):
     def _protocol_forward(self, module: SupportsDecomposedForward, *args: Any, **kwargs: Any) -> Any:
         ctx = module.preprocess(*args, skip_modulated_input=False, **kwargs)
         if ctx.modulated_input is None:
-            raise ValueError("TeaCache preprocessing did not provide a modulated input")
+            return module.postprocess(module.run_transformer_blocks(ctx))
         modulated_input_cpu = ctx.modulated_input.detach().float().cpu().numpy()
         ctx = module.run_transformer_blocks(ctx)
         model_output_cpu = ctx.hidden_states.detach().float().cpu().numpy()

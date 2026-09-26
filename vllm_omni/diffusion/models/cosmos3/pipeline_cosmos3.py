@@ -1407,18 +1407,14 @@ class Cosmos3OmniDiffusersPipeline(
     def _cache_requires_paired_cfg(self) -> bool:
         """Whether the sequential-CFG denoising loop must keep paired forwards.
 
-        cache-dit wraps the GEN pathway with ``has_separate_cfg=True`` and
-        distinguishes the conditional vs unconditional passes purely by the
-        parity of its transformer-forward counter.  The T2I ``guidance_interval``
-        optimization that skips the uncond pass outside the interval would
-        desync that accounting (cond passes get mislabeled as uncond and the
-        per-generation step counter drifts).  ``enable_cache_for_cosmos3`` sets
-        the marker below when it enables cache-dit on this pipeline; the loop
-        then keeps both passes and neutralizes CFG via scale=1.0 instead.
-
-        Returns False when cache-dit is not active, preserving the skip speedup.
+        Cache-DiT and TeaCache both use forward parity to separate sequential
+        CFG branches. Skipping the unconditional pass outside guidance_interval
+        would put later passes into the wrong cache state.
         """
-        return self._cache_dit_requires_paired_cfg
+        registry = getattr(self.transformer, "_hook_registry", None)
+        return self._cache_dit_requires_paired_cfg or (
+            registry is not None and registry.get_hook("teacache") is not None
+        )
 
     @staticmethod
     def _get_sp_param(sp: OmniDiffusionSamplingParams, key: str, default: Any = None) -> Any:
@@ -2779,6 +2775,10 @@ class Cosmos3OmniDiffusersPipeline(
         do_cfg = guidance_scale > 1.0
         cfg_parallel = self._cfg_parallel_active() and do_cfg
         step_scheduler = scheduler if scheduler is not None else self.scheduler
+        registry = getattr(self.transformer, "_hook_registry", None)
+        if registry is not None:
+            registry.reset_hook("teacache")
+        self.transformer.do_true_cfg = do_cfg
         # Session-keyed UND K/V (RFC #4480); None => bespoke transformer-instance cache.
         kv_state = self._new_cosmos3_state(session_id)
         self._kv_reset_und(kv_state)
@@ -3227,6 +3227,8 @@ class Cosmos3OmniDiffusersPipeline(
 
         self.transformer.reset_cache()
         self._cosmos3_branch_caches = {}
+        # Transfer can run several branches with different GEN layouts per step.
+        self.transformer._teacache_disabled = True
         try:
             for step_index, t in enumerate(self.progress_bar(timesteps)):
                 self._set_denoise_step_metadata(step_index, timesteps, self.scheduler)
@@ -3350,6 +3352,7 @@ class Cosmos3OmniDiffusersPipeline(
             self._clear_denoise_step_metadata()
             self._reset_mixed_precision()
             self._cosmos3_branch_caches = None
+            self.transformer._teacache_disabled = False
             self.transformer.reset_cache()
         return latents
 

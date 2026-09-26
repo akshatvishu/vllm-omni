@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -34,6 +35,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig, SensenovaCachedAdapter
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, TeaCacheDefaults
 
 logger = init_logger(__name__)
 
@@ -42,6 +44,19 @@ logger = init_logger(__name__)
 class SenseNovaU1ModelOutput:
     last_hidden_state: torch.Tensor
     past_key_values: DynamicCache | None = None
+
+
+@dataclass
+class SenseNovaU1State:
+    image_gen_indicators: torch.Tensor | None
+    exist_und: bool
+    exist_gen: bool
+    indexes: torch.Tensor
+    position_embeddings: tuple[tuple[torch.Tensor, torch.Tensor], ...]
+    attention_mask: dict[str, torch.Tensor | None]
+    past_key_values: DynamicCache | None
+    use_cache: bool | None
+    layer_kwargs: dict[str, Any]
 
 
 @dataclass
@@ -672,7 +687,13 @@ class SenseNovaU1Model(nn.Module):
         # rather than giving every layer its own pair.
         self.rotary_emb, self.rotary_emb_hw = _build_3d_rope(config)
 
-    def forward(
+    def get_teacache_defaults(self) -> TeaCacheDefaults:
+        return TeaCacheDefaults(
+            [9.07281930e04, -2.17699186e04, 1.83940990e03, -6.30339273e01, 7.61309272e-01],
+            rel_l1_thresh=0.2,
+        )
+
+    def preprocess(
         self,
         input_ids=None,
         image_gen_indicators=None,
@@ -681,8 +702,10 @@ class SenseNovaU1Model(nn.Module):
         past_key_values=None,
         inputs_embeds=None,
         use_cache=None,
+        *,
+        skip_modulated_input: bool = False,
         **kwargs,
-    ):
+    ) -> ForwardState[SenseNovaU1State]:
         if image_gen_indicators is None:
             exist_und, exist_gen = True, False
         else:
@@ -721,9 +744,15 @@ class SenseNovaU1Model(nn.Module):
             self.rotary_emb_hw(hidden_states, indexes[1].unsqueeze(0)),
             self.rotary_emb_hw(hidden_states, indexes[2].unsqueeze(0)),
         )
-        for layer in self.layers:
-            hidden_states = layer(
-                hidden_states,
+        modulated_input = None
+        if not skip_modulated_input and not kwargs.get("cache_dit_skip", False) and exist_gen and not exist_und:
+            modulated_input = self.layers[0].input_layernorm_mot_gen(hidden_states)
+        return ForwardState(
+            modulated_input=modulated_input,
+            hidden_states=hidden_states,
+            encoder_hidden_states=None,
+            temb=hidden_states,
+            intermediates=SenseNovaU1State(
                 image_gen_indicators=image_gen_indicators,
                 exist_und=exist_und,
                 exist_gen=exist_gen,
@@ -732,18 +761,58 @@ class SenseNovaU1Model(nn.Module):
                 attention_mask=causal_mask_mapping,
                 past_key_values=past_key_values,
                 use_cache=use_cache,
-                **kwargs,
+                layer_kwargs=kwargs,
+            ),
+        )
+
+    def run_transformer_blocks(self, ctx: ForwardState[SenseNovaU1State]) -> ForwardState[SenseNovaU1State]:
+        state = ctx.intermediates
+        for layer in self.layers:
+            ctx.hidden_states = layer(
+                ctx.hidden_states,
+                image_gen_indicators=state.image_gen_indicators,
+                exist_und=state.exist_und,
+                exist_gen=state.exist_gen,
+                indexes=state.indexes,
+                position_embeddings=state.position_embeddings,
+                attention_mask=state.attention_mask,
+                past_key_values=state.past_key_values,
+                use_cache=state.use_cache,
+                **state.layer_kwargs,
             )
+        return ctx
 
-        if not exist_gen:
-            hidden_states = self.norm(hidden_states)
-        else:
-            hidden_states = self.norm_mot_gen(hidden_states)
-
+    def postprocess(self, ctx: ForwardState[SenseNovaU1State]) -> SenseNovaU1ModelOutput:
+        state = ctx.intermediates
+        hidden_states = self.norm_mot_gen(ctx.hidden_states) if state.exist_gen else self.norm(ctx.hidden_states)
         return SenseNovaU1ModelOutput(
             last_hidden_state=hidden_states,
-            past_key_values=past_key_values if use_cache else None,
+            past_key_values=state.past_key_values if state.use_cache else None,
         )
+
+    def forward(
+        self,
+        input_ids=None,
+        image_gen_indicators=None,
+        indexes=None,
+        attention_mask=None,
+        past_key_values=None,
+        inputs_embeds=None,
+        use_cache=None,
+        **kwargs,
+    ):
+        ctx = self.preprocess(
+            input_ids=input_ids,
+            image_gen_indicators=image_gen_indicators,
+            indexes=indexes,
+            attention_mask=attention_mask,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            skip_modulated_input=True,
+            **kwargs,
+        )
+        return self.postprocess(self.run_transformer_blocks(ctx))
 
 
 # ---------------------------------------------------------------------------

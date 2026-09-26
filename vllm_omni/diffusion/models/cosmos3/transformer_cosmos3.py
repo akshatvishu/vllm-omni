@@ -34,6 +34,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention as FrameworkAttention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, TeaCacheDefaults
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.sp_plan import SequenceParallelInput, SequenceParallelOutput
 from vllm_omni.diffusion.forward_context import get_forward_context, is_forward_context_available
@@ -211,6 +212,16 @@ def _validate_mixed_precision_runtime(
     parallel_config = getattr(od_config, "parallel_config", None)
     if bool(getattr(parallel_config, "use_hsdp", False)):
         raise ValueError("Cosmos3 mixed precision has not validated live backend weights under HSDP")
+
+
+def _validate_teacache_runtime(od_config: OmniDiffusionConfig) -> None:
+    if getattr(od_config, "cache_backend", None) != "tea_cache":
+        return
+    parallel_config = getattr(od_config, "parallel_config", None)
+    if bool(getattr(parallel_config, "use_hsdp", False)):
+        raise ValueError("Cosmos3 TeaCache does not support HSDP")
+    if bool(getattr(od_config, "enable_distributed_layerwise_offload", False)):
+        raise ValueError("Cosmos3 TeaCache does not support distributed layerwise offload")
 
 
 def _as_bool(value: Any) -> bool:
@@ -1355,6 +1366,7 @@ class Cosmos3VFMTransformer(nn.Module):
                 mixed_precision_config.reasoner,
             )
         _validate_mixed_precision_runtime(mixed_precision_config, od_config)
+        _validate_teacache_runtime(od_config)
 
         self.language_model = self._language_model_cls(
             hidden_size=self.hidden_size,
@@ -1414,6 +1426,7 @@ class Cosmos3VFMTransformer(nn.Module):
             ]
         )
 
+        self._teacache_disabled = False
         self.mixed_precision_runtime: Cosmos3MixedPrecisionRuntime | None = None
         if mixed_precision_config is not None:
             self.mixed_precision_runtime = Cosmos3MixedPrecisionRuntime(mixed_precision_config)
@@ -1828,6 +1841,58 @@ class Cosmos3VFMTransformer(nn.Module):
         **kwargs,
     ) -> torch.Tensor | tuple[torch.Tensor, ...]:
         """Run the shared Cosmos3 GEN preprocess, stack, and postprocess path."""
+        ctx = self.preprocess(
+            hidden_states,
+            timestep,
+            text_ids,
+            text_mask,
+            video_shape,
+            fps=fps,
+            action_latents=action_latents,
+            action_domain_ids=action_domain_ids,
+            action_noisy_mask=action_noisy_mask,
+            action_start_frame_offset=action_start_frame_offset,
+            action_fps=action_fps,
+            sound_latents=sound_latents,
+            noisy_frame_mask=noisy_frame_mask,
+            control_latents=control_latents,
+            control_weights=control_weights,
+            transfer_share_vision_temporal_positions=transfer_share_vision_temporal_positions,
+            skip_modulated_input=True,
+            **kwargs,
+        )
+        return self.postprocess(self.run_transformer_blocks(ctx))
+
+    def get_teacache_defaults(self) -> TeaCacheDefaults:
+        # PR #4389 fitted these on Cosmos3-Nano T2V. Super shares the GEN architecture.
+        return TeaCacheDefaults(
+            [-1.04904030e03, 4.39934003e02, -6.83467690e01, 4.54241596e00, 3.16593050e-02],
+            rel_l1_thresh=0.2,
+            num_warmup_steps=12,
+        )
+
+    def preprocess(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        text_ids: torch.Tensor,
+        text_mask: torch.Tensor,
+        video_shape: tuple[int, int, int],
+        fps: float | None = None,
+        action_latents: torch.Tensor | None = None,
+        action_domain_ids: torch.Tensor | None = None,
+        action_noisy_mask: torch.Tensor | None = None,
+        action_start_frame_offset: int = 1,
+        action_fps: float | None = None,
+        sound_latents: torch.Tensor | None = None,
+        noisy_frame_mask: torch.Tensor | None = None,
+        control_latents: list[torch.Tensor] | tuple[torch.Tensor, ...] | torch.Tensor | None = None,
+        control_weights: list[float] | tuple[float, ...] | torch.Tensor | None = None,
+        transfer_share_vision_temporal_positions: bool = True,
+        *,
+        skip_modulated_input: bool = False,
+        **kwargs: Any,
+    ) -> ForwardState[_GenPrepared]:
         if kwargs:
             raise TypeError(f"Unexpected Cosmos3 transformer kwargs: {sorted(kwargs)}")
         prep = self._gen_preprocess(
@@ -1848,7 +1913,24 @@ class Cosmos3VFMTransformer(nn.Module):
             control_weights=control_weights,
             transfer_share_vision_temporal_positions=transfer_share_vision_temporal_positions,
         )
-        return self._gen_postprocess(self._run_gen_stack(prep), prep)
+        modulated_input = None
+        if not skip_modulated_input and not self._teacache_disabled:
+            # Cosmos3 has no adaLN. PR #4389 calibrated the first GEN RMSNorm output.
+            modulated_input = self.gen_layers[0].input_layernorm(prep.hidden_gen)
+        return ForwardState(
+            modulated_input=modulated_input,
+            hidden_states=prep.hidden_gen,
+            encoder_hidden_states=None,
+            temb=prep.time_embed,
+            intermediates=prep,
+        )
+
+    def run_transformer_blocks(self, ctx: ForwardState[_GenPrepared]) -> ForwardState[_GenPrepared]:
+        ctx.hidden_states = self._run_gen_stack(ctx.intermediates, ctx.hidden_states)
+        return ctx
+
+    def postprocess(self, ctx: ForwardState[_GenPrepared]) -> torch.Tensor | tuple[torch.Tensor, ...]:
+        return self._gen_postprocess(ctx.hidden_states, ctx.intermediates)
 
     def _gen_preprocess(
         self,
@@ -2116,10 +2198,10 @@ class Cosmos3VFMTransformer(nn.Module):
                 multi_control_weights=multi_control_weights,
             )
 
-    def _run_gen_stack(self, prep: _GenPrepared) -> torch.Tensor:
+    def _run_gen_stack(self, prep: _GenPrepared, hidden_gen: torch.Tensor) -> torch.Tensor:
         """Execute the cacheable full-layout GEN stack, including final norm."""
         hidden_gen = self._run_gen_layers(
-            prep.hidden_gen,
+            hidden_gen,
             s_video=prep.s_video,
             s_control=prep.s_control,
             s_action=prep.s_action,

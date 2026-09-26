@@ -118,6 +118,8 @@ class TeaCacheHook(ModelHook):
 
     def _protocol_forward(self, module: SupportsTeaCache, *args: Any, **kwargs: Any) -> Any:
         ctx = module.preprocess(*args, skip_modulated_input=False, **kwargs)
+        if ctx.modulated_input is None:
+            return module.postprocess(module.run_transformer_blocks(ctx))
 
         def run_blocks():
             nonlocal ctx
@@ -212,6 +214,10 @@ class TeaCacheHook(ModelHook):
         Returns:
             True to compute full transformer, False to reuse cached residual
         """
+        if state.cnt < self.config.num_warmup_steps:
+            state.accumulated_rel_l1_distance = 0.0
+            return True
+
         # First timestep: always compute
         if state.cnt == 0:
             state.accumulated_rel_l1_distance = 0.0

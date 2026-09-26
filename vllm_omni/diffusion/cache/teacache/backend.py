@@ -24,16 +24,23 @@ logger = init_logger(__name__)
 def _make_teacache_config(transformer: Any, transformer_type: str, config: DiffusionCacheConfig) -> TeaCacheConfig:
     coefficients = config.coefficients
     rel_l1_thresh = config.rel_l1_thresh
-    if isinstance(transformer, SupportsTeaCache):
+    num_warmup_steps = config.num_warmup_steps
+    has_defaults = isinstance(transformer, SupportsTeaCache)
+    if has_defaults and (coefficients is None or rel_l1_thresh is None or num_warmup_steps is None):
         defaults = transformer.get_teacache_defaults()
         if coefficients is None:
             coefficients = defaults.coefficients
         if rel_l1_thresh is None:
             rel_l1_thresh = defaults.rel_l1_thresh
+        if num_warmup_steps is None:
+            num_warmup_steps = defaults.num_warmup_steps
+    if has_defaults and coefficients is None:
+        raise ValueError(f"No TeaCache coefficients calibrated for {transformer_type}; provide coefficients")
     return TeaCacheConfig(
         transformer_type=transformer_type,
         rel_l1_thresh=rel_l1_thresh,
         coefficients=coefficients,
+        num_warmup_steps=0 if num_warmup_steps is None else num_warmup_steps,
     )
 
 
@@ -60,18 +67,6 @@ def enable_bagel_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
     teacache_config = _make_teacache_config(transformer, "Bagel", config)
     apply_teacache_hook(transformer, teacache_config)
     pipeline.transformer = transformer
-
-    logger.info(
-        f"TeaCache applied with rel_l1_thresh={teacache_config.rel_l1_thresh}, "
-        f"transformer_class={teacache_config.transformer_type}"
-    )
-
-
-def enable_sensenova_u1_teacache(pipeline: Any, config: DiffusionCacheConfig) -> None:
-    """Enable TeaCache for SenseNova-U1 denoising forwards."""
-    transformer = pipeline.denoising_transformer
-    teacache_config = _make_teacache_config(transformer, "SenseNovaU1ForCausalLM", config)
-    apply_teacache_hook(transformer, teacache_config)
 
     logger.info(
         f"TeaCache applied with rel_l1_thresh={teacache_config.rel_l1_thresh}, "
@@ -107,7 +102,6 @@ CUSTOM_TEACACHE_ENABLERS = {
     "BagelPipeline": enable_bagel_teacache,
     "HunyuanImage3Pipeline": enable_hunyuan_image3_teacache,
     "MiniMaxH3Pipeline": enable_minimax_h3_teacache,
-    "SenseNovaU1Pipeline": enable_sensenova_u1_teacache,
 }
 
 
@@ -203,8 +197,6 @@ class TeaCacheBackend(CacheBackend):
 
         # Extract transformer from pipeline
         transformer = pipeline.transformer
-        if not hasattr(transformer, "_hook_registry") and hasattr(pipeline, "denoising_transformer"):
-            transformer = pipeline.denoising_transformer
 
         if hasattr(transformer, "_hook_registry"):
             hook = transformer._hook_registry.get_hook(TeaCacheHook._HOOK_NAME)

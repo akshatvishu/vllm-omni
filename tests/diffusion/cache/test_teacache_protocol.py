@@ -9,7 +9,10 @@ from vllm.config import VllmConfig, set_current_vllm_config
 
 from tests.helpers.mark import hardware_test
 from vllm_omni.diffusion.cache.teacache.backend import TeaCacheBackend
+from vllm_omni.diffusion.cache.teacache.config import TeaCacheConfig
+from vllm_omni.diffusion.cache.teacache.hook import TeaCacheHook
 from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache, TeaCacheDefaults
+from vllm_omni.diffusion.cache.teacache.state import TeaCacheState
 from vllm_omni.diffusion.data import DiffusionCacheConfig, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.parallel_state import (
     destroy_distributed_environment,
@@ -18,6 +21,8 @@ from vllm_omni.diffusion.distributed.parallel_state import (
 )
 from vllm_omni.diffusion.forward_context import set_forward_context
 from vllm_omni.diffusion.models.bagel.bagel_transformer import Bagel
+from vllm_omni.diffusion.models.cosmos3.transformer_cosmos3 import Cosmos3VFMTransformer
+from vllm_omni.diffusion.models.cosmos3.transformer_cosmos3_edge import Cosmos3EdgeVFMTransformer
 from vllm_omni.diffusion.models.flux.flux_transformer import FluxTransformer2DModel
 from vllm_omni.diffusion.models.flux2.flux2_transformer import Flux2Transformer2DModel
 from vllm_omni.diffusion.models.flux2_klein.flux2_klein_transformer import (
@@ -26,7 +31,7 @@ from vllm_omni.diffusion.models.flux2_klein.flux2_klein_transformer import (
 from vllm_omni.diffusion.models.hunyuan_image3.hunyuan_image3_transformer import HunyuanImage3Model
 from vllm_omni.diffusion.models.longcat_image.longcat_image_transformer import LongCatImageTransformer2DModel
 from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import QwenImageTransformer2DModel
-from vllm_omni.diffusion.models.sensenova_u1.sensenova_u1_transformer import SenseNovaU1ForCausalLM
+from vllm_omni.diffusion.models.sensenova_u1.sensenova_u1_transformer import SenseNovaU1Model
 from vllm_omni.diffusion.models.stable_audio.stable_audio_transformer import StableAudioDiTModel
 from vllm_omni.diffusion.models.z_image.z_image_transformer import ZImageTransformer2DModel
 
@@ -43,9 +48,11 @@ TEACACHE_TRANSFORMER_CLASSES = [
     LongCatImageTransformer2DModel,
     ZImageTransformer2DModel,
     StableAudioDiTModel,
+    SenseNovaU1Model,
+    Cosmos3VFMTransformer,
 ]
 
-LEGACY_TEACACHE_TRANSFORMER_CLASSES = [Bagel, SenseNovaU1ForCausalLM, HunyuanImage3Model]
+LEGACY_TEACACHE_TRANSFORMER_CLASSES = [Bagel, HunyuanImage3Model]
 
 MODEL_COEFFICIENTS = {
     # FLUX transformer coefficients from TeaCache paper
@@ -103,6 +110,8 @@ MODEL_COEFFICIENTS = {
     ],
     # LongCat Image transformer coefficients
     LongCatImageTransformer2DModel: [652.5980, -424.1615, 84.5526, -4.5923, 0.1694],
+    SenseNovaU1Model: [9.07281930e04, -2.17699186e04, 1.83940990e03, -6.30339273e01, 7.61309272e-01],
+    Cosmos3VFMTransformer: [-1.04904030e03, 4.39934003e02, -6.83467690e01, 4.54241596e00, 3.16593050e-02],
 }
 
 
@@ -159,6 +168,43 @@ def test_backend_user_override_takes_precedence():
         backend.enable(pipeline)
         cache_config = mock_hook.call_args[0][1]
         assert cache_config.coefficients == user_coeffs
+
+
+def test_cosmos3_warmup_default_and_override():
+    pipeline = FakePipeline(Cosmos3VFMTransformer.__new__(Cosmos3VFMTransformer))
+    for requested, expected in ((None, 12), (2, 2)):
+        backend = TeaCacheBackend(DiffusionCacheConfig(num_warmup_steps=requested))
+        with patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook") as apply_hook:
+            backend.enable(pipeline)
+        assert apply_hook.call_args.args[1].num_warmup_steps == expected
+
+
+def test_cosmos3_edge_requires_explicit_teacache_calibration():
+    pipeline = FakePipeline(Cosmos3EdgeVFMTransformer.__new__(Cosmos3EdgeVFMTransformer))
+    with pytest.raises(ValueError, match="No TeaCache coefficients calibrated"):
+        TeaCacheBackend(DiffusionCacheConfig()).enable(pipeline)
+
+    config = DiffusionCacheConfig(coefficients=[0.0] * 5)
+    with patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook") as apply_hook:
+        TeaCacheBackend(config).enable(pipeline)
+    cache_config = apply_hook.call_args.args[1]
+    assert cache_config.coefficients == [0.0] * 5
+    assert cache_config.rel_l1_thresh == 0.2
+    assert cache_config.num_warmup_steps == 0
+
+
+def test_teacache_warmup_forces_full_steps_before_cache_hit():
+    hook = TeaCacheHook(TeaCacheConfig(coefficients=[0.0] * 5, num_warmup_steps=2))
+    state = TeaCacheState()
+    signal = torch.ones(1)
+    state.cnt = 1
+    state.previous_modulated_input = signal
+    state.accumulated_rel_l1_distance = 1.0
+
+    assert hook._should_compute_full_transformer(state, signal)
+    assert state.accumulated_rel_l1_distance == 0.0
+    state.cnt = 2
+    assert not hook._should_compute_full_transformer(state, signal)
 
 
 def test_backend_raises_for_non_protocol_model():

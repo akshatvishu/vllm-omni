@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 """Cosmos3 Edge transformer variant with a Nemotron dense UND backbone."""
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from vllm.model_executor.layers.linear import ColumnParallelLinear, RowParallelL
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
 
 from vllm_omni.diffusion.attention.layer import Attention as FrameworkAttention
+from vllm_omni.diffusion.cache.teacache.protocol import TeaCacheDefaults
 
 from .transformer_cosmos3 import (
     Cosmos3VFMTransformer,
@@ -305,6 +306,9 @@ class Cosmos3EdgeVFMTransformer(Cosmos3VFMTransformer):
 
     _language_model_cls = Cosmos3EdgeLanguageModel
     _gen_mlp_cls = Cosmos3Relu2MLP
+
+    def get_teacache_defaults(self) -> TeaCacheDefaults:
+        return TeaCacheDefaults(coefficients=None, rel_l1_thresh=0.2)
 
     @staticmethod
     def _validate_supported_config(model_config: Any) -> None:

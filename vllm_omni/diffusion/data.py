@@ -572,7 +572,7 @@ class DiffusionCacheConfig:
     It can be initialized from a dictionary and accessed via attributes.
 
     Common parameters:
-        - TeaCache: rel_l1_thresh, coefficients (optional)
+        - TeaCache: rel_l1_thresh, coefficients, num_warmup_steps (optional)
         - cache-dit: Fn_compute_blocks, Bn_compute_blocks, max_warmup_steps,
                     residual_diff_threshold, enable_taylorseer, taylorseer_order,
                     scm_steps_mask_policy, scm_steps_policy
@@ -598,6 +598,7 @@ class DiffusionCacheConfig:
     # None defers to the model-specific TeaCache default (0.2 fallback).
     rel_l1_thresh: float | None = None
     coefficients: list[float] | None = None  # Uses model-specific defaults if None
+    num_warmup_steps: int | None = None  # Uses model-specific default if None
 
     # SeaCache parameters [sea_cache only]
     sea_threshold: float = 0.25

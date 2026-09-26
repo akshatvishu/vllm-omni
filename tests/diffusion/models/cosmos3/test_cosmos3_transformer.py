@@ -76,6 +76,33 @@ def _tiny_cosmos3_edge_config(**overrides):
 
 
 @pytest.mark.parametrize(
+    ("cache_backend", "use_hsdp", "enable_dlo", "error"),
+    [
+        ("tea_cache", True, False, "does not support HSDP"),
+        ("tea_cache", False, True, "does not support distributed layerwise offload"),
+        ("cache_dit", True, True, None),
+    ],
+)
+def test_cosmos3_teacache_rejects_weight_sharding(
+    cache_backend: str, use_hsdp: bool, enable_dlo: bool, error: str | None
+) -> None:
+    from vllm_omni.diffusion.models.cosmos3.transformer_cosmos3 import Cosmos3VFMTransformer
+
+    config = SimpleNamespace(
+        tf_model_config=_tiny_cosmos3_config(),
+        dtype=torch.float32,
+        cache_backend=cache_backend,
+        parallel_config=SimpleNamespace(use_hsdp=use_hsdp),
+        enable_distributed_layerwise_offload=enable_dlo,
+    )
+    if error is None:
+        Cosmos3VFMTransformer(config)
+    else:
+        with pytest.raises(ValueError, match=error):
+            Cosmos3VFMTransformer(config)
+
+
+@pytest.mark.parametrize(
     ("config_kind", "expected_language", "expected_gen"),
     [
         ("flat", "transformer", "transformer"),
@@ -822,6 +849,60 @@ def test_cache_execution_residual_spans_final_gen_norm(monkeypatch: pytest.Monke
     assert torch.equal(cached_output, full_output)
     for name in ("_seacache_skip", "_seacache_record", "_seacache_residual", "_seacache_last_residual"):
         assert not hasattr(model, name)
+
+
+def test_teacache_protocol_hit_reuses_gen_residual(monkeypatch: pytest.MonkeyPatch) -> None:
+    from vllm_omni.diffusion.cache.teacache.backend import TeaCacheBackend
+    from vllm_omni.diffusion.data import DiffusionCacheConfig
+    from vllm_omni.diffusion.models.cosmos3 import transformer_cosmos3
+
+    class CountingGenLayer(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.input_layernorm = nn.LayerNorm(8, elementwise_affine=False)
+            self.calls = 0
+
+        def forward(self, hidden_states: torch.Tensor, **kwargs) -> torch.Tensor:
+            del kwargs
+            self.calls += 1
+            return hidden_states + torch.tanh(self.input_layernorm(hidden_states))
+
+    monkeypatch.setattr(transformer_cosmos3, "_get_ulysses_state", lambda: (1, 0, None))
+    model = transformer_cosmos3.Cosmos3VFMTransformer(
+        SimpleNamespace(tf_model_config=_tiny_cosmos3_config(), dtype=torch.float32)
+    )
+    layer = CountingGenLayer()
+    model.gen_layers = nn.ModuleList([layer])
+    kwargs = {
+        "hidden_states": torch.ones(1, 2, 1, 2, 2),
+        "timestep": torch.tensor([1.0]),
+        "text_ids": torch.tensor([[1, 2]], dtype=torch.long),
+        "text_mask": torch.ones(1, 2, dtype=torch.long),
+        "video_shape": (1, 2, 2),
+        "fps": 24.0,
+    }
+    ctx = model.preprocess(**kwargs, skip_modulated_input=False)
+    torch.testing.assert_close(ctx.modulated_input, layer.input_layernorm(ctx.hidden_states), rtol=0, atol=0)
+    model.reset_cache()
+    full_output = model(**kwargs)
+    model.reset_cache()
+
+    TeaCacheBackend(DiffusionCacheConfig(coefficients=[0.0] * 5, num_warmup_steps=1)).enable(
+        SimpleNamespace(transformer=model)
+    )
+    first_output = model(**kwargs)
+    second_output = model(**kwargs)
+
+    assert layer.calls == 2  # One reference, one miss, then a hit.
+    torch.testing.assert_close(first_output, full_output, rtol=0, atol=0)
+    torch.testing.assert_close(second_output, full_output, rtol=0, atol=1e-7)
+
+    model._teacache_disabled = True
+    transfer_output = model(**kwargs)
+    model._teacache_disabled = False
+    assert layer.calls == 3
+    torch.testing.assert_close(transfer_output, full_output, rtol=0, atol=0)
+    assert model._hook_registry.get_hook("teacache")._forward_cnt == 2
 
 
 def test_no_cache_still_runs_final_gen_norm_once(monkeypatch: pytest.MonkeyPatch) -> None:

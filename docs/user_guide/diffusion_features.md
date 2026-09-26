@@ -163,12 +163,12 @@ The following tables show which models support each feature:
 | **Qwen-Image-Edit**      |     ✅     |     ✅      |           ✅           |       ✅        |         ✅         |          ❌          |   ✅    |             ✅             |      ✅ (decode)      |       ❌        |        ❌         |
 | **Qwen-Image-Edit-2509** |     ✅     |     ✅      |           ✅           |       ✅        |         ✅         |          ❌          |   ✅    |        ✅ (decode)         |          ✅           |       ❌        |        ❌         |
 | **Qwen-Image-Layered**   |     ✅     |     ✅      |           ✅           |       ✅        |         ✅         |          ❌          |   ✅    |             ✅             |      ✅ (decode)      |       ❌        |        ❌         |
-| **SenseNova-U1 / U1.5**  |     ❌     |     ✅      |           ❌           |       ✅        |         ✅         |          ❌          |   ❌    |             ✅             |          ❌           |       ❌        |        ❌         |
+| **SenseNova-U1 / U1.5**  |  ✅ (U1)  |     ✅      |           ❌           |       ✅        |         ✅         |          ❌          |   ❌    |             ✅             |          ❌           |       ❌        |        ❌         |
 | **Stable-Diffusion-XL**  |     ❌     |     ❌      |           ✅           |       ✅        |         ✅         |          ❌          |   ✅    |             ✅             |      ✅ (decode)      |       ❌        |        ❌         |
 | **Stable-Diffusion3.5**  |     ❌     |     ✅      |           ❌           |       ✅        |         ✅         |          ❌          |   ❌    |             ✅             |      ✅ (decode)      |       ❌        |        ❌         |
 | **Z-Image**              |     ✅     |     ✅      |           ✅           |       ❓        |   ✅ (TP=2 only)   |          ❌          |   ✅    |             ❌             |      ✅ (decode)      |       ✅        |        ❌         |
 | **ERNIE-Image**          |     ❌     |     ✅      |           ✅           |       ❓        |         ✅         |          ❌          |   ✅    |             ✅             |          ❌           |       ❌        |        ❌         |
-| **Cosmos3**              |     ❌     |     ✅      |           ✅           |       ✅        |         ✅         |          ❌          |   ✅    |             ✅             |      ✅ (decode)      |       ✅        |        ❌         |
+| **Cosmos3**              |     ❓     |     ✅      |           ✅           |       ✅        |         ✅         |          ❌          |   ✅    |             ✅             |      ✅ (decode)      |       ✅        |        ❌         |
 
 > Notes:
 >
@@ -179,6 +179,7 @@ The following tables show which models support each feature:
 > 5. HunyuanImage3 supports step execution. Multi-request step execution requires `TORCH_SDPA`; see [Diffusion Execution Modes](diffusion/execution_modes.md#step-execution).
 > 6. BAGEL step execution supports image generation with `bagel.yaml`, `bagel_think.yaml`, and `bagel_single_stage.yaml`; two-stage Thinker execution and explicit single-stage text output remain on their existing complete-request paths. Image requests require `num_inference_steps >= 2`. BAGEL step execution cannot currently be combined with sequence parallelism or a diffusion cache backend; see [Diffusion Execution Modes](diffusion/execution_modes.md#step-execution).
 > 7. MammothModa2 runs its DiT stage on the diffusion runner (`StageExecutionType.DIFFUSION`); Cache-DiT is enabled through the standard diffusion-stage knobs on the stage entry of the deploy YAML (`cache_backend: cache_dit`, plus optional `cache_config` / `enable_cache_dit_summary`). The runner installs the backend at startup and the pipeline adopts it per request. Only the repeated main-layer stack is cached; requests with `text_guidance_scale = 1.0` bypass the cache hooks.
+> 8. SenseNova-U1 TeaCache ran with cache hits on one MI300X, including model level CPU offload. Requests without CFG run without TeaCache. Three-branch image editing with TeaCache and `cfg_parallel_size=2` is rejected because cond and uncond share a rank but need separate cache states. U1.5 uses the same pipeline, but its default TeaCache coefficients have not been checked with the U1.5 checkpoint.
 
 ### VideoGen
 
@@ -193,7 +194,7 @@ The following tables show which models support each feature:
 |  **SANA-Video-2B T2V I2V**   |     ❌     |     ❌      |   ✅ (`--usp`, frame-sharded)   |       ✅       |  ✅ (TP=2 only)   |         ❌         |   ❌   |            ❌             |          ❌          |       ❌       |        ❌        |
 | **Helios**                   |     ❌     |     ✅      |           ✅           |       ✅        |         ✅         |         ❌         |   ✅    |             ✅             |          ❌           |       ❌        |        ✅*        |
 | **HunyuanVideo-1.5 T2V I2V** |     ❌     |     ✅      |           ✅           |       ✅        |         ✅         |         ❌         |   ✅    |             ✅             |  ✅ (encode/decode)   |       ✅        |        ❌         |
-| **Cosmos3**                  |     ❌     |     ✅      |           ✅           |       ✅        |         ✅         |         ❌         |   ✅    |             ✅             |  ✅ (encode/decode)   |       ✅        |        ❌         |
+| **Cosmos3**                  |     ❓     |     ✅      |           ✅           |       ✅        |         ✅         |         ❌         |   ✅    |             ✅             |  ✅ (encode/decode)   |       ✅        |        ❌         |
 | **LongCat-Video-Avatar-1.5** |     ❌     |     ❌      |           ❌           |       ❌        |         ❌         |         ❌         |   ❌    |             ❌             |          ❌           |       ❌        |        ❌         |
 | **MiniMax-H3**               | ✅ (FL2VA) |     ✅      |           ✅           |       ❌        |       ✅ (DiT/TE)  |         ❌         |   ✅    |             ✅             |       ✅ (tile)       |      ✅ (DiT)      |        ❌         |
 | **MAGI-2 Preview**           |     ❌     |     ✅      |      ✅ (Ulysses)       |    ✅ (2-way)   |         ✅         |         ❌         |   ✅    | ✅ (1-GPU/LW; DLO DP-AG/SP no-AG) |       ✅ (tile)       |       ❌        |        ❌         |

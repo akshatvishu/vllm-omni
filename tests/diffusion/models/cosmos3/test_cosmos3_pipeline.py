@@ -231,6 +231,7 @@ class StubCosmos3Transformer(nn.Module):
                 "timestep": timestep.clone(),
                 "text_mask": text_mask.clone(),
                 "cache_before": self.cached_kv,
+                "teacache_disabled": getattr(self, "_teacache_disabled", False),
                 "kwargs": dict(kwargs),
             }
         )
@@ -2380,6 +2381,8 @@ def test_diffuse_transfer_applies_control_cfg(make_cosmos3_pipeline, sequential_
     assert pipeline.transformer.calls[0]["kwargs"]["control_weights"] == [1.0]
     assert "control_weights" not in pipeline.transformer.calls[1]["kwargs"]
     assert pipeline.transformer.calls[2]["kwargs"]["control_weights"] == [1.0]
+    assert all(call["teacache_disabled"] for call in pipeline.transformer.calls)
+    assert not pipeline.transformer._teacache_disabled
     torch.testing.assert_close(result, torch.full_like(latents, 254.0))
 
 
@@ -2796,6 +2799,30 @@ def test_diffuse_keeps_paired_cfg_when_cache_dit_active(make_cosmos3_pipeline) -
     # Identical result to the skip path: out-of-interval combine uses scale=1.0,
     # so combine_cfg_noise(cond=2, uncond=1, 1.0) == 2 == the skipped cond value.
     torch.testing.assert_close(result, torch.full_like(latents, 6.0))
+
+
+def test_diffuse_keeps_paired_cfg_when_teacache_active(make_cosmos3_pipeline) -> None:
+    pipeline = make_cosmos3_pipeline()
+    registry = Mock()
+    registry.get_hook.return_value = object()
+    pipeline.transformer._hook_registry = registry
+    latents = torch.zeros(1, 2, 1, 1, 1)
+
+    pipeline.diffuse(
+        latents=latents,
+        timesteps=torch.tensor([900, 100]),
+        cond_ids=_ids(2),
+        cond_mask=_mask(),
+        uncond_ids=_ids(1),
+        uncond_mask=_mask(),
+        guidance_scale=3.0,
+        shared_kwargs={"video_shape": (1, 1, 1), "fps": 24.0},
+        guidance_interval=(500.0, 1000.0),
+    )
+
+    registry.reset_hook.assert_called_once_with("teacache")
+    assert pipeline.transformer.do_true_cfg
+    assert [call["token"] for call in pipeline.transformer.calls] == [2, 1, 2, 1]
 
 
 class TestForwardRouting:

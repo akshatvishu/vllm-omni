@@ -13,6 +13,7 @@ compressed path must compute the same thing the expanded one did.
 import pytest
 import torch
 
+from tests.helpers.mark import hardware_test
 from vllm_omni.diffusion.attention.backends.sdpa import SDPAImpl
 from vllm_omni.diffusion.models.sensenova_u1.sensenova_u1_transformer import (
     SenseNovaU1Attention,
@@ -106,6 +107,9 @@ class _ModelHost:
     """Carries only the attributes ``SenseNovaU1Model.forward`` touches."""
 
     forward = SenseNovaU1Model.forward
+    preprocess = SenseNovaU1Model.preprocess
+    run_transformer_blocks = SenseNovaU1Model.run_transformer_blocks
+    postprocess = SenseNovaU1Model.postprocess
 
     def __init__(self, probe):
         self.layers = [probe]
@@ -153,8 +157,7 @@ def _float64_attention(q, k, v):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for fused GQA")
-@pytest.mark.cuda
-@pytest.mark.L4
+@hardware_test(res={"cuda": "L4"})
 @pytest.mark.parametrize("kv_len", [271, 512, 2048])
 def test_decode_without_the_no_op_mask_is_closer_to_float64(kv_len):
     """The old decode path expanded K/V and passed an all-zeros mask, which kept

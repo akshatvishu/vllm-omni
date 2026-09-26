@@ -5,7 +5,6 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -19,7 +18,7 @@ from torch.distributed.fsdp import fully_shard
 from vllm_omni.diffusion.cache.teacache.backend import TeaCacheBackend
 from vllm_omni.diffusion.cache.teacache.coefficient_estimator import DataCollectionHook
 from vllm_omni.diffusion.cache.teacache.config import TeaCacheConfig
-from vllm_omni.diffusion.cache.teacache.extractors import CacheContext, get_extractor
+from vllm_omni.diffusion.cache.teacache.extractors import CacheContext
 from vllm_omni.diffusion.cache.teacache.hook import TeaCacheHook, apply_teacache_hook
 from vllm_omni.diffusion.cache.teacache.protocol import (
     ForwardState,
@@ -184,12 +183,17 @@ def test_legacy_decision_callback_is_preserved():
     torch.testing.assert_close(hook.state_manager.get_state().previous_residual_encoder, torch.tensor([3.0]))
 
 
-def test_protocol_requires_modulated_input_for_cache():
+def test_protocol_without_modulated_input_runs_without_cache():
     model = _ProtocolModel()
     hook = _hook(model)
-    with patch.object(model, "preprocess", return_value=ForwardState(None, torch.ones(1), None, torch.ones(1), None)):
-        with pytest.raises(ValueError, match="modulated input"):
-            hook.new_forward(model, torch.ones(1), torch.ones(1))
+    with patch.object(
+        model, "preprocess", return_value=ForwardState(None, torch.ones(1), torch.ones(1), torch.ones(1), None)
+    ):
+        hidden, encoder = hook.new_forward(model, torch.ones(1), torch.ones(1))
+    torch.testing.assert_close(hidden, torch.tensor([3.0]))
+    torch.testing.assert_close(encoder, torch.tensor([4.0]))
+    assert model.block_calls == 1
+    assert hook._forward_cnt == 0
 
 
 @pytest.mark.parametrize(
@@ -233,48 +237,11 @@ def test_custom_legacy_enablers_keep_table_defaults():
     class BagelPipeline:
         bagel = _LegacyModel()
 
-    class SenseNovaU1Pipeline:
-        denoising_transformer = _LegacyModel()
-
-    for pipeline, target in (
-        (BagelPipeline(), "bagel"),
-        (SenseNovaU1Pipeline(), "denoising_transformer"),
-    ):
-        with patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook") as apply_hook:
-            TeaCacheBackend(DiffusionCacheConfig()).enable(pipeline)
-        model, config = apply_hook.call_args.args
-        assert model is getattr(pipeline, target)
-        assert len(config.coefficients) == 5
-        assert config.rel_l1_thresh == 0.2
-
-
-def test_sensenova_legacy_extractor_runs_denoising():
-    class Layer:
-        @staticmethod
-        def input_layernorm_mot_gen(hidden_states):
-            return hidden_states * 2
-
-        @staticmethod
-        def __call__(hidden_states, **kwargs):
-            assert kwargs["exist_gen"]
-            assert not kwargs["exist_und"]
-            return hidden_states + 1
-
-    module = SimpleNamespace(
-        model=SimpleNamespace(layers=[Layer()], norm_mot_gen=lambda hidden_states: hidden_states * 3),
-    )
-    inputs_embeds = torch.ones(1, 2, 3)
-    context = get_extractor("SenseNovaU1ForCausalLM")(
-        module,
-        inputs_embeds=inputs_embeds,
-        image_gen_indicators=torch.ones(1, 2, dtype=torch.bool),
-        compute_logits=False,
-    )
-
-    assert torch.equal(context.modulated_input, inputs_embeds * 2)
-    output = context.postprocess(context.run_transformer_blocks()[0])
-    assert torch.equal(output.hidden_states, torch.full_like(inputs_embeds, 6))
-    assert output.logits is None
+    with patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook") as apply_hook:
+        TeaCacheBackend(DiffusionCacheConfig()).enable(BagelPipeline())
+    _, config = apply_hook.call_args.args
+    assert len(config.coefficients) == 5
+    assert config.rel_l1_thresh == 0.2
 
 
 def test_sensenova_transformer_imports_before_teacache():

@@ -10,13 +10,6 @@ from dataclasses import dataclass
 # TODO - need to move hunyuan image out of this path and onto the hook approach
 _MODEL_COEFFICIENTS = {
     "Bagel": [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00],
-    "SenseNovaU1ForCausalLM": [
-        9.07281930e04,
-        -2.17699186e04,
-        1.83940990e03,
-        -6.30339273e01,
-        7.61309272e-01,
-    ],
     "HunyuanImage3Pipeline": [
         1.04117826e02,
         -1.26848482e02,
@@ -55,6 +48,7 @@ class TeaCacheConfig:
             when no model-specific default is registered.
         coefficients: Polynomial coefficients for rescaling L1 distance. If None, uses
             model-specific defaults based on transformer_type.
+        num_warmup_steps: Initial steps per CFG branch that always run the full transformer.
         transformer_type: Transformer class name (e.g., "QwenImageTransformer2DModel").
             Auto-detected from pipeline.transformer.__class__.__name__ in backend.
             Defaults to "QwenImageTransformer2DModel".
@@ -63,9 +57,16 @@ class TeaCacheConfig:
     rel_l1_thresh: float | None = None
     coefficients: list[float] | None = None
     transformer_type: str = "QwenImageTransformer2DModel"
+    num_warmup_steps: int = 0
 
     def __post_init__(self) -> None:
         """Validate and set default coefficients."""
+        if (
+            isinstance(self.num_warmup_steps, bool)
+            or not isinstance(self.num_warmup_steps, int)
+            or self.num_warmup_steps < 0
+        ):
+            raise ValueError(f"num_warmup_steps must be a non-negative integer, got {self.num_warmup_steps!r}")
         threshold = self.rel_l1_thresh
         if threshold is None:
             threshold = _MODEL_DEFAULT_REL_L1_THRESH.get(self.transformer_type, _DEFAULT_REL_L1_THRESH)

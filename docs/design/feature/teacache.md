@@ -26,6 +26,8 @@ The core insight is that the modulated input (after normalization and timestep c
 
 vLLM-omni supports TeaCache through model-owned `preprocess`, `run_transformer_blocks` and `postprocess` methods and through legacy extractor functions. The hook accepts both paths during the migration. The model-owned path changes model code deliberately so cached and uncached execution share one forward implementation; copied extractor forwards can drift from the model's forward. The extractor instructions below describe the legacy path until every model is ported.
 
+For a model-owned forward, `preprocess` can return `modulated_input=None` when that call must run without TeaCache. The hook then executes the blocks and postprocess without advancing cache state. The coefficient collector also skips that call.
+
 ### Architecture
 
 The TeaCache system consists of three main components:

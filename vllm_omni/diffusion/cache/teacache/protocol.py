@@ -16,7 +16,9 @@ class ForwardState(Generic[T]):
     """Inputs and model-owned intermediates for a decomposed forward.
 
     Preprocess must provide anything postprocess needs on a cache hit, when
-    run_transformer_blocks is skipped.
+    run_transformer_blocks is skipped. A missing modulated_input tells the
+    TeaCache hook and coefficient collector to run the blocks without caching
+    or collecting that call.
     """
 
     modulated_input: torch.Tensor | None
@@ -28,8 +30,9 @@ class ForwardState(Generic[T]):
 
 @dataclass(frozen=True)
 class TeaCacheDefaults:
-    coefficients: list[float]
+    coefficients: list[float] | None
     rel_l1_thresh: float
+    num_warmup_steps: int = 0
 
 
 @runtime_checkable

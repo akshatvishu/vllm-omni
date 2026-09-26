@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Regression test: SenseNovaU1ForCausalLM instantiation under the diffusion
-config shim must not crash on missing ``head_dtype`` and the resulting
-LogitsProcessor must have ``head_dtype is None`` (= use model dtype)."""
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+"""Tiny SenseNova-U1 model checks for vLLM config and TeaCache."""
 
 import os
+import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -15,6 +16,8 @@ from vllm.distributed.parallel_state import (
     initialize_model_parallel,
 )
 
+from vllm_omni.diffusion.cache.teacache.backend import TeaCacheBackend
+from vllm_omni.diffusion.data import DiffusionCacheConfig
 from vllm_omni.diffusion.models.sensenova_u1.sensenova_u1_transformer import (
     SenseNovaU1ForCausalLM,
 )
@@ -32,6 +35,7 @@ def _build_tiny_sensenova_u1(quant_config=None, prefix="model"):
         llm_config={
             "hidden_size": 64,
             "num_attention_heads": 2,
+            "num_key_value_heads": 2,
             "num_hidden_layers": 1,
             "intermediate_size": 128,
             "vocab_size": 32,
@@ -42,7 +46,8 @@ def _build_tiny_sensenova_u1(quant_config=None, prefix="model"):
     return SenseNovaU1ForCausalLM(config.llm_config, quant_config=quant_config, prefix=prefix)
 
 
-def test_logits_processor_head_dtype_under_diffusion_shim():
+@pytest.fixture
+def tiny_sensenova_u1():
     # Initialize the distributed environment
     os.environ.setdefault("MASTER_ADDR", "localhost")
     os.environ.setdefault("MASTER_PORT", "29543")
@@ -62,11 +67,40 @@ def test_logits_processor_head_dtype_under_diffusion_shim():
     vllm_config.modelconfig = fake_diff_config  # type: ignore[assignment]
 
     # Build a tiny version of the Causal LM component
-    with set_current_vllm_config(vllm_config):
-        model = _build_tiny_sensenova_u1()
+    try:
+        with set_current_vllm_config(vllm_config):
+            yield _build_tiny_sensenova_u1()
+    finally:
+        cleanup_dist_env_and_memory()
 
+
+def test_logits_processor_head_dtype_under_diffusion_shim(tiny_sensenova_u1):
     # Ensure that we have a set head_dtype attribute. Currently, the head_dtype
     # is set to None
-    head_dtype = model.logits_processor.head_dtype
+    head_dtype = tiny_sensenova_u1.logits_processor.head_dtype
     assert head_dtype is None
-    cleanup_dist_env_and_memory()
+
+
+def test_tiny_model_teacache_hits(tiny_sensenova_u1):
+    model = tiny_sensenova_u1.model.eval()
+    with torch.no_grad():
+        for parameter in model.parameters():
+            torch.nn.init.normal_(parameter, std=0.02)
+    inputs = {
+        "inputs_embeds": torch.randn(1, 1, 64),
+        "image_gen_indicators": torch.ones(1, 1, dtype=torch.bool),
+        "indexes": torch.zeros(3, 1, dtype=torch.long),
+        "use_cache": False,
+    }
+    with torch.no_grad(), patch.dict(sys.modules, {"vllm_omni.diffusion.models.sensenova_u1.fused_rmsnorm_rope": None}):
+        # The fused RoPE kernel needs a GPU; use the model's native CPU path.
+        baseline = model(**inputs).last_hidden_state
+        TeaCacheBackend(DiffusionCacheConfig(coefficients=[0, 0, 0, 0, 0])).enable(SimpleNamespace(transformer=model))
+        with patch.object(model.layers[0], "forward", wraps=model.layers[0].forward) as layer_forward:
+            first = model(**inputs).last_hidden_state
+            second = model(**inputs).last_hidden_state
+
+    torch.testing.assert_close(first, baseline)
+    torch.testing.assert_close(second, baseline)
+    assert torch.count_nonzero(baseline) > 0
+    assert layer_forward.call_count == 1

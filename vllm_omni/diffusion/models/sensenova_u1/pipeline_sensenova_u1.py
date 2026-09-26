@@ -437,30 +437,6 @@ def _optimized_scale(positive_flat, negative_flat):
 # ---------------------------------------------------------------------------
 
 
-class SenseNovaU1DenoisingAdapter(nn.Module):
-    """Denoising-only entry point used by cache backends."""
-
-    def __init__(self, language_model: SenseNovaU1ForCausalLM):
-        super().__init__()
-        object.__setattr__(self, "language_model", language_model)
-        self.do_true_cfg = True
-
-    @property
-    def model(self):
-        return self.language_model.model
-
-    @property
-    def lm_head(self):
-        return self.language_model.lm_head
-
-    @property
-    def logits_processor(self):
-        return self.language_model.logits_processor
-
-    def forward(self, *args, **kwargs):
-        return self.language_model(*args, **kwargs)
-
-
 class SenseNovaU1Pipeline(
     nn.Module,
     SupportsComponentDiscovery,
@@ -515,12 +491,10 @@ class SenseNovaU1Pipeline(
             self.llm_cfg,
             prefix="language_model",
         )
-        # Cache-DiT hooks pipeline.transformer(.blocks), so it must point at the
-        # real decoder module (exposes .blocks and real parameters).
+        # Cache-DiT and TeaCache hook the decoder; the language-model wrapper
+        # still runs first so its CPU-offload hook can load the weights.
         self.transformer = self.language_model.model
-        # TeaCache intercepts the ForCausalLM-level denoising forward; route it
-        # through a dedicated adapter so it does not collide with Cache-DiT.
-        self.denoising_transformer = SenseNovaU1DenoisingAdapter(self.language_model)
+        self.transformer.do_true_cfg = True
 
         # Vision model (understanding branch)
         self.vision_model = NEOVisionModel(self.vis_cfg)
@@ -688,8 +662,7 @@ class SenseNovaU1Pipeline(
         **_kw,
     ):
         B, L = z.shape[0], z.shape[1]
-        denoising_model = self.language_model if cache_dit_skip else self.denoising_transformer
-        outputs = denoising_model(
+        outputs = self.language_model(
             inputs_embeds=input_embeds,
             image_gen_indicators=torch.ones(
                 (input_embeds.shape[0], input_embeds.shape[1]), dtype=torch.bool, device=input_embeds.device
@@ -1357,6 +1330,17 @@ class SenseNovaU1Pipeline(
 
     def _forward_it2i(self, p, input_images: list[Image.Image]) -> DiffusionOutput:
         """Image-to-image (editing) generation path with dual CFG."""
+        # TODO(#2371): Remove once the CFG dispatcher passes branch ids to TeaCache (#5287).
+        if (
+            self.od_config.cache_backend == "tea_cache"
+            and self.od_config.parallel_config.cfg_parallel_size == 2
+            and p.img_cfg_scale != 1
+            and p.cfg_scale != p.img_cfg_scale
+        ):
+            raise ValueError(
+                "SenseNova-U1 TeaCache does not support three-branch image editing with CFG parallel size 2"
+            )
+
         ns = self._init_noise_and_schedule(p)
 
         pixel_values, grid_hw = self._prepare_input_images(input_images)
