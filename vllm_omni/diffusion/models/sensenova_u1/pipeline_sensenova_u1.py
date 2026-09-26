@@ -658,7 +658,7 @@ class SenseNovaU1Pipeline(
         image_token_num,
         t_eps: float,
         image_size=None,
-        cache_dit_skip=False,
+        skip_step_cache=False,
         **_kw,
     ):
         B, L = z.shape[0], z.shape[1]
@@ -671,7 +671,7 @@ class SenseNovaU1Pipeline(
             attention_mask=attn_mask,
             past_key_values=past_key_values,
             update_cache=False,
-            cache_dit_skip=cache_dit_skip,
+            skip_step_cache=skip_step_cache,
             use_cache=True,
             compute_logits=False,
         )
@@ -1087,7 +1087,7 @@ class SenseNovaU1Pipeline(
             timesteps=timesteps,
         )
 
-    def _get_cfg_kwargs(self, caches: dict, image_embeds, t, z, ns, p, branch: str, cache_dit_skip: bool = False):
+    def _get_cfg_kwargs(self, caches: dict, image_embeds, t, z, ns, p, branch: str, skip_step_cache: bool = False):
         required = (branch, f"idx_{branch}", f"mask_{branch}")
         missing = [key for key in required if key not in caches]
         if missing:
@@ -1103,15 +1103,15 @@ class SenseNovaU1Pipeline(
             image_size=p.image_size,
             t_eps=p.t_eps,
         )
-        if cache_dit_skip:
-            kwargs["cache_dit_skip"] = True
+        if skip_step_cache:
+            kwargs["skip_step_cache"] = True
         return kwargs
 
     def _denoise(self, image_prediction, ns, t, z, image_embeds, caches, p, step_i, is_it2i):
         if not is_it2i:
             has_cached_partner = t >= p.cfg_interval[0] and t <= p.cfg_interval[1] and p.cfg_scale > 1
             cond_kwargs = self._get_cfg_kwargs(
-                caches, image_embeds, t, z, ns, p, branch="cond", cache_dit_skip=not has_cached_partner
+                caches, image_embeds, t, z, ns, p, branch="cond", skip_step_cache=not has_cached_partner
             )
 
             in_interval = t >= p.cfg_interval[0] and t <= p.cfg_interval[1]
@@ -1133,7 +1133,7 @@ class SenseNovaU1Pipeline(
             needs_cfg = p.cfg_scale != 1 or p.img_cfg_scale != 1
             has_cached_partner = use_cfg and needs_cfg
             cond_kwargs = self._get_cfg_kwargs(
-                caches, image_embeds, t, z, ns, p, branch="cond", cache_dit_skip=not has_cached_partner
+                caches, image_embeds, t, z, ns, p, branch="cond", skip_step_cache=not has_cached_partner
             )
 
             if not use_cfg or not needs_cfg:
@@ -1162,7 +1162,7 @@ class SenseNovaU1Pipeline(
                 )
             else:
                 image_cond_kwargs = self._get_cfg_kwargs(
-                    caches, image_embeds, t, z, ns, p, branch="img_cond", cache_dit_skip=True
+                    caches, image_embeds, t, z, ns, p, branch="img_cond", skip_step_cache=True
                 )
                 uncond_kwargs = self._get_cfg_kwargs(caches, image_embeds, t, z, ns, p, branch="uncond")
                 noise_pred = self.predict_noise_with_multi_branch_cfg(

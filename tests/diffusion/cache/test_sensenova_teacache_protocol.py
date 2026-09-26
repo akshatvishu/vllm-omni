@@ -48,7 +48,6 @@ class _Layer(nn.Module):
         assert len(kwargs["position_embeddings"]) == 3
         assert kwargs["position_embeddings"][0].shape == hidden_states.shape
         assert kwargs["attention_mask"]["full_attention"] is None
-        assert kwargs["update_cache"] is False
         return hidden_states + hidden_states.square() + (2 if kwargs["exist_gen"] else 1)
 
 
@@ -117,7 +116,7 @@ def test_cache_hit_and_bypass_still_call_language_model_hooks():
     assert model.layers[0].calls == 1
 
     language_model(**_args(False), compute_logits=False)
-    language_model(**_args(cache_dit_skip=True), compute_logits=False)
+    language_model(**_args(skip_step_cache=True), compute_logits=False)
     explicit_und = _args()
     explicit_und["image_gen_indicators"] = torch.zeros(1, 1, dtype=torch.bool)
     language_model(**explicit_und, compute_logits=False)
@@ -135,7 +134,7 @@ def test_cfg_bypass_does_not_shift_branch_cache(monkeypatch):
     hook = model._hook_registry.get_hook("teacache")
 
     def run_branch(value, *, skip=False):
-        args = _args(cache_dit_skip=True) if skip else _args()
+        args = _args(skip_step_cache=True) if skip else _args()
         args["inputs_embeds"] = torch.full((1, 1, 3), value)
         return model(**args).last_hidden_state
 
@@ -151,6 +150,19 @@ def test_cfg_bypass_does_not_shift_branch_cache(monkeypatch):
     assert not torch.equal(cond_first, uncond_first)
     assert model.layers[0].calls == 4
     assert hook._forward_cnt == 4
+
+
+def test_kv_update_bypasses_step_cache():
+    model = _model()
+    TeaCacheBackend(DiffusionCacheConfig(coefficients=[0, 0, 0, 0, 0])).enable(SimpleNamespace(transformer=model))
+    args = _args()
+    args["update_cache"] = True
+
+    model(**args)
+    model(**args)
+
+    assert model.layers[0].calls == 2
+    assert model._hook_registry.get_hook("teacache")._forward_cnt == 0
 
 
 def test_collector_records_only_denoising_calls():

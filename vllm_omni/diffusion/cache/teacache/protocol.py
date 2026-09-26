@@ -24,7 +24,7 @@ class ForwardState(Generic[T]):
     modulated_input: torch.Tensor | None
     hidden_states: torch.Tensor
     encoder_hidden_states: torch.Tensor | None
-    temb: torch.Tensor
+    temb: torch.Tensor | None
     intermediates: T
 
 

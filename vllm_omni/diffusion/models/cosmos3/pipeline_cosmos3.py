@@ -48,6 +48,7 @@ from transformers import AutoTokenizer
 from vllm.logger import init_logger
 from vllm.model_executor.models.utils import AutoWeightsLoader
 
+from vllm_omni.diffusion.cache.teacache.hook import TeaCacheHook
 from vllm_omni.diffusion.data import DiffusionOutput, OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.autoencoders.autoencoder_kl_wan import DistributedAutoencoderKLWan
 from vllm_omni.diffusion.distributed.cfg_parallel import CFGParallelMixin
@@ -1411,10 +1412,7 @@ class Cosmos3OmniDiffusersPipeline(
         CFG branches. Skipping the unconditional pass outside guidance_interval
         would put later passes into the wrong cache state.
         """
-        registry = getattr(self.transformer, "_hook_registry", None)
-        return self._cache_dit_requires_paired_cfg or (
-            registry is not None and registry.get_hook("teacache") is not None
-        )
+        return self._cache_dit_requires_paired_cfg or self.od_config.cache_backend == "tea_cache"
 
     @staticmethod
     def _get_sp_param(sp: OmniDiffusionSamplingParams, key: str, default: Any = None) -> Any:
@@ -2777,7 +2775,7 @@ class Cosmos3OmniDiffusersPipeline(
         step_scheduler = scheduler if scheduler is not None else self.scheduler
         registry = getattr(self.transformer, "_hook_registry", None)
         if registry is not None:
-            registry.reset_hook("teacache")
+            registry.reset_hook(TeaCacheHook._HOOK_NAME)
         self.transformer.do_true_cfg = do_cfg
         # Session-keyed UND K/V (RFC #4480); None => bespoke transformer-instance cache.
         kv_state = self._new_cosmos3_state(session_id)
@@ -3228,6 +3226,8 @@ class Cosmos3OmniDiffusersPipeline(
         self.transformer.reset_cache()
         self._cosmos3_branch_caches = {}
         # Transfer can run several branches with different GEN layouts per step.
+        if self.od_config.cache_backend == "tea_cache":
+            logger.warning("Cosmos3 transfer requests bypass TeaCache")
         self.transformer._teacache_disabled = True
         try:
             for step_index, t in enumerate(self.progress_bar(timesteps)):

@@ -18,6 +18,7 @@ import torch
 from PIL import Image
 from torch import nn
 
+from vllm_omni.diffusion.hooks import HookRegistry, ModelHook
 from vllm_omni.diffusion.worker.request_batch import DiffusionRequestBatch
 from vllm_omni.experimental.world_models.session_state import SessionStateManager
 
@@ -273,7 +274,7 @@ def make_cosmos3_pipeline():
 
         pipeline = object.__new__(Cosmos3OmniDiffusersPipeline)
         nn.Module.__init__(pipeline)
-        pipeline.od_config = SimpleNamespace()
+        pipeline.od_config = SimpleNamespace(cache_backend=None)
         pipeline.device = torch.device("cpu")
         pipeline.dtype = torch.float32
         pipeline.transformer = StubCosmos3Transformer(latent_channel_size=2)
@@ -2351,8 +2352,11 @@ def test_diffuse_drops_session_when_progress_iteration_fails(make_cosmos3_pipeli
     assert "request-that-fails" not in pipeline._memory_manager
 
 
-def test_diffuse_transfer_applies_control_cfg(make_cosmos3_pipeline, sequential_cfg_parallel) -> None:
+def test_diffuse_transfer_applies_control_cfg(make_cosmos3_pipeline, sequential_cfg_parallel, monkeypatch) -> None:
     pipeline = make_cosmos3_pipeline()
+    pipeline.od_config.cache_backend = "tea_cache"
+    warning = Mock()
+    monkeypatch.setattr("vllm_omni.diffusion.models.cosmos3.pipeline_cosmos3.logger.warning", warning)
     latents = torch.zeros(1, 2, 1, 1, 1)
     velocity_mask = torch.ones(1, 1, 1, 1, 1)
 
@@ -2383,6 +2387,7 @@ def test_diffuse_transfer_applies_control_cfg(make_cosmos3_pipeline, sequential_
     assert pipeline.transformer.calls[2]["kwargs"]["control_weights"] == [1.0]
     assert all(call["teacache_disabled"] for call in pipeline.transformer.calls)
     assert not pipeline.transformer._teacache_disabled
+    warning.assert_called_once_with("Cosmos3 transfer requests bypass TeaCache")
     torch.testing.assert_close(result, torch.full_like(latents, 254.0))
 
 
@@ -2803,8 +2808,8 @@ def test_diffuse_keeps_paired_cfg_when_cache_dit_active(make_cosmos3_pipeline) -
 
 def test_diffuse_keeps_paired_cfg_when_teacache_active(make_cosmos3_pipeline) -> None:
     pipeline = make_cosmos3_pipeline()
+    pipeline.od_config.cache_backend = "tea_cache"
     registry = Mock()
-    registry.get_hook.return_value = object()
     pipeline.transformer._hook_registry = registry
     latents = torch.zeros(1, 2, 1, 1, 1)
 
@@ -2877,6 +2882,36 @@ class TestForwardRouting:
         pipeline.diffuse = fake_diffuse
         pipeline._decode_latents = lambda latents: latents
         return captured
+
+    def test_t2i_samples_reset_teacache_between_diffuse_calls(self, make_cosmos3_pipeline) -> None:
+        class ResetProbe(ModelHook):
+            def __init__(self) -> None:
+                self.forwards_per_sample: list[int] = []
+
+            def reset_state(self, module: nn.Module) -> nn.Module:
+                self.forwards_per_sample.append(0)
+                return module
+
+            def pre_forward(self, module: nn.Module, *args: Any, **kwargs: Any) -> tuple[tuple, dict]:
+                self.forwards_per_sample[-1] += 1
+                return args, kwargs
+
+        pipeline = make_cosmos3_pipeline()
+        diffuse = pipeline.diffuse
+        self._install_forward_stubs(pipeline)
+        pipeline.diffuse = diffuse
+        pipeline.od_config.cache_backend = "tea_cache"
+        probe = ResetProbe()
+        HookRegistry.get_or_create(pipeline.transformer).register_hook("teacache", probe)
+
+        pipeline.forward(
+            make_request_batch(
+                {"prompt": "A painted robot", "modalities": ["image"]},
+                make_sampling_params(num_outputs_per_prompt=2, num_inference_steps=2),
+            )
+        )
+
+        assert probe.forwards_per_sample == [4, 4]
 
     @pytest.mark.parametrize(
         ("prompt", "sampling_params", "expected"),

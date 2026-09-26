@@ -149,7 +149,7 @@ def enable_cache_for_wan22(pipeline: Any, cache_config: Any) -> RefreshCacheCont
     )
 
     refresh_trans_one = _build_cache_context_refresh(cache_config)
-    refresh_trans_two = _build_cache_context_refresh(cache_config, lambda pipeline: pipeline.transformer_2)
+    refresh_trans_two = _build_cache_context_refresh(cache_config, lambda pipeline: getattr(pipeline, "transformer_2"))
 
     def refresh_cache_context(pipeline: Any, num_inference_steps: int, verbose: bool = True) -> None:
         """Refresh cache context for both transformers with new num_inference_steps.
@@ -700,7 +700,7 @@ class SensenovaCachedBlocks(CachedBlocks_Pattern_3_4_5):
 
     @classmethod
     def _is_denoising_call(cls, kwargs: dict[str, Any]) -> bool:
-        if kwargs.get("cache_dit_skip", False):
+        if kwargs.get("skip_step_cache", False):
             return False
 
         # Prefix/text forwards either omit image_gen_indicators or update the
@@ -722,7 +722,7 @@ class SensenovaCachedBlocks(CachedBlocks_Pattern_3_4_5):
     @staticmethod
     def _strip_cache_only_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         kwargs = dict(kwargs)
-        kwargs.pop("cache_dit_skip", None)
+        kwargs.pop("skip_step_cache", None)
         return kwargs
 
     def forward(self, hidden_states: torch.Tensor, *args, **kwargs):

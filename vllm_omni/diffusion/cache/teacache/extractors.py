@@ -470,7 +470,7 @@ def extract_cosmos3_context(
     if kwargs:
         raise TypeError(f"Unexpected Cosmos3 transformer kwargs: {sorted(kwargs)}")
 
-    prep = module._gen_preprocess(
+    prep = module.preprocess(
         hidden_states,
         timestep,
         text_ids,
@@ -487,7 +487,8 @@ def extract_cosmos3_context(
         control_latents=control_latents,
         control_weights=control_weights,
         transfer_share_vision_temporal_positions=transfer_share_vision_temporal_positions,
-    )
+        skip_modulated_input=True,
+    ).intermediates
 
     def run_transformer_blocks() -> tuple[torch.Tensor, ...]:
         return (module._run_gen_stack(prep, prep.hidden_gen),)

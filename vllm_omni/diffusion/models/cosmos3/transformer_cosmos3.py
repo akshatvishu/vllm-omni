@@ -222,6 +222,8 @@ def _validate_teacache_runtime(od_config: OmniDiffusionConfig) -> None:
         raise ValueError("Cosmos3 TeaCache does not support HSDP")
     if bool(getattr(od_config, "enable_distributed_layerwise_offload", False)):
         raise ValueError("Cosmos3 TeaCache does not support distributed layerwise offload")
+    if bool(getattr(od_config, "enable_layerwise_offload", False)):
+        raise ValueError("Cosmos3 TeaCache does not support layerwise offload")
 
 
 def _as_bool(value: Any) -> bool:

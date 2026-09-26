@@ -137,9 +137,9 @@ _MODEL_COEFFICIENTS = {
 }
 ```
 
-Cosmos3 Nano and Super use the coefficients proposed in [PR #4389](https://github.com/vllm-project/vllm-omni/pull/4389). That PR fitted the coefficients on Cosmos3 Nano text-to-video runs and recommended 12 warmup steps to reduce early-step quality loss. The protocol path includes the final GEN norm in the cached residual, while #4389 fitted a residual before that norm; output quality and speedup with these coefficients still need a real-weight check. Transfer requests run without TeaCache because their branches have different GEN layouts. Cosmos3 Edge has no calibrated default coefficients and requires an explicit coefficient override.
+Cosmos3 Nano and Super use the coefficients proposed in [PR #4389](https://github.com/vllm-project/vllm-omni/pull/4389). That PR fitted the coefficients on Cosmos3 Nano text-to-video runs and recommended 12 warmup steps to reduce early-step quality loss. The protocol path includes the final GEN norm in the cached residual, while #4389 fitted a residual before that norm; output quality and speedup with these coefficients still need a real-weight check. Transfer requests run without TeaCache because their branches have different GEN layouts. Cosmos3 Edge has no calibrated default coefficients and requires an explicit coefficient override. Edge also defaults to zero warmup steps; set `num_warmup_steps` explicitly when supplying Edge coefficients.
 
-Cosmos3 TeaCache cannot be combined with HSDP or distributed layerwise offload. The current TeaCache signal reads a GEN layer's weights before its forward, and the skip decision is not synchronized across the weight-sharding groups.
+Cosmos3 TeaCache cannot be combined with HSDP, layerwise offload, or distributed layerwise offload. The current TeaCache signal reads a GEN layer's weights before its forward. Layerwise offload prepares those weights in the block's forward hook, while HSDP and distributed layerwise offload also require a shared skip decision across weight-sharding groups.
 
 ---
 

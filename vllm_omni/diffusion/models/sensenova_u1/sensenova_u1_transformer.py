@@ -745,13 +745,19 @@ class SenseNovaU1Model(nn.Module):
             self.rotary_emb_hw(hidden_states, indexes[2].unsqueeze(0)),
         )
         modulated_input = None
-        if not skip_modulated_input and not kwargs.get("cache_dit_skip", False) and exist_gen and not exist_und:
+        if (
+            not skip_modulated_input
+            and not kwargs.get("skip_step_cache", False)
+            and not kwargs.get("update_cache", True)
+            and exist_gen
+            and not exist_und
+        ):
             modulated_input = self.layers[0].input_layernorm_mot_gen(hidden_states)
         return ForwardState(
             modulated_input=modulated_input,
             hidden_states=hidden_states,
             encoder_hidden_states=None,
-            temb=hidden_states,
+            temb=None,
             intermediates=SenseNovaU1State(
                 image_gen_indicators=image_gen_indicators,
                 exist_und=exist_und,

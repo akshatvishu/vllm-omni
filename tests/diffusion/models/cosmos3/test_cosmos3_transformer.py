@@ -76,15 +76,16 @@ def _tiny_cosmos3_edge_config(**overrides):
 
 
 @pytest.mark.parametrize(
-    ("cache_backend", "use_hsdp", "enable_dlo", "error"),
+    ("cache_backend", "use_hsdp", "enable_dlo", "enable_offload", "error"),
     [
-        ("tea_cache", True, False, "does not support HSDP"),
-        ("tea_cache", False, True, "does not support distributed layerwise offload"),
-        ("cache_dit", True, True, None),
+        ("tea_cache", True, False, False, "does not support HSDP"),
+        ("tea_cache", False, True, False, "does not support distributed layerwise offload"),
+        ("tea_cache", False, False, True, "does not support layerwise offload"),
+        ("cache_dit", True, True, True, None),
     ],
 )
 def test_cosmos3_teacache_rejects_weight_sharding(
-    cache_backend: str, use_hsdp: bool, enable_dlo: bool, error: str | None
+    cache_backend: str, use_hsdp: bool, enable_dlo: bool, enable_offload: bool, error: str | None
 ) -> None:
     from vllm_omni.diffusion.models.cosmos3.transformer_cosmos3 import Cosmos3VFMTransformer
 
@@ -94,6 +95,7 @@ def test_cosmos3_teacache_rejects_weight_sharding(
         cache_backend=cache_backend,
         parallel_config=SimpleNamespace(use_hsdp=use_hsdp),
         enable_distributed_layerwise_offload=enable_dlo,
+        enable_layerwise_offload=enable_offload,
     )
     if error is None:
         Cosmos3VFMTransformer(config)
