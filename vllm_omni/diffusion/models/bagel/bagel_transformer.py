@@ -40,6 +40,7 @@ from vllm.transformers_utils.configs.bagel import BagelConfig
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata as DiffusionAttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention as DiffusionAttention
 from vllm_omni.diffusion.cache.cachedit import BagelCachedAdapter, CacheDiTAdapterConfig
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsTeaCache, TeaCacheDefaults
 from vllm_omni.diffusion.data import DiffusionParallelConfig
 from vllm_omni.diffusion.distributed.cfg_parallel import CFGParallelMixin
 from vllm_omni.diffusion.distributed.parallel_state import (
@@ -1253,7 +1254,25 @@ def get_flattened_position_ids_extrapolate(img_h, img_w, patch_size, max_num_pat
     return pos_ids
 
 
-class Bagel(CFGParallelMixin, nn.Module):
+@dataclass
+class BagelState:
+    packed_vae_token_indexes: torch.Tensor
+    packed_text_indexes: torch.Tensor
+    packed_position_ids: torch.Tensor
+    packed_seqlens: torch.Tensor
+    past_key_values: NaiveCache
+    cfg_branch_caches: list[NaiveCache] | None
+    vae_per_branch: int
+    cfg_renorm_min: float
+    cfg_renorm_type: str
+    cfg_text_scale: float
+    cfg_img_scale: float
+    cfg_vae_lengths: list[int] | None
+    cfg_text_scales: list[float] | None
+    cfg_img_scales: list[float] | None
+
+
+class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
     config_class = BagelConfig
     base_model_prefix = "bagel"
 
@@ -2450,6 +2469,158 @@ class Bagel(CFGParallelMixin, nn.Module):
         v_t = v_t[packed_vae_token_indexes]
         return v_t
 
+    def get_teacache_defaults(self) -> TeaCacheDefaults:
+        return TeaCacheDefaults(
+            [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00],
+            rel_l1_thresh=0.2,
+        )
+
+    def preprocess(
+        self,
+        x_t: torch.Tensor,
+        timestep: torch.Tensor,
+        packed_vae_token_indexes: torch.LongTensor,
+        packed_vae_position_ids: torch.LongTensor,
+        packed_text_ids: torch.LongTensor,
+        packed_text_indexes: torch.LongTensor,
+        packed_position_ids: torch.LongTensor,
+        packed_seqlens: torch.IntTensor,
+        past_key_values: NaiveCache,
+        cfg_renorm_min: float = 0.0,
+        cfg_renorm_type: str = "global",
+        cfg_text_scale: float = 1.0,
+        cfg_img_scale: float = 1.0,
+        cfg_branch_pids: list[torch.Tensor] | None = None,
+        cfg_branch_caches: list[NaiveCache] | None = None,
+        cfg_vae_lengths: list[int] | None = None,
+        cfg_text_scales: list[float] | None = None,
+        cfg_img_scales: list[float] | None = None,
+        *,
+        skip_modulated_input: bool = False,
+    ) -> ForwardState[BagelState]:
+        packed_text_embedding = self.language_model.forward(
+            packed_text_ids=packed_text_ids,
+            return_embeddings_only=True,
+        ).packed_query_sequence
+        packed_sequence = packed_text_embedding.new_zeros((sum(packed_seqlens), self.hidden_size))
+        packed_sequence[packed_text_indexes] = packed_text_embedding
+
+        if not isinstance(timestep, torch.Tensor):
+            timestep = torch.tensor([timestep], device=x_t.device)
+        elif timestep.ndim == 0:
+            timestep = timestep.unsqueeze(0)
+        packed_pos_embed = self.latent_pos_embed(packed_vae_position_ids)
+        packed_timestep_embeds = self.time_embedder(timestep)
+        x_t = self.vae2llm(x_t) + packed_timestep_embeds + packed_pos_embed
+        if x_t.dtype != packed_sequence.dtype:
+            x_t = x_t.to(packed_sequence.dtype)
+        packed_sequence[packed_vae_token_indexes] = x_t
+
+        has_cfg_branches = cfg_branch_pids is not None and cfg_branch_caches is not None
+        use_cfg = has_cfg_branches and (
+            cfg_text_scale > 1.0 or (cfg_text_scales is not None and any(scale > 1.0 for scale in cfg_text_scales))
+        )
+        vae_per_branch = packed_vae_token_indexes.shape[0]
+        if use_cfg:
+            assert cfg_branch_pids is not None
+            assert cfg_branch_caches is not None
+            num_branches = len(cfg_branch_pids)
+            seq_len = int(packed_seqlens.sum())
+            packed_sequence = packed_sequence.repeat(num_branches, 1)
+            packed_vae_token_indexes = torch.cat([packed_vae_token_indexes + i * seq_len for i in range(num_branches)])
+            packed_position_ids = torch.cat(cfg_branch_pids, dim=1 if cfg_branch_pids[0].ndim == 2 else 0)
+            packed_seqlens = packed_seqlens.repeat(num_branches)
+            if self.use_moe:
+                packed_text_indexes = torch.cat([packed_text_indexes + i * seq_len for i in range(num_branches)])
+
+        # CFG branches occupy separate rows in one cached residual. Outside the
+        # CFG interval only one branch runs, so bypass the differently sized cache.
+        modulated_input = None
+        if not skip_modulated_input and not (has_cfg_branches and not use_cfg):
+            modulated_input = packed_sequence
+        return ForwardState(
+            modulated_input=modulated_input,
+            hidden_states=packed_sequence,
+            encoder_hidden_states=None,
+            temb=None,
+            intermediates=BagelState(
+                packed_vae_token_indexes=packed_vae_token_indexes,
+                packed_text_indexes=packed_text_indexes,
+                packed_position_ids=packed_position_ids,
+                packed_seqlens=packed_seqlens,
+                past_key_values=past_key_values,
+                cfg_branch_caches=cfg_branch_caches if use_cfg else None,
+                vae_per_branch=vae_per_branch,
+                cfg_renorm_min=cfg_renorm_min,
+                cfg_renorm_type=cfg_renorm_type,
+                cfg_text_scale=cfg_text_scale,
+                cfg_img_scale=cfg_img_scale,
+                cfg_vae_lengths=cfg_vae_lengths,
+                cfg_text_scales=cfg_text_scales,
+                cfg_img_scales=cfg_img_scales,
+            ),
+        )
+
+    def run_transformer_blocks(self, ctx: ForwardState[BagelState]) -> ForwardState[BagelState]:
+        state = ctx.intermediates
+        extra_inputs = {}
+        if self.use_moe:
+            extra_inputs = {
+                "mode": "gen",
+                "packed_vae_token_indexes": state.packed_vae_token_indexes,
+                "packed_text_indexes": state.packed_text_indexes,
+            }
+        # Merging prefix caches copies their tensors; do it only on compute steps.
+        past_key_values = (
+            NaiveCache.merge(state.cfg_branch_caches) if state.cfg_branch_caches is not None else state.past_key_values
+        )
+        output = self.language_model.forward(
+            packed_query_sequence=ctx.hidden_states,
+            query_lens=state.packed_seqlens,
+            packed_query_position_ids=state.packed_position_ids,
+            past_key_values=past_key_values,
+            update_past_key_values=False,
+            is_causal=False,
+            **extra_inputs,
+        )
+        ctx.hidden_states = output.packed_query_sequence
+        return ctx
+
+    def postprocess(self, ctx: ForwardState[BagelState]) -> torch.Tensor:
+        state = ctx.intermediates
+        v_t = self.llm2vae(ctx.hidden_states)[state.packed_vae_token_indexes]
+        if state.cfg_branch_caches is None:
+            return v_t
+
+        branch_v_ts = v_t.split(state.vae_per_branch)
+        v_t, cfg_text_v_t = branch_v_ts[:2]
+        cfg_img_v_t = branch_v_ts[2] if len(branch_v_ts) > 2 else None
+        if state.cfg_vae_lengths is None:
+            return self._combine_cfg(
+                v_t,
+                cfg_text_v_t,
+                cfg_img_v_t,
+                state.cfg_text_scale,
+                state.cfg_img_scale,
+                state.cfg_renorm_type,
+                state.cfg_renorm_min,
+            )
+        if state.cfg_text_scales is None:
+            raise ValueError("cfg_text_scales must be provided with cfg_vae_lengths.")
+        cfg_img_scales = state.cfg_img_scales
+        if cfg_img_scales is None:
+            cfg_img_scales = [state.cfg_img_scale] * len(state.cfg_vae_lengths)
+        return self._combine_cfg_per_request(
+            v_t,
+            cfg_text_v_t,
+            cfg_img_v_t,
+            state.cfg_vae_lengths,
+            state.cfg_text_scales,
+            cfg_img_scales,
+            state.cfg_renorm_type,
+            state.cfg_renorm_min,
+        )
+
     def forward(
         self,
         x_t: torch.Tensor,
@@ -2471,107 +2642,25 @@ class Bagel(CFGParallelMixin, nn.Module):
         cfg_text_scales: list[float] | None = None,
         cfg_img_scales: list[float] | None = None,
     ):
-        # Build query sequence (identical for all CFG branches)
-        packed_text_embedding = self.language_model.forward(
+        ctx = self.preprocess(
+            x_t=x_t,
+            timestep=timestep,
+            packed_vae_token_indexes=packed_vae_token_indexes,
+            packed_vae_position_ids=packed_vae_position_ids,
             packed_text_ids=packed_text_ids,
-            return_embeddings_only=True,
-        ).packed_query_sequence
-        packed_sequence = packed_text_embedding.new_zeros((sum(packed_seqlens), self.hidden_size))
-        packed_sequence[packed_text_indexes] = packed_text_embedding
-
-        # i2v relaxes this: per-token timestep (cond=0, noncond=t) is valid.
-        packed_pos_embed = self.latent_pos_embed(packed_vae_position_ids)
-        packed_timestep_embeds = self.time_embedder(timestep)
-        x_t = self.vae2llm(x_t) + packed_timestep_embeds + packed_pos_embed
-        if x_t.dtype != packed_sequence.dtype:
-            x_t = x_t.to(packed_sequence.dtype)
-        packed_sequence[packed_vae_token_indexes] = x_t
-
-        extra_inputs = {}
-        if self.use_moe:
-            extra_inputs["mode"] = "gen"
-            extra_inputs["packed_vae_token_indexes"] = packed_vae_token_indexes
-            extra_inputs["packed_text_indexes"] = packed_text_indexes
-
-        has_cfg_branches = cfg_branch_pids is not None and cfg_branch_caches is not None
-        use_cfg = has_cfg_branches and (
-            cfg_text_scale > 1.0 or (cfg_text_scales is not None and any(scale > 1.0 for scale in cfg_text_scales))
+            packed_text_indexes=packed_text_indexes,
+            packed_position_ids=packed_position_ids,
+            packed_seqlens=packed_seqlens,
+            past_key_values=past_key_values,
+            cfg_renorm_min=cfg_renorm_min,
+            cfg_renorm_type=cfg_renorm_type,
+            cfg_text_scale=cfg_text_scale,
+            cfg_img_scale=cfg_img_scale,
+            cfg_branch_pids=cfg_branch_pids,
+            cfg_branch_caches=cfg_branch_caches,
+            cfg_vae_lengths=cfg_vae_lengths,
+            cfg_text_scales=cfg_text_scales,
+            cfg_img_scales=cfg_img_scales,
+            skip_modulated_input=True,
         )
-        cfg_text_v_t = None
-        cfg_img_v_t = None
-
-        if use_cfg:
-            assert cfg_branch_pids is not None
-            assert cfg_branch_caches is not None
-            num_branches = len(cfg_branch_pids)
-            seq_len = int(packed_seqlens.sum())
-
-            batched_sequence = packed_sequence.repeat(num_branches, 1)
-            batched_vae_indexes = torch.cat([packed_vae_token_indexes + i * seq_len for i in range(num_branches)])
-            batched_position_ids = torch.cat(cfg_branch_pids, dim=1 if cfg_branch_pids[0].ndim == 2 else 0)
-            batched_seqlens = packed_seqlens.repeat(num_branches)
-            merged_cache = NaiveCache.merge(cfg_branch_caches)
-
-            if self.use_moe:
-                batched_text_indices = torch.cat([packed_text_indexes + i * seq_len for i in range(num_branches)])
-                extra_inputs["packed_vae_token_indexes"] = batched_vae_indexes
-                extra_inputs["packed_text_indexes"] = batched_text_indices
-
-            output = self.language_model.forward(
-                packed_query_sequence=batched_sequence,
-                query_lens=batched_seqlens,
-                packed_query_position_ids=batched_position_ids,
-                past_key_values=merged_cache,
-                update_past_key_values=False,
-                is_causal=False,
-                **extra_inputs,
-            )
-
-            all_vae_v_t = self.llm2vae(output.packed_query_sequence)[batched_vae_indexes]
-            vae_per_branch = packed_vae_token_indexes.shape[0]
-            branch_v_ts = all_vae_v_t.split(vae_per_branch)
-            v_t = branch_v_ts[0]
-            cfg_text_v_t = branch_v_ts[1]
-            cfg_img_v_t = branch_v_ts[2] if len(branch_v_ts) > 2 else None
-        else:
-            # Single forward (no CFG or outside cfg_interval).
-            output = self.language_model.forward(
-                packed_query_sequence=packed_sequence,
-                query_lens=packed_seqlens,
-                packed_query_position_ids=packed_position_ids,
-                past_key_values=past_key_values,
-                update_past_key_values=False,
-                is_causal=False,
-                **extra_inputs,
-            )
-            v_t = self.llm2vae(output.packed_query_sequence)[packed_vae_token_indexes]
-
-        # ── CFG combination ──
-        if use_cfg:
-            if cfg_vae_lengths is None:
-                v_t = self._combine_cfg(
-                    v_t,
-                    cfg_text_v_t,
-                    cfg_img_v_t,
-                    cfg_text_scale,
-                    cfg_img_scale,
-                    cfg_renorm_type,
-                    cfg_renorm_min,
-                )
-            else:
-                if cfg_text_scales is None:
-                    raise ValueError("cfg_text_scales must be provided with cfg_vae_lengths.")
-                if cfg_img_scales is None:
-                    cfg_img_scales = [cfg_img_scale] * len(cfg_vae_lengths)
-                v_t = self._combine_cfg_per_request(
-                    v_t,
-                    cfg_text_v_t,
-                    cfg_img_v_t,
-                    cfg_vae_lengths,
-                    cfg_text_scales,
-                    cfg_img_scales,
-                    cfg_renorm_type,
-                    cfg_renorm_min,
-                )
-
-        return v_t
+        return self.postprocess(self.run_transformer_blocks(ctx))

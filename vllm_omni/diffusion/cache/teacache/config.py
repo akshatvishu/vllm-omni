@@ -9,7 +9,6 @@ from dataclasses import dataclass
 
 # TODO - need to move hunyuan image out of this path and onto the hook approach
 _MODEL_COEFFICIENTS = {
-    "Bagel": [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00],
     "HunyuanImage3Pipeline": [
         1.04117826e02,
         -1.26848482e02,

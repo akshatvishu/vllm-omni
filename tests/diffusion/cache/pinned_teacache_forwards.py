@@ -3,6 +3,8 @@
 # mypy: disable-error-code=attr-defined
 """Temporary migration references from vLLM-Omni 43e507117f04a86f2df8d405cbe03c1b1642eac9.
 
+Bagel uses the forward at 6cf1e4883, which includes the later batched CFG path.
+
 Remove these copies in C13 after the ports pass the planned model validation.
 """
 
@@ -17,6 +19,7 @@ from vllm.triton_utils import HAS_TRITON
 
 from vllm_omni.diffusion.forward_context import get_forward_context, is_forward_context_available
 from vllm_omni.diffusion.layers.fused_qk_norm_rope import fused_qk_norm_rope_min_tokens
+from vllm_omni.diffusion.models.bagel.bagel_transformer import NaiveCache
 from vllm_omni.diffusion.models.flux.flux_transformer import logger
 
 _FUSED_MIN_TOKENS = 512
@@ -808,3 +811,130 @@ def pinned_z_image_forward(
     x = self.unpatchify(unified, x_size, patch_size, f_patch_size)
 
     return x, {}
+
+
+def pinned_bagel_forward(
+    self,
+    x_t: torch.Tensor,
+    timestep: torch.Tensor,
+    packed_vae_token_indexes: torch.LongTensor,
+    packed_vae_position_ids: torch.LongTensor,
+    packed_text_ids: torch.LongTensor,
+    packed_text_indexes: torch.LongTensor,
+    packed_position_ids: torch.LongTensor,
+    packed_seqlens: torch.IntTensor,
+    past_key_values: NaiveCache,
+    cfg_renorm_min: float = 0.0,
+    cfg_renorm_type: str = "global",
+    cfg_text_scale: float = 1.0,
+    cfg_img_scale: float = 1.0,
+    cfg_branch_pids: list[torch.Tensor] | None = None,
+    cfg_branch_caches: list[NaiveCache] | None = None,
+    cfg_vae_lengths: list[int] | None = None,
+    cfg_text_scales: list[float] | None = None,
+    cfg_img_scales: list[float] | None = None,
+):
+    # Build query sequence (identical for all CFG branches)
+    packed_text_embedding = self.language_model.forward(
+        packed_text_ids=packed_text_ids,
+        return_embeddings_only=True,
+    ).packed_query_sequence
+    packed_sequence = packed_text_embedding.new_zeros((sum(packed_seqlens), self.hidden_size))
+    packed_sequence[packed_text_indexes] = packed_text_embedding
+
+    # i2v relaxes this: per-token timestep (cond=0, noncond=t) is valid.
+    packed_pos_embed = self.latent_pos_embed(packed_vae_position_ids)
+    packed_timestep_embeds = self.time_embedder(timestep)
+    x_t = self.vae2llm(x_t) + packed_timestep_embeds + packed_pos_embed
+    if x_t.dtype != packed_sequence.dtype:
+        x_t = x_t.to(packed_sequence.dtype)
+    packed_sequence[packed_vae_token_indexes] = x_t
+
+    extra_inputs = {}
+    if self.use_moe:
+        extra_inputs["mode"] = "gen"
+        extra_inputs["packed_vae_token_indexes"] = packed_vae_token_indexes
+        extra_inputs["packed_text_indexes"] = packed_text_indexes
+
+    has_cfg_branches = cfg_branch_pids is not None and cfg_branch_caches is not None
+    use_cfg = has_cfg_branches and (
+        cfg_text_scale > 1.0 or (cfg_text_scales is not None and any(scale > 1.0 for scale in cfg_text_scales))
+    )
+    cfg_text_v_t = None
+    cfg_img_v_t = None
+
+    if use_cfg:
+        assert cfg_branch_pids is not None
+        assert cfg_branch_caches is not None
+        num_branches = len(cfg_branch_pids)
+        seq_len = int(packed_seqlens.sum())
+
+        batched_sequence = packed_sequence.repeat(num_branches, 1)
+        batched_vae_indexes = torch.cat([packed_vae_token_indexes + i * seq_len for i in range(num_branches)])
+        batched_position_ids = torch.cat(cfg_branch_pids, dim=1 if cfg_branch_pids[0].ndim == 2 else 0)
+        batched_seqlens = packed_seqlens.repeat(num_branches)
+        merged_cache = NaiveCache.merge(cfg_branch_caches)
+
+        if self.use_moe:
+            batched_text_indices = torch.cat([packed_text_indexes + i * seq_len for i in range(num_branches)])
+            extra_inputs["packed_vae_token_indexes"] = batched_vae_indexes
+            extra_inputs["packed_text_indexes"] = batched_text_indices
+
+        output = self.language_model.forward(
+            packed_query_sequence=batched_sequence,
+            query_lens=batched_seqlens,
+            packed_query_position_ids=batched_position_ids,
+            past_key_values=merged_cache,
+            update_past_key_values=False,
+            is_causal=False,
+            **extra_inputs,
+        )
+
+        all_vae_v_t = self.llm2vae(output.packed_query_sequence)[batched_vae_indexes]
+        vae_per_branch = packed_vae_token_indexes.shape[0]
+        branch_v_ts = all_vae_v_t.split(vae_per_branch)
+        v_t = branch_v_ts[0]
+        cfg_text_v_t = branch_v_ts[1]
+        cfg_img_v_t = branch_v_ts[2] if len(branch_v_ts) > 2 else None
+    else:
+        # Single forward (no CFG or outside cfg_interval).
+        output = self.language_model.forward(
+            packed_query_sequence=packed_sequence,
+            query_lens=packed_seqlens,
+            packed_query_position_ids=packed_position_ids,
+            past_key_values=past_key_values,
+            update_past_key_values=False,
+            is_causal=False,
+            **extra_inputs,
+        )
+        v_t = self.llm2vae(output.packed_query_sequence)[packed_vae_token_indexes]
+
+    # ── CFG combination ──
+    if use_cfg:
+        if cfg_vae_lengths is None:
+            v_t = self._combine_cfg(
+                v_t,
+                cfg_text_v_t,
+                cfg_img_v_t,
+                cfg_text_scale,
+                cfg_img_scale,
+                cfg_renorm_type,
+                cfg_renorm_min,
+            )
+        else:
+            if cfg_text_scales is None:
+                raise ValueError("cfg_text_scales must be provided with cfg_vae_lengths.")
+            if cfg_img_scales is None:
+                cfg_img_scales = [cfg_img_scale] * len(cfg_vae_lengths)
+            v_t = self._combine_cfg_per_request(
+                v_t,
+                cfg_text_v_t,
+                cfg_img_v_t,
+                cfg_vae_lengths,
+                cfg_text_scales,
+                cfg_img_scales,
+                cfg_renorm_type,
+                cfg_renorm_min,
+            )
+
+    return v_t

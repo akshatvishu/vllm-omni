@@ -213,7 +213,7 @@ Add your extractor to the `EXTRACTOR_REGISTRY` in `vllm_omni/diffusion/cache/tea
 
 ```python
 EXTRACTOR_REGISTRY: dict[str, Callable] = {
-    "Bagel": extract_bagel_context,
+    "MiniMaxH3DiTModel": extract_minimax_h3_context,
     "YourModelTransformer2DModel": extract_your_model_context,  # Add here
 }
 ```
@@ -477,7 +477,7 @@ Complete examples in the codebase:
 | Model | Path | Pattern | Notes |
 | ------- | ------ | --------- | ------- |
 | **Qwen-Image** | `vllm_omni/diffusion/models/qwen_image/qwen_image_transformer.py` | Decomposed forward | `preprocess`, `run_transformer_blocks`, `postprocess` |
-| **Bagel** | `vllm_omni/diffusion/cache/teacache/extractors.py` | Omni model | `extract_bagel_context` |
+| **Bagel** | `vllm_omni/diffusion/models/bagel/bagel_transformer.py` | Decomposed forward | Packed tokens and batched CFG |
 | **TeaCache Core** | `vllm_omni/diffusion/cache/teacache/` | Base implementation | Hook and config |
 | **Coefficient Estimator** | `vllm_omni/diffusion/cache/teacache/coefficient_estimator.py` | Estimation tool | Adapter pattern |
 

@@ -41,6 +41,7 @@ MOCK_COEFFICIENTS = [1.0, 2.0, 3.0, 4.0, 5.0]
 
 
 TEACACHE_TRANSFORMER_CLASSES = [
+    Bagel,
     FluxTransformer2DModel,
     Flux2Transformer2DModel,
     Flux2KleinTransformer2DModel,
@@ -52,9 +53,10 @@ TEACACHE_TRANSFORMER_CLASSES = [
     Cosmos3VFMTransformer,
 ]
 
-LEGACY_TEACACHE_TRANSFORMER_CLASSES = [Bagel, HunyuanImage3Model]
+LEGACY_TEACACHE_TRANSFORMER_CLASSES = [HunyuanImage3Model]
 
 MODEL_COEFFICIENTS = {
+    Bagel: [1.33313129e06, -1.68644226e05, 7.95050740e03, -1.63747873e02, 1.26352397e00],
     # FLUX transformer coefficients from TeaCache paper
     FluxTransformer2DModel: [
         4.98651651e02,

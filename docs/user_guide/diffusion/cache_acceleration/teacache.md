@@ -143,6 +143,8 @@ Cosmos3 Nano and Super use the coefficients proposed in [PR #4389](https://githu
 
 Cosmos3 TeaCache cannot be combined with HSDP, layerwise offload, or distributed layerwise offload. The current TeaCache signal reads block zero's GEN weights before its forward. Layerwise offload loads that block synchronously at setup, then prefetches it asynchronously on a separate stream between runs. The early TeaCache read has not been validated with that prefetch. HSDP and distributed layerwise offload also require a shared skip decision across weight-sharding groups.
 
+Bagel uses its decomposed forward with the existing coefficients and default threshold of 0.2. Batched CFG branches occupy separate rows in the cached residual. Calls outside the CFG interval run without caching, because they use a different packed layout. The port preserves prefix KV caches and applies CFG after the cached blocks. CPU tests cover these paths; output quality and speed with real weights remain unverified. Generation paths that call `forward_single_branch`, including the existing SP and CFG-parallel paths, bypass TeaCache.
+
 SenseNova U1's default threshold of 0.2 is not quality validated. A one-MI300X comparison at 768×768, 50 steps and CFG scale 4 found mean SSIM 0.498 and LPIPS 0.443 against uncached output across ten prompt and seed pairs, with visible blur in one inspected image. A diagnostic request reused the cache in 90 of 100 branch calls. The inherited coefficients or threshold need further calibration before recommending this setting. U1.5 has not been checked with real weights.
 
 ---

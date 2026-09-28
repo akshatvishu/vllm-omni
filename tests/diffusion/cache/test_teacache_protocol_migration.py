@@ -29,6 +29,7 @@ from vllm_omni.diffusion.cache.teacache.protocol import (
 from vllm_omni.diffusion.cache.teacache.state import TeaCacheState
 from vllm_omni.diffusion.data import DiffusionCacheConfig
 from vllm_omni.diffusion.hooks import HookRegistry
+from vllm_omni.diffusion.models.bagel.bagel_transformer import Bagel
 from vllm_omni.diffusion.models.flux2_klein.flux2_klein_transformer import (
     Flux2Transformer2DModel as Flux2KleinTransformer2DModel,
 )
@@ -262,15 +263,33 @@ def test_klein_uses_protocol_defaults_without_custom_enabler():
     assert config.rel_l1_thresh == defaults.rel_l1_thresh
 
 
-def test_custom_legacy_enablers_keep_table_defaults():
+@pytest.mark.parametrize("threshold", [None, 0.7])
+def test_bagel_custom_enabler_uses_protocol_defaults(threshold):
     class BagelPipeline:
-        bagel = _LegacyModel()
+        bagel = Bagel.__new__(Bagel)
+        transformer: Bagel
+
+    pipeline = BagelPipeline()
+    with patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook") as apply_hook:
+        TeaCacheBackend(DiffusionCacheConfig(rel_l1_thresh=threshold)).enable(pipeline)
+
+    model, config = apply_hook.call_args.args
+    defaults = model.get_teacache_defaults()
+    assert model is pipeline.bagel is pipeline.transformer
+    assert config.coefficients == defaults.coefficients
+    assert config.rel_l1_thresh == (defaults.rel_l1_thresh if threshold is None else threshold)
+
+
+def test_custom_legacy_enablers_keep_table_defaults():
+    class MiniMaxH3Pipeline:
+        transformer = _LegacyModel()
+        partition = "fl2va"
 
     with patch("vllm_omni.diffusion.cache.teacache.backend.apply_teacache_hook") as apply_hook:
-        TeaCacheBackend(DiffusionCacheConfig()).enable(BagelPipeline())
+        TeaCacheBackend(DiffusionCacheConfig()).enable(MiniMaxH3Pipeline())
     _, config = apply_hook.call_args.args
     assert len(config.coefficients) == 5
-    assert config.rel_l1_thresh == 0.2
+    assert config.rel_l1_thresh == 0.17
 
 
 def test_sensenova_transformer_imports_before_teacache():
