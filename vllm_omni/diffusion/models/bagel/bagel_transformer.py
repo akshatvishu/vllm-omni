@@ -2505,10 +2505,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
         packed_sequence = packed_text_embedding.new_zeros((sum(packed_seqlens), self.hidden_size))
         packed_sequence[packed_text_indexes] = packed_text_embedding
 
-        if not isinstance(timestep, torch.Tensor):
-            timestep = torch.tensor([timestep], device=x_t.device)
-        elif timestep.ndim == 0:
-            timestep = timestep.unsqueeze(0)
+        # i2v relaxes this: per-token timestep (cond=0, noncond=t) is valid.
         packed_pos_embed = self.latent_pos_embed(packed_vae_position_ids)
         packed_timestep_embeds = self.time_embedder(timestep)
         x_t = self.vae2llm(x_t) + packed_timestep_embeds + packed_pos_embed
@@ -2520,6 +2517,11 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
         use_cfg = has_cfg_branches and (
             cfg_text_scale > 1.0 or (cfg_text_scales is not None and any(scale > 1.0 for scale in cfg_text_scales))
         )
+        # The signal is identical across CFG branches; keep one copy.
+        # Outside the CFG interval, bypass the differently sized cached residual.
+        modulated_input = None
+        if not skip_modulated_input and not (has_cfg_branches and not use_cfg):
+            modulated_input = packed_sequence
         vae_per_branch = packed_vae_token_indexes.shape[0]
         if use_cfg:
             assert cfg_branch_pids is not None
@@ -2533,11 +2535,6 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
             if self.use_moe:
                 packed_text_indexes = torch.cat([packed_text_indexes + i * seq_len for i in range(num_branches)])
 
-        # CFG branches occupy separate rows in one cached residual. Outside the
-        # CFG interval only one branch runs, so bypass the differently sized cache.
-        modulated_input = None
-        if not skip_modulated_input and not (has_cfg_branches and not use_cfg):
-            modulated_input = packed_sequence
         return ForwardState(
             modulated_input=modulated_input,
             hidden_states=packed_sequence,

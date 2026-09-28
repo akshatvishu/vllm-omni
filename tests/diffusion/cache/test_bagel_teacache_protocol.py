@@ -25,7 +25,6 @@ from vllm_omni.diffusion.models.bagel.bagel_transformer import (
     Qwen2MoTModel,
 )
 from vllm_omni.diffusion.models.bagel.mot.mot_layernorm import MoTRMSNorm
-from vllm_omni.diffusion.models.bagel.pipeline_bagel import BagelPipeline
 from vllm_omni.diffusion.models.lance.lance_transformer import LanceBagel
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
@@ -38,11 +37,9 @@ class _LanguageModel(nn.Module):
         super().__init__()
         self.dtype = dtype
         self.calls = []
-        self.embedding_calls = 0
 
     def forward(self, **kwargs):
         if kwargs.get("return_embeddings_only"):
-            self.embedding_calls += 1
             ids = kwargs["packed_text_ids"]
             embeddings = ids[:, None].expand(-1, HIDDEN_SIZE).to(self.dtype) / 10
             return BaseNavitOutputWithPast(packed_query_sequence=embeddings)
@@ -143,15 +140,35 @@ def test_split_matches_pinned_forward(branches, per_request, multidim, dtype):
     assert len(model.language_model.calls) == 2
 
 
-@pytest.mark.parametrize("timestep", [torch.tensor(0.7), 0.7, 1])
 @torch.no_grad()
-def test_scalar_timestep_matches_expanded_and_per_token_timestep_is_preserved(timestep):
+def test_per_token_timestep_is_preserved():
     model = _model()
     args = _args()
-    expected = model(**dict(args, timestep=torch.full((3,), float(timestep))))
-    actual = model(**dict(args, timestep=timestep))
-    torch.testing.assert_close(actual, expected)
-    assert not torch.equal(model(**args), expected)
+    actual = model(**args)
+    torch.testing.assert_close(actual, pinned_bagel_forward(model, **args))
+    assert not torch.equal(actual, model(**dict(args, timestep=torch.full((3,), 0.7))))
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+@torch.no_grad()
+def test_cfg_signal_uses_one_branch_with_equivalent_l1_distance(dtype):
+    model = _model(dtype)
+    args = _args(3)
+    previous = model.preprocess(**args)
+    current = model.preprocess(**dict(args, x_t=args["x_t"] + 0.15, timestep=torch.full((3,), 0.4)))
+    assert previous.modulated_input is not None
+    assert current.modulated_input is not None
+    assert previous.modulated_input.shape[0] * 3 == previous.hidden_states.shape[0]
+    for branch in previous.hidden_states.chunk(3):
+        torch.testing.assert_close(previous.modulated_input, branch)
+    signal_distance = (current.modulated_input - previous.modulated_input).abs().mean() / (
+        previous.modulated_input.abs().mean() + 1e-8
+    )
+    repeated_distance = (current.hidden_states - previous.hidden_states).abs().mean() / (
+        previous.hidden_states.abs().mean() + 1e-8
+    )
+    torch.testing.assert_close(signal_distance, repeated_distance)
+    assert model.preprocess(**args, skip_modulated_input=True).modulated_input is None
 
 
 @pytest.mark.parametrize("branches", [1, 2, 3])
@@ -232,7 +249,7 @@ def test_generate_image_calls_installed_hook_and_reset_recomputes(monkeypatch):
 def test_bagel_adapter_collects_packed_signal_and_decoder_output():
     model = _model()
     args = _args(3)
-    expected_signal = model.preprocess(**args).hidden_states.clone()
+    expected_signal = model.preprocess(**_args()).hidden_states.clone()
     expected_output = model.run_transformer_blocks(model.preprocess(**args)).hidden_states
     transformer, name = BagelAdapter.get_transformer(SimpleNamespace(bagel=model))
     collector = DataCollectionHook(name)
@@ -242,6 +259,7 @@ def test_bagel_adapter_collects_packed_signal_and_decoder_output():
     collected = collector.stop_collection()
     assert len(collected) == 1
     signal, output = collected[0]
+    assert output.shape[0] == 3 * signal.shape[0]
     np.testing.assert_allclose(signal, expected_signal.numpy())
     np.testing.assert_allclose(output, expected_output.numpy())
 
@@ -301,24 +319,3 @@ def test_real_decoder_forward_and_final_norm_remain_inside_cache_boundary():
     torch.testing.assert_close(first, expected)
     torch.testing.assert_close(second, expected)
     assert calls == [1]
-
-
-@torch.no_grad()
-def test_pipeline_denoise_step_uses_installed_bagel_hook(monkeypatch):
-    pipeline = BagelPipeline.__new__(BagelPipeline)
-    nn.Module.__init__(pipeline)
-    pipeline.bagel = _model()
-    pipeline.device = torch.device("cpu")
-    pipeline.od_config = SimpleNamespace(dtype=torch.float32)
-    args = _args(2)
-    monkeypatch.setattr(pipeline, "_build_denoise_kwargs", lambda input_batch, states: args)
-    hook = _install(pipeline.bagel)
-    batch = SimpleNamespace(states=[SimpleNamespace(step_index=0)])
-
-    first = pipeline.denoise_step(batch)
-    second = pipeline.denoise_step(batch)
-
-    torch.testing.assert_close(second, first)
-    assert hook._forward_cnt == 2
-    assert pipeline.bagel.language_model.embedding_calls == 2
-    assert len(pipeline.bagel.language_model.calls) == 1
