@@ -194,13 +194,16 @@ The following tables show which models support each feature:
 |  **SANA-Video-2B T2V I2V**   |     ❌     |     ❌      |   ✅ (`--usp`, frame-sharded)   |       ✅       |  ✅ (TP=2 only)   |         ❌         |   ❌   |            ❌             |          ❌          |       ❌       |        ❌        |
 | **Helios**                   |     ❌     |     ✅      |           ✅           |       ✅        |         ✅         |         ❌         |   ✅    |             ✅             |          ❌           |       ❌        |        ✅*        |
 | **HunyuanVideo-1.5 T2V I2V** |     ❌     |     ✅      |           ✅           |       ✅        |         ✅         |         ❌         |   ✅    |             ✅             |  ✅ (encode/decode)   |       ✅        |        ❌         |
-| **Cosmos3**                  |     ❓     |     ✅      |           ✅           |       ✅        |         ✅         |         ❌         |   ✅    |             ✅             |  ✅ (encode/decode)   |       ✅        |        ❌         |
+| **Cosmos3**                  |     ✅*    |     ✅      |           ✅           |       ✅        |         ✅         |         ❌         |   ✅    |             ✅             |  ✅ (encode/decode)   |       ✅        |        ❌         |
 | **LongCat-Video-Avatar-1.5** |     ❌     |     ❌      |           ❌           |       ❌        |         ❌         |         ❌         |   ❌    |             ❌             |          ❌           |       ❌        |        ❌         |
 | **MiniMax-H3**               | ✅ (FL2VA) |     ✅      |           ✅           |       ❌        |       ✅ (DiT/TE)  |         ❌         |   ✅    |             ✅             |       ✅ (tile)       |      ✅ (DiT)      |        ❌         |
 | **MAGI-2 Preview**           |     ❌     |     ✅      |      ✅ (Ulysses)       |    ✅ (2-way)   |         ✅         |         ❌         |   ✅    | ✅ (1-GPU/LW; DLO DP-AG/SP no-AG) |       ✅ (tile)       |       ❌        |        ❌         |
 | **SANA-WM**                  |     ❌     |     ❌      |          ❌<sup>5</sup> |       ✅        |         ✅         |         ❌         |   ❌    |             ❌             |          ❌           |       ❌        |        ❌         |
 
 > Notes:
+>
+> Cosmos3 TeaCache was checked on one MI300X with the Nano text-to-video checkpoint at threshold 0.2 and 12 warmup steps. Super, Edge, image generation, transfer and distributed modes have not passed this quality check. TeaCache cannot be combined with HSDP or layerwise offload; those columns describe Cosmos3 without TeaCache. See the [TeaCache guide](diffusion/cache_acceleration/teacache.md) for the measured comparison.
+>
 > 5. SANA-WM cannot support sequence parallelism: its bidirectional gated delta
 > recurrence carries state across frames, so a rank cannot denoise a slice of
 > the token sequence in isolation. Doing so would need a distributed scan or
