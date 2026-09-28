@@ -1407,7 +1407,7 @@ def test_compute_rope_freqs_places_text_video_action_and_sound_positions() -> No
 
 
 @pytest.mark.parametrize("num_controls", [0, 1, 2])
-def test_seacache_inputs_preserve_original_vision_order(monkeypatch, num_controls):
+def test_seacache_inputs_keep_target_and_exclude_controls(monkeypatch, num_controls):
     from vllm_omni.diffusion.cache.seacache.protocol import SupportsSeaCache
     from vllm_omni.diffusion.models.cosmos3 import transformer_cosmos3
     from vllm_omni.diffusion.models.cosmos3.transformer_cosmos3_edge import Cosmos3EdgeVFMTransformer
@@ -1418,21 +1418,22 @@ def test_seacache_inputs_preserve_original_vision_order(monkeypatch, num_control
     )
     assert isinstance(model, SupportsSeaCache)
     assert issubclass(Cosmos3EdgeVFMTransformer, SupportsSeaCache)
-    target = torch.zeros(1, 2, 1, 2, 2)
+    target = torch.zeros(1, 2, 3, 2, 2)
     controls = [torch.full_like(target, index + 1) for index in range(num_controls)]
-    mask = torch.ones(1, 1, 1, 1, 1)
+    mask = torch.tensor([0, 1, 1]).reshape(1, 1, 3, 1, 1)
     ctx = model.preprocess(
         hidden_states=target,
         timestep=torch.tensor([1.0]),
         text_ids=torch.tensor([[1, 2]], dtype=torch.long),
         text_mask=torch.ones(1, 2, dtype=torch.long),
-        video_shape=(1, 2, 2),
+        video_shape=(3, 2, 2),
         control_latents=controls,
         noisy_frame_mask=mask,
         skip_modulated_input=True,
     )
     inputs = model.get_seacache_inputs(ctx)
-    assert len(inputs.latents) == num_controls + 1
-    assert all(actual is expected for actual, expected in zip(inputs.latents, [*controls, target], strict=True))
+    assert len(inputs.latents) == 1
+    assert inputs.latents[0] is target
+    assert ctx.intermediates.s_control == num_controls * ctx.intermediates.s_video
     assert inputs.noisy_frame_mask is mask
     assert ctx.modulated_input is None

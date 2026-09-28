@@ -13,8 +13,9 @@ from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, SupportsDe
 class SeaCacheInputs:
     """Original BCTHW vision latents in indicator order, retained by reference.
 
-    Cosmos3 supplies controls followed by the noisy target. These inputs are
-    separate from the packed execution tensor used to record the residual.
+    Models exclude separate control hints, but retain clean prefix frames in
+    partially conditioned targets. The packed execution tensor used for the
+    residual still includes all conditioning inputs.
     """
 
     latents: list[torch.Tensor]

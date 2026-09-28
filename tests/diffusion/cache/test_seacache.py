@@ -95,7 +95,7 @@ class TinyCosmos3Transformer(torch.nn.Module):
             hidden_states=gen_input,
             encoder_hidden_states=None,
             temb=None,
-            intermediates=SeaCacheInputs(vision_items, noisy_frame_mask),
+            intermediates=SeaCacheInputs([hidden_states], noisy_frame_mask),
         )
 
     def run_transformer_blocks(self, ctx):
@@ -166,6 +166,205 @@ def _apply_test_hook(
         current_sigma_callback=lambda: metadata.sigma,
         num_inference_steps_callback=lambda: metadata.num_steps,
     )
+
+
+def test_peer_ineligible_bypasses_and_clears_local_history(monkeypatch):
+    transformer = TinyCosmos3Transformer()
+    metadata = SimpleNamespace(step=0, sigma=0.5, num_steps=4)
+    hook = _apply_test_hook(transformer, metadata)
+    _run_step(transformer, 500, 1.0, hook=hook)
+    metadata.step = 1
+    votes = []
+
+    def peer_bypasses(decision, device):
+        votes.append(decision)
+        return 2
+
+    monkeypatch.setattr(hook, "_synchronize_decision", peer_bypasses)
+    _run_step(transformer, 500, 1.0, hook=hook)
+    assert votes == [0]
+    assert not hook.state_manager._states
+    assert hook.skip_count == 0
+
+
+def _control_inputs(value: float, names=("cond", "cond_no_control", "uncond")):
+    return {name: ([_latent(value)] if name == "cond_no_control" else [_latent(10), _latent(value)]) for name in names}
+
+
+def _execute_control_branches(transformer, hook, inputs):
+    for name, items in inputs.items():
+        with hook.cache_context(name):
+            transformer(hidden_states=items[-1], timestep=torch.tensor([500]), control_latents=items[:-1])
+
+
+@pytest.mark.parametrize("order", [0, 1, 2])
+def test_target_only_indicators_align_branches_with_separate_residuals(monkeypatch, order):
+    transformer = TinyCosmos3Transformer()
+    metadata = SimpleNamespace(step=0, sigma=0.5, num_steps=7)
+    hook = _apply_test_hook(transformer, metadata, SeaCacheConfig(residual_order=order))
+    gate = hook._resolve_gate
+    votes, indicators = [], []
+
+    def observed_gate(state, indicator, step, num_steps):
+        result = gate(state, indicator, step, num_steps)
+        votes.append((step, result))
+        indicators.append(indicator)
+        return result
+
+    monkeypatch.setattr(hook, "_resolve_gate", observed_gate)
+    for step, value in enumerate((1.0, 1.2, 1.4, 1.4, 1.4, 1.4, 1.4)):
+        metadata.step = step
+        inputs = _control_inputs(value)
+        hook.begin_step(tuple(inputs))
+        with torch.inference_mode():
+            _execute_control_branches(transformer, hook, inputs)
+        assert len({vote for s, vote in votes if s == step}) == 1
+        for indicator in indicators[-3:]:
+            assert len(indicator) == 1
+            torch.testing.assert_close(indicator[0], indicators[-1][0])
+        histories = [state.history for state in hook.state_manager._states.values()]
+        assert len({tuple(s for s, _ in history) for history in histories}) == 1
+        assert len({history[-1][1].data_ptr() for history in histories}) == 3
+    assert len(votes) == 21
+    assert hook.full_count == 12 and hook.skip_count == 9
+
+
+@pytest.mark.parametrize("branches", [(), ("cond", "cond"), ("",)])
+def test_begin_step_rejects_invalid_branch_names(branches):
+    hook = _apply_test_hook(TinyCosmos3Transformer(), SimpleNamespace(step=0, sigma=0.5, num_steps=4))
+    with pytest.raises(ValueError, match="branch names"):
+        hook.begin_step(branches)
+
+
+def test_branch_exception_and_refresh_clear_state(monkeypatch):
+    transformer = TinyCosmos3Transformer()
+    metadata = SimpleNamespace(step=0, sigma=0.5, num_steps=4)
+    hook = _apply_test_hook(transformer, metadata)
+    hook.begin_step(("cond", "uncond"))
+    _run_step(transformer, 500, 1.0, hook=hook)
+    assert hook.state_manager._states
+
+    def fail_postprocess(ctx):
+        raise ValueError("forward failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(transformer, "postprocess", fail_postprocess)
+        with pytest.raises(ValueError, match="forward failed"):
+            _run_step(transformer, 500, 1.0, hook=hook, context="uncond")
+    assert not hook.state_manager._states and not hook._active_branches
+    hook.begin_step(("cond",))
+    _run_step(transformer, 500, 1.0, hook=hook)
+    hook.refresh(transformer)
+    assert not hook.state_manager._states
+    assert hook._active_branches == () and hook._last_evaluation_step is None
+
+
+@pytest.mark.parametrize(
+    "active",
+    [
+        ("cond", "uncond"),
+        ("cond", "cond_no_control"),
+        ("cond", "cond_no_control", "uncond"),
+    ],
+)
+def test_guidance_interval_transitions_restart_all_histories(active):
+    transformer = TinyCosmos3Transformer()
+    metadata = SimpleNamespace(step=0, sigma=0.5, num_steps=10)
+    hook = _apply_test_hook(transformer, metadata)
+    schedule = [("cond",), ("cond",), active, active, ("cond",), active]
+    for step, names in enumerate(schedule):
+        metadata.step = step
+        hook.begin_step(names)
+        before = hook.full_count
+        with torch.inference_mode():
+            _execute_control_branches(transformer, hook, _control_inputs(1.0, names))
+        changed = step == 0 or names != schedule[step - 1]
+        assert hook.full_count - before == (len(names) if changed else 0)
+        assert set(hook.state_manager._states) == set(names)
+
+
+def test_repeated_solver_evaluation_resets_history():
+    transformer = TinyCosmos3Transformer()
+    metadata = SimpleNamespace(step=1, sigma=0.5, num_steps=4)
+    hook = _apply_test_hook(transformer, metadata)
+    for value in (1.0, 2.0):
+        hook.begin_step(("cond",))
+        _run_step(transformer, 500, value, hook=hook)
+    assert hook.full_count == 2 and hook.skip_count == 0
+    assert [s for s, _ in hook.state_manager._states["cond"].history] == [1]
+
+
+@pytest.mark.parametrize("mismatch", ["shape", "dtype"])
+def test_residual_mismatch_is_resolved_before_rank_vote(monkeypatch, mismatch):
+    transformer = TinyCosmos3Transformer()
+    metadata = SimpleNamespace(step=0, sigma=0.5, num_steps=4)
+    hook = _apply_test_hook(transformer, metadata)
+    _run_step(transformer, 500, 1.0, hook=hook)
+    metadata.step = 1
+    state = hook.state_manager._states["cond"]
+    residual = torch.zeros(1, 1, 2) if mismatch == "shape" else state.history[0][1].double()
+    state.history = [(0, residual)]
+    seen = []
+
+    def vote(compute, device):
+        seen.append(compute)
+        return compute
+
+    monkeypatch.setattr(hook, "_synchronize_decision", vote)
+    _run_step(transformer, 500, 1.0, hook=hook)
+    assert seen == [1]
+    assert hook.full_count == 2 and hook.skip_count == 0
+
+
+def _control_cfg_parallel_worker(rank, world_size, init_method, result_queue):
+    torch.distributed.init_process_group(
+        "gloo",
+        init_method=init_method,
+        rank=rank,
+        world_size=world_size,
+        timeout=datetime.timedelta(seconds=30),
+    )
+    parallel_state._CFG = SimpleNamespace(
+        world_size=world_size, rank_in_group=rank, device_group=torch.distributed.group.WORLD
+    )
+    parallel_state._SP = SimpleNamespace(world_size=1)
+    try:
+        transformer = TinyCosmos3Transformer()
+        metadata = SimpleNamespace(step=0, sigma=0.5, num_steps=8)
+        hook = _apply_test_hook(transformer, metadata, SeaCacheConfig())
+        rows = []
+        # Changing the global tuple must reset even a rank whose local name
+        # remains cond; ownership moves as the no-control branch enters/exits.
+        schedule = [("cond", "uncond")] * 2 + [("cond", "cond_no_control", "uncond")] * 2
+        for step, names in enumerate(schedule):
+            metadata.step = step
+            hook.begin_step(names)
+            local = [name for i, name in enumerate(names) if i % world_size == rank] or [names[0]]
+            before = hook.full_count
+            with torch.inference_mode():
+                _execute_control_branches(transformer, hook, _control_inputs(1.0, local))
+            rows.append(hook.full_count - before)
+        result_queue.put((rank, rows))
+    finally:
+        parallel_state._CFG = None
+        parallel_state._SP = None
+        torch.distributed.destroy_process_group()
+
+
+@pytest.mark.parametrize("world_size", [2, 4])
+def test_target_only_cfg_parallel_uneven_idle_ranks_and_intervals(world_size):
+    context = torch.multiprocessing.get_context("spawn")
+    with context.Manager() as manager:
+        result_queue = manager.Queue()
+        torch.multiprocessing.spawn(
+            _control_cfg_parallel_worker,
+            args=(world_size, get_distributed_init_method("seacache_target_cfg_"), result_queue),
+            nprocs=world_size,
+        )
+        results = [result_queue.get(timeout=2) for _ in range(world_size)]
+    for rank, rows in results:
+        counts = [max(1, sum(i % world_size == rank for i in range(n))) for n in (2, 3)]
+        assert rows == [counts[0], 0, counts[1], 0]
 
 
 def test_config_validation() -> None:
@@ -356,9 +555,9 @@ def _uneven_cfg_sharded_worker(
 
         hook = SeaCacheRootHook(SeaCacheConfig())
         hook._parameter_sharded = True
-        hook._synchronize_compute(False, torch.device("cpu"))
+        hook._synchronize_decision(0, torch.device("cpu"))
         if rank in (0, 1):
-            hook._synchronize_compute(False, torch.device("cpu"))
+            hook._synchronize_decision(0, torch.device("cpu"))
 
         gathered = [torch.zeros(1) for _ in range(2)]
         torch.distributed.all_gather(
@@ -436,14 +635,17 @@ def _hybrid_sp_worker(
             ring_group=ring_group,
         )
 
-        compute = rank == 3
+        compute = int(rank == 3)
         non_sharded_hook = SeaCacheRootHook(SeaCacheConfig())
-        non_sharded_result = non_sharded_hook._synchronize_compute(compute, torch.device("cpu"))
+        non_sharded_result = non_sharded_hook._synchronize_decision(compute, torch.device("cpu"))
 
         sharded_hook = SeaCacheRootHook(SeaCacheConfig())
         sharded_hook._parameter_sharded = True
-        sharded_result = sharded_hook._synchronize_compute(compute, torch.device("cpu"))
-        result_queue.put((rank, non_sharded_result, sharded_result))
+        sharded_result = sharded_hook._synchronize_decision(compute, torch.device("cpu"))
+        bypass = 2 if rank == 3 else 0
+        non_sharded_bypass = non_sharded_hook._synchronize_decision(bypass, torch.device("cpu"))
+        sharded_bypass = sharded_hook._synchronize_decision(bypass, torch.device("cpu"))
+        result_queue.put((rank, non_sharded_result, sharded_result, non_sharded_bypass, sharded_bypass))
     finally:
         parallel_state._FS = None
         parallel_state._SP = None
@@ -462,10 +664,10 @@ def test_hook_synchronizes_full_hybrid_sequence_parallel_group() -> None:
 
     results = sorted(result_queue.get(timeout=2) for _ in range(4))
     assert results == [
-        (0, True, True),
-        (1, True, True),
-        (2, True, True),
-        (3, True, True),
+        (0, 1, 1, 2, 2),
+        (1, 1, 1, 2, 2),
+        (2, 1, 1, 2, 2),
+        (3, 1, 1, 2, 2),
     ]
 
 
@@ -477,7 +679,7 @@ def test_parameter_sharded_hook_fails_open_without_distributed_state(
     monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
     monkeypatch.setattr(torch.distributed, "is_initialized", lambda: False)
 
-    assert hook._synchronize_compute(False, torch.device("cpu")) is True
+    assert hook._synchronize_decision(0, torch.device("cpu")) == 1
 
 
 def test_hook_keeps_three_transfer_branches_separate() -> None:
@@ -497,7 +699,7 @@ def test_hook_keeps_three_transfer_branches_separate() -> None:
     assert set(hook.state_manager._states) == set(contexts)
     assert hook.full_count == 3
     assert hook.skip_count == 3
-    assert len(hook.state_manager._states["cond"].previous_indicator) == 2
+    assert len(hook.state_manager._states["cond"].previous_indicator) == 1
     assert len(hook.state_manager._states["cond_no_control"].previous_indicator) == 1
 
 
@@ -588,6 +790,7 @@ def test_backend_selector_and_refresh() -> None:
     hook = pipeline.transformer._hook_registry.get_hook(SeaCacheRootHook._HOOK_NAME)
     assert isinstance(hook, SeaCacheRootHook)
     assert callable(getattr(pipeline, "_cache_context_factory", None))
+    assert getattr(pipeline, "_cache_begin_step", None) == hook.begin_step
     for name in ("_seacache_skip", "_seacache_record", "_seacache_residual", "_seacache_last_residual"):
         assert not hasattr(pipeline.transformer, name)
     pipeline._current_step_index = 0
@@ -597,6 +800,7 @@ def test_backend_selector_and_refresh() -> None:
     assert hook.full_count == 1
 
     backend.refresh(pipeline, num_inference_steps=7)
+    assert getattr(pipeline, "_cache_begin_step", None) == hook.begin_step
     assert hook.full_count == 0
     assert hook.skip_count == 0
     assert hook.state_manager._states == {}
@@ -730,7 +934,7 @@ def test_hook_discovers_declared_offload_blocks(monkeypatch):
         decision.fill_(1)
 
     monkeypatch.setattr(torch.distributed, "all_reduce", force_compute)
-    assert hook._synchronize_compute(False, torch.device("cpu"))
+    assert hook._synchronize_decision(0, torch.device("cpu")) == 1
     assert reduced_groups == [shared_group]
 
 

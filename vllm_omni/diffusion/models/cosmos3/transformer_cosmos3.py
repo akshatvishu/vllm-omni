@@ -2206,7 +2206,7 @@ class Cosmos3VFMTransformer(nn.Module):
                 use_multi_control_attention=use_multi_control_attention,
                 multi_control_token_sizes=multi_control_token_sizes,
                 multi_control_weights=multi_control_weights,
-                seacache_inputs=SeaCacheInputs([*control_latent_list, hidden_states], noisy_frame_mask),
+                seacache_inputs=SeaCacheInputs([hidden_states], noisy_frame_mask),
             )
 
     def _run_gen_stack(self, prep: _GenPrepared, hidden_gen: torch.Tensor) -> torch.Tensor:
