@@ -2521,37 +2521,37 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
             x_t = x_t.to(packed_sequence.dtype)
         packed_sequence[packed_vae_token_indexes] = x_t
 
-        # The signal is identical across CFG branches; keep one copy.
-        # Outside the CFG interval, bypass the differently sized cached residual.
-        outside_cfg_window = has_cfg_branches and not use_cfg
-        modulated_input = None if skip_modulated_input or outside_cfg_window else packed_sequence
-        vae_per_branch = packed_vae_token_indexes.shape[0]
         if use_cfg:
             assert cfg_branch_pids is not None
             assert cfg_branch_caches is not None
             num_branches = len(cfg_branch_pids)
             seq_len = int(packed_seqlens.sum())
-            packed_sequence = packed_sequence.repeat(num_branches, 1)
-            packed_vae_token_indexes = torch.cat([packed_vae_token_indexes + i * seq_len for i in range(num_branches)])
-            packed_position_ids = torch.cat(cfg_branch_pids, dim=1 if cfg_branch_pids[0].ndim == 2 else 0)
-            packed_seqlens = packed_seqlens.repeat(num_branches)
+            batched_sequence = packed_sequence.repeat(num_branches, 1)
+            batched_vae_indexes = torch.cat([packed_vae_token_indexes + i * seq_len for i in range(num_branches)])
+            batched_position_ids = torch.cat(cfg_branch_pids, dim=1 if cfg_branch_pids[0].ndim == 2 else 0)
+            batched_seqlens = packed_seqlens.repeat(num_branches)
             if self.use_moe:
-                packed_text_indexes = torch.cat([packed_text_indexes + i * seq_len for i in range(num_branches)])
+                batched_text_indices = torch.cat([packed_text_indexes + i * seq_len for i in range(num_branches)])
+
+        # The signal is identical across CFG branches; keep one copy.
+        # Outside the CFG interval, bypass the differently sized cached residual.
+        outside_cfg_window = has_cfg_branches and not use_cfg
+        modulated_input = None if skip_modulated_input or outside_cfg_window else packed_sequence
 
         return ForwardState(
             modulated_input=modulated_input,
-            hidden_states=packed_sequence,
+            hidden_states=batched_sequence if use_cfg else packed_sequence,
             encoder_hidden_states=None,
             temb=None,
             intermediates=BagelState(
                 use_cfg=use_cfg,
-                packed_vae_token_indexes=packed_vae_token_indexes,
-                packed_text_indexes=packed_text_indexes,
-                packed_position_ids=packed_position_ids,
-                packed_seqlens=packed_seqlens,
+                packed_vae_token_indexes=batched_vae_indexes if use_cfg else packed_vae_token_indexes,
+                packed_text_indexes=batched_text_indices if use_cfg and self.use_moe else packed_text_indexes,
+                packed_position_ids=batched_position_ids if use_cfg else packed_position_ids,
+                packed_seqlens=batched_seqlens if use_cfg else packed_seqlens,
                 past_key_values=past_key_values,
-                cfg_branch_caches=cfg_branch_caches if use_cfg else None,
-                vae_per_branch=vae_per_branch,
+                cfg_branch_caches=cfg_branch_caches,
+                vae_per_branch=packed_vae_token_indexes.shape[0],
                 cfg_renorm_min=cfg_renorm_min,
                 cfg_renorm_type=cfg_renorm_type,
                 cfg_text_scale=cfg_text_scale,
