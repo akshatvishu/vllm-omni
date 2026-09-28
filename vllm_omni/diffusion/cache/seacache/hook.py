@@ -12,14 +12,16 @@ import torch
 from vllm.logger import init_logger
 
 from vllm_omni.diffusion.cache.seacache.config import SeaCacheConfig
+from vllm_omni.diffusion.cache.seacache.protocol import SupportsSeaCache
 from vllm_omni.diffusion.cache.seacache.sea_filter import (
     apply_sea_filter,
     extrapolate_residual,
     indicator_distance,
 )
 from vllm_omni.diffusion.cache.seacache.state import SeaCacheState
-from vllm_omni.diffusion.cache.teacache.extractors import CacheContext, get_extractor
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, validate_protocol_forward
 from vllm_omni.diffusion.hooks import HookRegistry, ModelHook, StateManager
+from vllm_omni.diffusion.offloader.block_discovery import get_blocks_attr_names, get_blocks_from_dit
 
 logger = init_logger(__name__)
 
@@ -59,7 +61,6 @@ class SeaCacheRootHook(ModelHook):
         current_step_callback: Callable[[], int | torch.Tensor | None] | None = None,
         current_sigma_callback: Callable[[], float | torch.Tensor | None] | None = None,
         num_inference_steps_callback: Callable[[], int | torch.Tensor | None] | None = None,
-        extractor_fn: Callable[..., CacheContext] | None = None,
     ) -> None:
         super().__init__()
         self.config = config
@@ -70,16 +71,17 @@ class SeaCacheRootHook(ModelHook):
         self._warned_messages: set[str] = set()
         self.full_count = 0
         self.skip_count = 0
-        self.extractor_fn = extractor_fn
         self._parameter_sharded = False
         self._collective_skip_groups: list[torch.distributed.ProcessGroup] = []
 
     def initialize_hook(self, module: torch.nn.Module) -> torch.nn.Module:
-        if self.extractor_fn is None:
-            self.extractor_fn = get_extractor(type(module))
+        if not isinstance(module, SupportsSeaCache):
+            raise TypeError(f"{type(module).__name__} must implement SupportsSeaCache")
+        validate_protocol_forward(module)
         self._parameter_sharded = _is_parameter_sharded(module)
         seen_groups: set[int] = set()
-        for block in getattr(module, "gen_layers", ()):
+        blocks = get_blocks_from_dit(module)[1] if get_blocks_attr_names(module) else []
+        for block in blocks:
             registry = getattr(block, "_hook_registry", None)
             dlo_hook = registry.get_hook("distributed_layerwise_offload") if registry is not None else None
             group = getattr(dlo_hook, "dp_group", None)
@@ -230,16 +232,14 @@ class SeaCacheRootHook(ModelHook):
         *args: Any,
         **kwargs: Any,
     ) -> Any:
-        if self.extractor_fn is None:
-            raise RuntimeError("SeaCache extractor was not initialized")
-        ctx = self.extractor_fn(module, *args, **kwargs)
+        ctx = module.preprocess(*args, **kwargs, skip_modulated_input=True)
 
         if torch.is_grad_enabled():
             self._warn_once("SeaCache is inference-only; autograd-enabled calls run in full.")
-            return self._run_uncached(ctx)
+            return self._run_uncached(module, ctx)
         if self.state_manager._current_context is None:
             self._warn_once("SeaCache requires an explicit cache context; running full.")
-            return self._run_uncached(ctx)
+            return self._run_uncached(module, ctx)
         callbacks = (
             self.current_step_callback,
             self.current_sigma_callback,
@@ -247,17 +247,15 @@ class SeaCacheRootHook(ModelHook):
         )
         if any(callback is None for callback in callbacks):
             self._warn_once("SeaCache requires scheduler step, sigma, and step-count callbacks; running full.")
-            return self._run_uncached(ctx)
+            return self._run_uncached(module, ctx)
         assert self.current_step_callback is not None
         assert self.current_sigma_callback is not None
         assert self.num_inference_steps_callback is not None
 
         try:
-            extra_states = ctx.extra_states or {}
-            vision_items = extra_states.get("sea_cache_latents")
-            if not isinstance(vision_items, list):
-                raise ValueError("extractor did not provide SeaCache vision inputs")
-            noisy_frame_mask = extra_states.get("sea_cache_noisy_frame_mask")
+            inputs = module.get_seacache_inputs(ctx)
+            vision_items = inputs.latents
+            noisy_frame_mask = inputs.noisy_frame_mask
             conditioning_only = isinstance(noisy_frame_mask, torch.Tensor) and not bool(
                 torch.any(noisy_frame_mask != 0).item()
             )
@@ -286,11 +284,11 @@ class SeaCacheRootHook(ModelHook):
                 raise ValueError("expected a valid step index and exact sigma in [0, 1]")
         except (IndexError, TypeError, ValueError, RuntimeError) as error:
             self._warn_once(f"SeaCache metadata is invalid; running full: {error}")
-            return self._run_uncached(ctx)
+            return self._run_uncached(module, ctx)
 
         if conditioning_only:
             self._warn_once("SeaCache requires noisy vision; conditioning-only calls run in full.")
-            return self._run_uncached(ctx)
+            return self._run_uncached(module, ctx)
 
         state: SeaCacheState = self.state_manager.get_state()
         try:
@@ -306,10 +304,7 @@ class SeaCacheRootHook(ModelHook):
 
         if should_compute:
             self.full_count += 1
-            output = self._run_full_stack(ctx)
-            result = ctx.postprocess(output)
-            self._record_execution(state, step, ctx.hidden_states, output)
-            return result
+            return self._run_and_record(module, ctx, state, step)
 
         residual = extrapolate_residual(
             state.history,
@@ -327,23 +322,27 @@ class SeaCacheRootHook(ModelHook):
             and residual.dtype == ctx.hidden_states.dtype
         )
         if can_reuse:
-            return ctx.postprocess(ctx.hidden_states + residual)
+            ctx.hidden_states = ctx.hidden_states + residual
+            return module.postprocess(ctx)
 
-        output = self._run_full_stack(ctx)
-        result = ctx.postprocess(output)
-        self._record_execution(state, step, ctx.hidden_states, output)
-        return result
+        return self._run_and_record(module, ctx, state, step)
+
+    def _run_and_record(
+        self,
+        module: SupportsSeaCache,
+        ctx: ForwardState[Any],
+        state: SeaCacheState,
+        step: int,
+    ) -> Any:
+        # Blocks may replace the state or mutate its input tensor in place.
+        execution_input = ctx.hidden_states.clone()
+        ctx = module.run_transformer_blocks(ctx)
+        self._record_execution(state, step, execution_input, ctx.hidden_states)
+        return module.postprocess(ctx)
 
     @staticmethod
-    def _run_full_stack(ctx: CacheContext) -> torch.Tensor:
-        outputs = ctx.run_transformer_blocks()
-        if not outputs:
-            raise RuntimeError("Cache extractor returned no transformer outputs")
-        return outputs[0]
-
-    @staticmethod
-    def _run_uncached(ctx: CacheContext) -> Any:
-        return ctx.postprocess(SeaCacheRootHook._run_full_stack(ctx))
+    def _run_uncached(module: SupportsSeaCache, ctx: ForwardState[Any]) -> Any:
+        return module.postprocess(module.run_transformer_blocks(ctx))
 
     def _record_execution(
         self,
@@ -383,7 +382,6 @@ def apply_sea_cache_hook(
     current_step_callback: Callable[[], int | torch.Tensor | None] | None = None,
     current_sigma_callback: Callable[[], float | torch.Tensor | None] | None = None,
     num_inference_steps_callback: Callable[[], int | torch.Tensor | None] | None = None,
-    extractor_fn: Callable[..., CacheContext] | None = None,
 ) -> SeaCacheRootHook:
     registry = HookRegistry.get_or_create(module)
     hook = SeaCacheRootHook(
@@ -391,7 +389,6 @@ def apply_sea_cache_hook(
         current_step_callback=current_step_callback,
         current_sigma_callback=current_sigma_callback,
         num_inference_steps_callback=num_inference_steps_callback,
-        extractor_fn=extractor_fn,
     )
     registry.register_hook(SeaCacheRootHook._HOOK_NAME, hook)
     return hook

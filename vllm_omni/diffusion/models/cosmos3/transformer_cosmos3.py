@@ -34,6 +34,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
 from vllm_omni.diffusion.attention.layer import Attention as FrameworkAttention
 from vllm_omni.diffusion.cache.cachedit import CacheDiTAdapterConfig
+from vllm_omni.diffusion.cache.seacache.protocol import SeaCacheInputs
 from vllm_omni.diffusion.cache.teacache.protocol import ForwardState, TeaCacheDefaults
 from vllm_omni.diffusion.data import OmniDiffusionConfig
 from vllm_omni.diffusion.distributed.sp_plan import SequenceParallelInput, SequenceParallelOutput
@@ -1192,6 +1193,7 @@ class _GenPrepared(NamedTuple):
     use_multi_control_attention: bool
     multi_control_token_sizes: tuple[int, ...] | None
     multi_control_weights: tuple[float, ...] | None
+    seacache_inputs: SeaCacheInputs
 
 
 class Cosmos3VFMTransformer(nn.Module):
@@ -1930,6 +1932,9 @@ class Cosmos3VFMTransformer(nn.Module):
             intermediates=prep,
         )
 
+    def get_seacache_inputs(self, ctx: ForwardState[_GenPrepared]) -> SeaCacheInputs:
+        return ctx.intermediates.seacache_inputs
+
     def run_transformer_blocks(self, ctx: ForwardState[_GenPrepared]) -> ForwardState[_GenPrepared]:
         ctx.hidden_states = self._run_gen_stack(ctx.intermediates, ctx.hidden_states)
         return ctx
@@ -2201,6 +2206,7 @@ class Cosmos3VFMTransformer(nn.Module):
                 use_multi_control_attention=use_multi_control_attention,
                 multi_control_token_sizes=multi_control_token_sizes,
                 multi_control_weights=multi_control_weights,
+                seacache_inputs=SeaCacheInputs([*control_latent_list, hidden_states], noisy_frame_mask),
             )
 
     def _run_gen_stack(self, prep: _GenPrepared, hidden_gen: torch.Tensor) -> torch.Tensor:

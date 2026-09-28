@@ -69,5 +69,5 @@ def validate_protocol_forward(module: torch.nn.Module) -> None:
     if classes.index(forward_owner) < classes.index(preprocess_owner):
         raise TypeError(
             f"{type(module).__name__}.forward overrides the decomposed forward from "
-            f"{preprocess_owner.__name__}; TeaCache cannot safely bypass that override"
+            f"{preprocess_owner.__name__}; cache hooks cannot safely bypass that override"
         )

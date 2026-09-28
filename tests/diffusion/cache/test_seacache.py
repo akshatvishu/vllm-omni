@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import datetime
 from contextlib import nullcontext
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 import torch
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import fully_shard
 
 from tests.helpers.runtime import get_distributed_init_method
 from vllm_omni.diffusion.cache.seacache import (
@@ -17,14 +20,16 @@ from vllm_omni.diffusion.cache.seacache import (
     SeaCacheRootHook,
     apply_sea_cache_hook,
 )
+from vllm_omni.diffusion.cache.seacache.protocol import SeaCacheInputs, SupportsSeaCache
 from vllm_omni.diffusion.cache.seacache.sea_filter import (
     apply_sea_filter,
     extrapolate_residual,
     indicator_distance,
 )
 from vllm_omni.diffusion.cache.selector import get_cache_backend
-from vllm_omni.diffusion.cache.teacache.extractors import EXTRACTOR_REGISTRY, CacheContext, get_extractor
+from vllm_omni.diffusion.cache.teacache.protocol import ForwardState
 from vllm_omni.diffusion.data import DiffusionCacheConfig
+from vllm_omni.diffusion.distributed import parallel_state
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
 
@@ -46,7 +51,34 @@ class TinyCosmos3Transformer(torch.nn.Module):
         control_latents: list[torch.Tensor] | torch.Tensor | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        del timestep, text_ids, text_mask, video_shape, noisy_frame_mask
+        ctx = self.preprocess(
+            hidden_states,
+            timestep,
+            text_ids,
+            text_mask,
+            video_shape,
+            noisy_frame_mask,
+            control_latents,
+            skip_modulated_input=True,
+            **kwargs,
+        )
+        return self.postprocess(self.run_transformer_blocks(ctx))
+
+    def preprocess(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        text_ids: torch.Tensor | None = None,
+        text_mask: torch.Tensor | None = None,
+        video_shape: tuple[int, int, int] | None = None,
+        noisy_frame_mask: torch.Tensor | None = None,
+        control_latents: list[torch.Tensor] | torch.Tensor | None = None,
+        *,
+        skip_modulated_input: bool = False,
+        **kwargs,
+    ) -> ForwardState[SeaCacheInputs]:
+        del timestep, text_ids, text_mask, video_shape
+        assert skip_modulated_input
         if kwargs:
             raise TypeError(f"Unexpected tiny transformer kwargs: {sorted(kwargs)}")
         controls = (
@@ -56,52 +88,25 @@ class TinyCosmos3Transformer(torch.nn.Module):
             if isinstance(control_latents, torch.Tensor)
             else list(control_latents)
         )
-        inputs = [*controls, hidden_states]
-        gen_input = torch.cat(
-            [value.movedim(1, -1).flatten(1, 3) for value in inputs],
-            dim=1,
+        vision_items = [*controls, hidden_states]
+        gen_input = torch.cat([value.movedim(1, -1).flatten(1, 3) for value in vision_items], dim=1)
+        return ForwardState(
+            modulated_input=None,
+            hidden_states=gen_input,
+            encoder_hidden_states=None,
+            temb=None,
+            intermediates=SeaCacheInputs(vision_items, noisy_frame_mask),
         )
-        return self._run_gen_layers(gen_input)
 
+    def run_transformer_blocks(self, ctx):
+        ctx.hidden_states = self._run_gen_layers(ctx.hidden_states)
+        return ctx
 
-def _extract_tiny_cosmos3_context(
-    module: TinyCosmos3Transformer,
-    hidden_states: torch.Tensor,
-    timestep: torch.Tensor,
-    text_ids: torch.Tensor | None = None,
-    text_mask: torch.Tensor | None = None,
-    video_shape: tuple[int, int, int] | None = None,
-    noisy_frame_mask: torch.Tensor | None = None,
-    control_latents: list[torch.Tensor] | torch.Tensor | None = None,
-    **kwargs,
-) -> CacheContext:
-    del timestep, text_ids, text_mask, video_shape
-    if kwargs:
-        raise TypeError(f"Unexpected tiny transformer kwargs: {sorted(kwargs)}")
-    controls = (
-        []
-        if control_latents is None
-        else [control_latents]
-        if isinstance(control_latents, torch.Tensor)
-        else list(control_latents)
-    )
-    vision_items = [*controls, hidden_states]
-    gen_input = torch.cat(
-        [value.movedim(1, -1).flatten(1, 3) for value in vision_items],
-        dim=1,
-    )
-    return CacheContext(
-        modulated_input=gen_input,
-        hidden_states=gen_input,
-        encoder_hidden_states=None,
-        temb=torch.zeros_like(gen_input[:, 0]),
-        run_transformer_blocks=lambda: (module._run_gen_layers(gen_input),),
-        postprocess=lambda output: output,
-        extra_states={
-            "sea_cache_latents": vision_items,
-            "sea_cache_noisy_frame_mask": noisy_frame_mask,
-        },
-    )
+    def postprocess(self, ctx):
+        return ctx.hidden_states
+
+    def get_seacache_inputs(self, ctx):
+        return ctx.intermediates
 
 
 class Cosmos3OmniDiffusersPipeline:
@@ -160,7 +165,6 @@ def _apply_test_hook(
         current_step_callback=lambda: metadata.step,
         current_sigma_callback=lambda: metadata.sigma,
         num_inference_steps_callback=lambda: metadata.num_steps,
-        extractor_fn=_extract_tiny_cosmos3_context,
     )
 
 
@@ -568,13 +572,7 @@ def test_hook_uses_exact_sigma_callback(monkeypatch: pytest.MonkeyPatch) -> None
     assert all(sigma == pytest.approx(0.37) for sigma in observed_sigmas)
 
 
-def test_backend_selector_and_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(EXTRACTOR_REGISTRY, "TinyCosmos3Transformer", _extract_tiny_cosmos3_context)
-
-    class FSDPTinyCosmos3Transformer(TinyCosmos3Transformer):
-        pass
-
-    assert get_extractor(FSDPTinyCosmos3Transformer) is _extract_tiny_cosmos3_context
+def test_backend_selector_and_refresh() -> None:
     backend = get_cache_backend(
         "sea_cache",
         {
@@ -604,8 +602,7 @@ def test_backend_selector_and_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     assert hook.state_manager._states == {}
 
 
-def test_backend_uses_resolved_pipeline_metadata_not_refresh_argument(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(EXTRACTOR_REGISTRY, "TinyCosmos3Transformer", _extract_tiny_cosmos3_context)
+def test_backend_uses_resolved_pipeline_metadata_not_refresh_argument() -> None:
     pipeline = Cosmos3OmniDiffusersPipeline()
     backend = SeaCacheBackend(DiffusionCacheConfig())
     backend.enable(pipeline)
@@ -633,3 +630,115 @@ def test_shared_config_defaults() -> None:
     assert config.sea_residual_order == 1
     assert config.sea_max_consecutive_cached == 2
     assert config.sea_power_exp == 3.0
+
+
+@pytest.mark.parametrize("in_place", [False, True])
+@torch.no_grad()
+def test_protocol_records_residual_before_postprocess(in_place):
+    class MutatingTransformer(TinyCosmos3Transformer):
+        def run_transformer_blocks(self, ctx):
+            if in_place:
+                ctx.hidden_states.add_(3)
+                return ctx
+            return replace(ctx, hidden_states=ctx.hidden_states + 3)
+
+        def postprocess(self, ctx):
+            return ctx.hidden_states.mul_(2)
+
+    transformer = MutatingTransformer()
+    metadata = SimpleNamespace(step=0, sigma=1.0, num_steps=4)
+    hook = _apply_test_hook(transformer, metadata)
+    first = _run_step(transformer, 1000, 1.0, hook=hook)
+    torch.testing.assert_close(first, torch.full_like(first, 8))
+    history = hook.state_manager._states["cond"].history
+    torch.testing.assert_close(history[0][1], torch.full_like(history[0][1], 3))
+
+    metadata.step = 1
+    metadata.sigma = 0.9
+    cached = _run_step(transformer, 900, 2.0, hook=hook)
+    torch.testing.assert_close(cached, torch.full_like(cached, 10))
+    assert hook.full_count == 1
+    assert hook.skip_count == 1
+    torch.testing.assert_close(history[0][1], torch.full_like(history[0][1], 3))
+
+
+def test_hook_rejects_missing_protocol_and_forward_override():
+    with pytest.raises(TypeError, match="must implement SupportsSeaCache"):
+        apply_sea_cache_hook(torch.nn.Identity(), SeaCacheConfig())
+
+    class BypassingTransformer(TinyCosmos3Transformer):
+        def forward(self, hidden_states, *args, **kwargs):
+            return hidden_states
+
+    with pytest.raises(TypeError, match="overrides the decomposed forward"):
+        apply_sea_cache_hook(BypassingTransformer(), SeaCacheConfig())
+
+
+def test_fsdp2_wrapper_keeps_seacache_protocol(tmp_path, monkeypatch):
+    torch.distributed.init_process_group("gloo", init_method=f"file://{tmp_path / 'init'}", rank=0, world_size=1)
+    try:
+        transformer = TinyCosmos3Transformer()
+        transformer.weight = torch.nn.Parameter(torch.ones(1))
+        fully_shard(transformer, mesh=DeviceMesh("cpu", [0]))
+        assert isinstance(transformer, SupportsSeaCache)
+        monkeypatch.setattr(parallel_state, "get_fs_group", lambda: SimpleNamespace(world_size=1))
+        monkeypatch.setattr(parallel_state, "get_sequence_parallel_world_size", lambda: 1)
+        metadata = SimpleNamespace(step=0, sigma=1.0, num_steps=4)
+        hook = _apply_test_hook(transformer, metadata)
+        assert hook._parameter_sharded
+        # FSDP2's CPU unshard path needs version counters, so use no_grad.
+        with torch.no_grad(), hook.cache_context("cond"):
+            first = transformer(hidden_states=_latent(1.0), timestep=torch.tensor([1000]))
+            metadata.step = 1
+            metadata.sigma = 0.9
+            torch.testing.assert_close(transformer(hidden_states=_latent(1.0), timestep=torch.tensor([900])), first)
+        assert hook.full_count == hook.skip_count == 1
+    finally:
+        torch.distributed.destroy_process_group()
+
+
+def test_hook_discovers_declared_offload_blocks(monkeypatch):
+    class OffloadedTransformer(TinyCosmos3Transformer):
+        _layerwise_offload_blocks_attrs = ["blocks", "other_blocks"]
+
+    transformer = OffloadedTransformer()
+    shared_group = object()
+    single_group = object()
+    transformer.blocks = torch.nn.ModuleList([torch.nn.Identity(), torch.nn.Identity()])
+    transformer.other_blocks = torch.nn.ModuleList([torch.nn.Identity()])
+    for block, group, size in zip(
+        [*transformer.blocks, *transformer.other_blocks],
+        [shared_group, shared_group, single_group],
+        [2, 2, 1],
+        strict=True,
+    ):
+        offload_hook = SimpleNamespace(dp_group=group, dp_size=size)
+        block._hook_registry = SimpleNamespace(
+            get_hook=lambda name, hook=offload_hook: hook if name == "distributed_layerwise_offload" else None
+        )
+    hook = _apply_test_hook(transformer, SimpleNamespace(step=0, sigma=1.0, num_steps=4))
+    assert hook._collective_skip_groups == [shared_group]
+
+    monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(parallel_state, "get_sequence_parallel_world_size", lambda: 1)
+    reduced_groups = []
+
+    def force_compute(decision, *, op, group):
+        assert op == torch.distributed.ReduceOp.MAX
+        reduced_groups.append(group)
+        decision.fill_(1)
+
+    monkeypatch.setattr(torch.distributed, "all_reduce", force_compute)
+    assert hook._synchronize_compute(False, torch.device("cpu"))
+    assert reduced_groups == [shared_group]
+
+
+@pytest.mark.parametrize("invalid_step", [None, -1, 4])
+def test_invalid_metadata_runs_uncached_without_recording(invalid_step):
+    transformer = TinyCosmos3Transformer()
+    hook = _apply_test_hook(transformer, SimpleNamespace(step=invalid_step, sigma=1.0, num_steps=4))
+    output = _run_step(transformer, 1000, 1.0, hook=hook)
+    torch.testing.assert_close(output, torch.full_like(output, 2))
+    assert hook.full_count == hook.skip_count == 0
+    assert not hook.state_manager._states

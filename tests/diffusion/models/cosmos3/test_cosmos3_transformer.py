@@ -10,6 +10,7 @@ import pytest
 import torch
 from torch import nn
 
+from vllm_omni.diffusion.cache.seacache import SeaCacheConfig, apply_sea_cache_hook
 from vllm_omni.platforms import current_omni_platform
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu, pytest.mark.diffusion]
@@ -785,7 +786,6 @@ def test_forward_returns_video_prediction(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_cache_execution_residual_spans_final_gen_norm(monkeypatch: pytest.MonkeyPatch) -> None:
-    from vllm_omni.diffusion.cache.teacache.extractors import extract_cosmos3_context
     from vllm_omni.diffusion.models.cosmos3 import transformer_cosmos3
 
     class TrackingNorm(nn.Module):
@@ -825,17 +825,29 @@ def test_cache_execution_residual_spans_final_gen_norm(monkeypatch: pytest.Monke
     assert norm.calls == 1
     norm.calls = 0
 
-    ctx = extract_cosmos3_context(model, **forward_kwargs)
+    ctx = model.preprocess(**forward_kwargs, skip_modulated_input=True)
     execution_input = ctx.hidden_states.detach().clone()
-    execution_output = ctx.run_transformer_blocks()[0]
+    ctx = model.run_transformer_blocks(ctx)
+    execution_output = ctx.hidden_states
     residual = execution_output - execution_input
-    extracted_output = ctx.postprocess(execution_output)
+    split_output = model.postprocess(ctx)
 
     assert norm.calls == 1
     expected_residual = ((captured["input"] + 2.0) + 5.0) - captured["input"]
     assert torch.equal(residual, expected_residual)
-    assert torch.equal(extracted_output, full_output)
+    assert torch.equal(split_output, full_output)
 
+    metadata = SimpleNamespace(step=0)
+    hook = apply_sea_cache_hook(
+        model,
+        SeaCacheConfig(threshold=100.0),
+        current_step_callback=lambda: metadata.step,
+        current_sigma_callback=lambda: 1.0 - metadata.step * 0.1,
+        num_inference_steps_callback=lambda: 4,
+    )
+    with torch.inference_mode(), hook.cache_context("cond"):
+        assert torch.equal(model(**forward_kwargs), full_output)
+    torch.testing.assert_close(hook.state_manager._states["cond"].history[0][1], expected_residual)
     norm.calls = 0
 
     def fail_if_gen_layers_run(*args, **kwargs):
@@ -844,10 +856,12 @@ def test_cache_execution_residual_spans_final_gen_norm(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(model, "_run_gen_layers", fail_if_gen_layers_run)
 
-    cached_ctx = extract_cosmos3_context(model, **forward_kwargs)
-    cached_output = cached_ctx.postprocess(cached_ctx.hidden_states + residual)
+    metadata.step = 1
+    with torch.inference_mode(), hook.cache_context("cond"):
+        cached_output = model(**forward_kwargs)
 
     assert norm.calls == 0
+    assert hook.full_count == hook.skip_count == 1
     assert torch.equal(cached_output, full_output)
     for name in ("_seacache_skip", "_seacache_record", "_seacache_residual", "_seacache_last_residual"):
         assert not hasattr(model, name)
@@ -1390,3 +1404,35 @@ def test_compute_rope_freqs_places_text_video_action_and_sound_positions() -> No
     )
     _, offset_gen_pos = rotary.position_ids
     assert offset_gen_pos[0, 0].tolist() == [102, 103, 104, 105, 106, 107]
+
+
+@pytest.mark.parametrize("num_controls", [0, 1, 2])
+def test_seacache_inputs_preserve_original_vision_order(monkeypatch, num_controls):
+    from vllm_omni.diffusion.cache.seacache.protocol import SupportsSeaCache
+    from vllm_omni.diffusion.models.cosmos3 import transformer_cosmos3
+    from vllm_omni.diffusion.models.cosmos3.transformer_cosmos3_edge import Cosmos3EdgeVFMTransformer
+
+    monkeypatch.setattr(transformer_cosmos3, "_get_ulysses_state", lambda: (1, 0, None))
+    model = transformer_cosmos3.Cosmos3VFMTransformer(
+        SimpleNamespace(tf_model_config=_tiny_cosmos3_config(), dtype=torch.float32)
+    )
+    assert isinstance(model, SupportsSeaCache)
+    assert issubclass(Cosmos3EdgeVFMTransformer, SupportsSeaCache)
+    target = torch.zeros(1, 2, 1, 2, 2)
+    controls = [torch.full_like(target, index + 1) for index in range(num_controls)]
+    mask = torch.ones(1, 1, 1, 1, 1)
+    ctx = model.preprocess(
+        hidden_states=target,
+        timestep=torch.tensor([1.0]),
+        text_ids=torch.tensor([[1, 2]], dtype=torch.long),
+        text_mask=torch.ones(1, 2, dtype=torch.long),
+        video_shape=(1, 2, 2),
+        control_latents=controls,
+        noisy_frame_mask=mask,
+        skip_modulated_input=True,
+    )
+    inputs = model.get_seacache_inputs(ctx)
+    assert len(inputs.latents) == num_controls + 1
+    assert all(actual is expected for actual, expected in zip(inputs.latents, [*controls, target], strict=True))
+    assert inputs.noisy_frame_mask is mask
+    assert ctx.modulated_input is None
