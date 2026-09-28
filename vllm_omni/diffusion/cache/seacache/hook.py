@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from enum import IntEnum
 from typing import Any
 
 import torch
@@ -47,6 +48,14 @@ def _is_parameter_sharded(module: torch.nn.Module) -> bool:
             ):
                 return True
     return False
+
+
+class SeaCacheDecision(IntEnum):
+    """MAX reduction gives bypass precedence over compute and skip."""
+
+    SKIP = 0
+    COMPUTE = 1
+    BYPASS = 2
 
 
 class SeaCacheRootHook(ModelHook):
@@ -136,57 +145,37 @@ class SeaCacheRootHook(ModelHook):
         """
         if not branches or any(not name for name in branches) or len(set(branches)) != len(branches):
             raise ValueError("SeaCache requires unique, nonempty branch names")
-        step, _, _ = self._step_metadata()
+        try:
+            step, _, _ = self._step_metadata()
+        except (IndexError, TypeError, ValueError, RuntimeError) as error:
+            self._warn_once(f"SeaCache input is ineligible; running full: {error}")
+            self.state_manager.reset()
+            self._active_branches = ()
+            self._last_evaluation_step = None
+            return
         if branches != self._active_branches or self._last_evaluation_step != step - 1:
             self.state_manager.reset()
         self._active_branches = branches
         self._last_evaluation_step = step
 
-    def _build_indicator(
-        self,
-        vision_items: list[torch.Tensor] | None,
-        sigma: float,
-    ) -> list[torch.Tensor] | None:
-        if not vision_items:
-            return None
-        hidden_states = vision_items[-1]
-        if not isinstance(hidden_states, torch.Tensor) or hidden_states.ndim != 5:
-            return None
+    def _build_indicator(self, latent: torch.Tensor, sigma: float) -> list[torch.Tensor]:
+        if not isinstance(latent, torch.Tensor) or latent.ndim != 5 or latent.shape[0] == 0:
+            raise ValueError("expected a nonempty BCTHW target latent")
 
-        # Models supply denoised targets, including any clean I2V/V2V prefix
-        # frames, but exclude separate fully conditioned control hints.
-        if any(
-            not isinstance(item, torch.Tensor)
-            or item.ndim != 5
-            or item.shape[0] != hidden_states.shape[0]
-            or item.shape[1:] != hidden_states.shape[1:]
-            for item in vision_items
-        ):
-            return None
-
-        indicator = []
-        for batch_index in range(hidden_states.shape[0]):
-            for latent in vision_items:
-                thwc = latent[batch_index].movedim(0, -1)
-                indicator.append(
-                    apply_sea_filter(
-                        thwc,
-                        sigma=sigma,
-                        power_exp=self.config.power_exp,
-                    ).detach()
-                )
-        return indicator or None
+        # Keep one indicator per sample so distance averages samples equally.
+        # The target retains clean prefix frames but excludes separate controls.
+        return [
+            apply_sea_filter(sample.movedim(0, -1), sigma=sigma, power_exp=self.config.power_exp).detach()
+            for sample in latent
+        ]
 
     def _resolve_gate(
         self,
         state: SeaCacheState,
-        indicator: list[torch.Tensor] | None,
+        indicator: list[torch.Tensor],
         step: int,
         num_inference_steps: int,
-    ) -> bool:
-        if state.last_step is not None and step != state.last_step + 1:
-            state.reset()
-        state.last_step = step
+    ) -> SeaCacheDecision:
         max_consecutive = bool(
             self.config.max_consecutive_cached and state.consecutive_cached >= self.config.max_consecutive_cached
         )
@@ -195,33 +184,31 @@ class SeaCacheRootHook(ModelHook):
             or step >= num_inference_steps - 1
             or max_consecutive
             or not state.history
-            or indicator is None
             or state.previous_indicator is None
         )
         if forced_compute:
             state.accumulated_distance = 0.0
-            state.previous_indicator = None if indicator is None else [value.detach() for value in indicator]
-            return True
+            state.previous_indicator = [value.detach() for value in indicator]
+            return SeaCacheDecision.COMPUTE
 
-        assert indicator is not None
         assert state.previous_indicator is not None
         distance = indicator_distance(indicator, state.previous_indicator)
         state.previous_indicator = [value.detach() for value in indicator]
         if not math.isfinite(distance):
             state.accumulated_distance = 0.0
             self._warn_once("SeaCache indicator history changed shape, device, or dtype; running full.")
-            return True
+            return SeaCacheDecision.COMPUTE
 
         state.accumulated_distance += distance
         if state.accumulated_distance < self.config.threshold:
-            return False
+            return SeaCacheDecision.SKIP
         state.accumulated_distance = 0.0
-        return True
+        return SeaCacheDecision.COMPUTE
 
-    def _synchronize_decision(self, decision_value: int, device: torch.device) -> int:
+    def _synchronize_decision(self, decision_value: SeaCacheDecision, device: torch.device) -> SeaCacheDecision:
         """MAX of skip=0, compute=1, bypass=2 across transformer collective peers."""
         if not torch.distributed.is_available() or not torch.distributed.is_initialized():
-            return max(1, decision_value) if self._parameter_sharded else decision_value
+            return max(SeaCacheDecision.COMPUTE, decision_value) if self._parameter_sharded else decision_value
         decision = torch.tensor(decision_value, dtype=torch.int32, device=device)
         if self._parameter_sharded:
             from vllm_omni.diffusion.distributed.parallel_state import (
@@ -243,7 +230,7 @@ class SeaCacheRootHook(ModelHook):
                     op=torch.distributed.ReduceOp.MAX,
                     group=get_sp_group().device_group,
                 )
-            return int(decision.item())
+            return SeaCacheDecision(decision.item())
 
         for group in self._collective_skip_groups:
             torch.distributed.all_reduce(
@@ -262,7 +249,7 @@ class SeaCacheRootHook(ModelHook):
                 op=torch.distributed.ReduceOp.MAX,
                 group=get_sp_group().device_group,
             )
-        return int(decision.item())
+        return SeaCacheDecision(decision.item())
 
     @torch.compiler.disable
     def new_forward(
@@ -274,18 +261,19 @@ class SeaCacheRootHook(ModelHook):
         ctx = module.preprocess(*args, **kwargs, skip_modulated_input=True)
 
         state: SeaCacheState | None = None
-        local_decision = 2
+        local_decision = SeaCacheDecision.BYPASS
         try:
             if torch.is_grad_enabled():
                 raise ValueError("autograd-enabled call")
             if self.state_manager._current_context is None:
                 raise ValueError("missing explicit cache context")
             inputs = module.get_seacache_inputs(ctx)
-            vision_items = inputs.latents
             noisy_frame_mask = inputs.noisy_frame_mask
             if isinstance(noisy_frame_mask, torch.Tensor) and not bool(torch.any(noisy_frame_mask != 0).item()):
                 raise ValueError("conditioning-only input")
             step, sigma, num_inference_steps = self._step_metadata()
+            if step != self._last_evaluation_step:
+                raise ValueError("begin_step was not called for this evaluation")
             state = self.state_manager.get_state()
             assert state is not None
             # Validate before collective agreement, never after a shared skip.
@@ -296,18 +284,16 @@ class SeaCacheRootHook(ModelHook):
                 for _, residual in state.history
             ):
                 state.reset()
-            indicator = self._build_indicator(vision_items, sigma)
-            if indicator is None:
-                raise ValueError("invalid noisy-target indicator")
-            local_decision = int(self._resolve_gate(state, indicator, step, num_inference_steps))
+            indicator = self._build_indicator(inputs.latent, sigma)
+            local_decision = self._resolve_gate(state, indicator, step, num_inference_steps)
         except (IndexError, TypeError, ValueError, RuntimeError) as error:
             self._warn_once(f"SeaCache input is ineligible; running full: {error}")
         decision = self._synchronize_decision(local_decision, ctx.hidden_states.device)
-        if decision == 2:
+        if decision == SeaCacheDecision.BYPASS:
             self.state_manager.reset()
             return self._run_uncached(module, ctx)
         assert state is not None
-        if decision == 1:
+        if decision == SeaCacheDecision.COMPUTE:
             state.accumulated_distance = 0.0
             self.full_count += 1
             return self._run_and_record(module, ctx, state, step)
@@ -352,7 +338,7 @@ class SeaCacheRootHook(ModelHook):
             and output.device == execution_input.device
             and output.dtype == execution_input.dtype
         ):
-            state.history.append((step, (output - execution_input).detach().clone()))
+            state.history.append((step, (output - execution_input).detach()))
             state.history = state.history[-(self.config.residual_order + 1) :]
             state.consecutive_cached = 0
             return

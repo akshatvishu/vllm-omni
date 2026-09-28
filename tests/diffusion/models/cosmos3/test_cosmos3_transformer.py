@@ -845,6 +845,7 @@ def test_cache_execution_residual_spans_final_gen_norm(monkeypatch: pytest.Monke
         current_sigma_callback=lambda: 1.0 - metadata.step * 0.1,
         num_inference_steps_callback=lambda: 4,
     )
+    hook.begin_step(("cond",))
     with torch.inference_mode(), hook.cache_context("cond"):
         assert torch.equal(model(**forward_kwargs), full_output)
     torch.testing.assert_close(hook.state_manager._states["cond"].history[0][1], expected_residual)
@@ -857,6 +858,7 @@ def test_cache_execution_residual_spans_final_gen_norm(monkeypatch: pytest.Monke
     monkeypatch.setattr(model, "_run_gen_layers", fail_if_gen_layers_run)
 
     metadata.step = 1
+    hook.begin_step(("cond",))
     with torch.inference_mode(), hook.cache_context("cond"):
         cached_output = model(**forward_kwargs)
 
@@ -1432,8 +1434,7 @@ def test_seacache_inputs_keep_target_and_exclude_controls(monkeypatch, num_contr
         skip_modulated_input=True,
     )
     inputs = model.get_seacache_inputs(ctx)
-    assert len(inputs.latents) == 1
-    assert inputs.latents[0] is target
+    assert inputs.latent is target
     assert ctx.intermediates.s_control == num_controls * ctx.intermediates.s_video
     assert inputs.noisy_frame_mask is mask
     assert ctx.modulated_input is None
