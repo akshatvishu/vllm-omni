@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 # mypy: disable-error-code=attr-defined
-"""Forward references copied from vLLM-Omni 43e507117f04a86f2df8d405cbe03c1b1642eac9."""
+"""Temporary migration references from vLLM-Omni 43e507117f04a86f2df8d405cbe03c1b1642eac9.
+
+Remove these copies in C13 after the ports pass the planned model validation.
+"""
 
 from typing import Any
 

@@ -27,6 +27,7 @@ from vllm_omni.diffusion.cache.cachedit import (
 from vllm_omni.diffusion.cache.magcache import MagCacheBackend
 from vllm_omni.diffusion.cache.selector import get_cache_backend
 from vllm_omni.diffusion.cache.teacache import TeaCacheBackend
+from vllm_omni.diffusion.cache.teacache.config import TeaCacheConfig
 from vllm_omni.diffusion.cache.teacache.protocol import TeaCacheDefaults
 from vllm_omni.diffusion.data import DiffusionCacheConfig
 
@@ -496,6 +497,41 @@ class TestTeaCacheBackend:
 
         TeaCacheBackend(DiffusionCacheConfig()).enable(pipeline)
         assert mock_apply_hook.call_args.args[1].rel_l1_thresh == 0.2
+
+    @pytest.mark.parametrize("num_warmup_steps", [None, 0, 2])
+    def test_hunyuan_rejects_unsupported_warmup(self, num_warmup_steps):
+        class HunyuanImage3Pipeline:
+            _tea_cache_config: TeaCacheConfig
+
+        pipeline = HunyuanImage3Pipeline()
+        backend = TeaCacheBackend(DiffusionCacheConfig(num_warmup_steps=num_warmup_steps))
+        if num_warmup_steps:
+            with pytest.raises(NotImplementedError, match="does not support num_warmup_steps"):
+                backend.enable(pipeline)
+            assert not backend.enabled
+            assert not hasattr(pipeline, "_tea_cache_config")
+        else:
+            backend.enable(pipeline)
+            assert backend.enabled
+            assert pipeline._tea_cache_config.num_warmup_steps == 0
+
+    def test_invalid_config_preserves_cause(self):
+        pipeline = SimpleNamespace(transformer=_TeaCacheProtocolTransformer())
+        backend = TeaCacheBackend(DiffusionCacheConfig(num_warmup_steps=-1))
+
+        with pytest.raises(ValueError, match="Invalid TeaCache configuration.*num_warmup_steps") as exc_info:
+            backend.enable(pipeline)
+
+        assert isinstance(exc_info.value.__cause__, ValueError)
+        assert not backend.enabled
+
+    def test_model_defaults_failure_is_not_wrapped_as_config_error(self):
+        transformer = _TeaCacheProtocolTransformer()
+        failure = RuntimeError("model defaults failed")
+        with patch.object(transformer, "get_teacache_defaults", side_effect=failure):
+            with pytest.raises(RuntimeError) as exc_info:
+                TeaCacheBackend(DiffusionCacheConfig()).enable(SimpleNamespace(transformer=transformer))
+        assert exc_info.value is failure
 
     @pytest.mark.parametrize("partition", ["fl2va", "combined"])
     @pytest.mark.parametrize(

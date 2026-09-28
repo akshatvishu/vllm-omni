@@ -1285,10 +1285,9 @@ class QwenImageTransformer2DModel(CachedTransformer, SupportsTeaCache):
         return ctx
 
     def postprocess(self, ctx: ForwardState[QwenImageState]) -> Transformer2DModelOutput | tuple[torch.Tensor, ...]:
-        if self.zero_cond_t:
-            ctx.temb = ctx.temb.chunk(2, dim=0)[0]
-        ctx.hidden_states = self.norm_out(ctx.hidden_states, ctx.temb)
-        output = self.proj_out(ctx.hidden_states)
+        temb = ctx.temb.chunk(2, dim=0)[0] if self.zero_cond_t else ctx.temb
+        hidden_states = self.norm_out(ctx.hidden_states, temb)
+        output = self.proj_out(hidden_states)
         if not ctx.intermediates.return_dict:
             return (output,)
         return Transformer2DModelOutput(sample=output)

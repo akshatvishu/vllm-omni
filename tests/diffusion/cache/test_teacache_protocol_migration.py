@@ -138,6 +138,35 @@ def test_sequential_cfg_keeps_branch_states_separate():
     assert model.block_calls == 3
 
 
+def test_sequential_cfg_warms_each_branch_before_reusing_its_residual():
+    class InputDependentModel(_ProtocolModel):
+        def run_transformer_blocks(self, ctx):
+            self.block_calls += 1
+            ctx.hidden_states *= 2
+            ctx.encoder_hidden_states *= 3
+            return ctx
+
+    model = InputDependentModel()
+    model.do_true_cfg = True
+    hook = TeaCacheHook(TeaCacheConfig(coefficients=[0.0] * 5, num_warmup_steps=2))
+    hook.initialize_hook(model)
+    calls = []
+    outputs = []
+    with patch("vllm_omni.diffusion.cache.teacache.hook.get_classifier_free_guidance_world_size", return_value=1):
+        for hidden in (1.0, 10.0, 2.0, 20.0, 3.0, 30.0):
+            hidden_output, _ = hook.new_forward(model, torch.tensor([hidden]), torch.ones(1))
+            outputs.append(hidden_output.item())
+            calls.append(model.block_calls)
+
+        assert calls == [1, 2, 3, 4, 4, 4]
+        assert outputs == [2.0, 20.0, 4.0, 40.0, 5.0, 50.0]
+
+        hook.reset_state(model)
+        for hidden in (1.0, 10.0, 2.0, 20.0):
+            hook.new_forward(model, torch.tensor([hidden]), torch.ones(1))
+        assert model.block_calls == 8
+
+
 def test_legacy_extractor_keeps_cache_hit_behavior():
     model = _LegacyModel()
     hook = _hook(model)

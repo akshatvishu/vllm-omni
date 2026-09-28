@@ -29,6 +29,7 @@ from vllm_omni.diffusion.cache.cachedit.backend import (
     RefreshCacheContextFunc,
     _build_cache_context_refresh,
     _default_get_pipeline_transformer,
+    _make_pipeline_transformer_getter,
     _maybe_build_block_adapter,
     enable_cache_for_dit,
 )
@@ -149,7 +150,7 @@ def enable_cache_for_wan22(pipeline: Any, cache_config: Any) -> RefreshCacheCont
     )
 
     refresh_trans_one = _build_cache_context_refresh(cache_config)
-    refresh_trans_two = _build_cache_context_refresh(cache_config, lambda pipeline: getattr(pipeline, "transformer_2"))
+    refresh_trans_two = _build_cache_context_refresh(cache_config, _make_pipeline_transformer_getter("transformer_2"))
 
     def refresh_cache_context(pipeline: Any, num_inference_steps: int, verbose: bool = True) -> None:
         """Refresh cache context for both transformers with new num_inference_steps.

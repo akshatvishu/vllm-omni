@@ -223,6 +223,9 @@ def _validate_teacache_runtime(od_config: OmniDiffusionConfig) -> None:
     if bool(getattr(od_config, "enable_distributed_layerwise_offload", False)):
         raise ValueError("Cosmos3 TeaCache does not support distributed layerwise offload")
     if bool(getattr(od_config, "enable_layerwise_offload", False)):
+        # The signal reads block zero before its forward. After setup, the ring
+        # prefetches its weights asynchronously on a separate copy stream;
+        # readiness for this early read has not been validated.
         raise ValueError("Cosmos3 TeaCache does not support layerwise offload")
 
 

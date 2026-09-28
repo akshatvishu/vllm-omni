@@ -119,6 +119,8 @@ In `OmniDiffusionConfig`
 | `coefficients` | list[float] \| None | `None` | Polynomial coefficients for rescaling L1 distance. Must contain exactly 5 elements if provided. If `None`, uses model-specific defaults based on transformer type. |
 | `num_warmup_steps` | int \| None | Model default | Initial denoising steps per CFG branch that always run the transformer. The default is 12 for Cosmos3 Nano and Super and 0 for other models. |
 
+HunyuanImage3's legacy TeaCache path does not support configurable warmup. A nonzero `num_warmup_steps` raises an error instead of being silently ignored.
+
 Ported models define their defaults in `get_teacache_defaults()`. Legacy model defaults remain in [`vllm_omni/diffusion/cache/teacache/config.py`](https://github.com/vllm-project/vllm-omni/blob/main/vllm_omni/diffusion/cache/teacache/config.py), for example:
 
 ```python
@@ -137,9 +139,11 @@ _MODEL_COEFFICIENTS = {
 }
 ```
 
-Cosmos3 Nano and Super use the coefficients proposed in [PR #4389](https://github.com/vllm-project/vllm-omni/pull/4389). That PR fitted them on Cosmos3 Nano text-to-video runs and recommended 12 warmup steps to reduce early-step quality loss. The protocol path includes the final GEN norm in the cached residual, while #4389 fitted a residual before that norm. In a one-MI300X Nano text-to-video comparison with four prompt and seed pairs, the protocol path averaged 1.55× speedup and had less output change against its uncached reference than #4389 did against its own. This check covers Nano text-to-video only. Transfer requests run without TeaCache because their branches have different GEN layouts. Cosmos3 Edge has no calibrated default coefficients and requires an explicit coefficient override. Edge also defaults to zero warmup steps; set `num_warmup_steps` explicitly when supplying Edge coefficients.
+Cosmos3 Nano and Super use the coefficients proposed in [PR #4389](https://github.com/vllm-project/vllm-omni/pull/4389). That PR fitted them on Cosmos3 Nano text-to-video runs and recommended 12 warmup steps to reduce early-step quality loss. The protocol path includes the final GEN norm in the cached residual, while #4389 fitted a residual before that norm. On one MI300X with four prompt and seed pairs, the measured speedups were comparable (1.52× for #4389 and 1.55× for the protocol path). The protocol path had less measured output change against its own uncached reference. The runs used different vLLM versions (0.24.0 and 0.30.0), so the comparison does not isolate the rewrite's effect. This check covers Nano text-to-video only. Transfer requests run without TeaCache because their branches have different GEN layouts. Cosmos3 Edge has no calibrated default coefficients and requires an explicit coefficient override. Edge also defaults to zero warmup steps; set `num_warmup_steps` explicitly when supplying Edge coefficients.
 
-Cosmos3 TeaCache cannot be combined with HSDP, layerwise offload, or distributed layerwise offload. The current TeaCache signal reads a GEN layer's weights before its forward. Layerwise offload prepares those weights in the block's forward hook, while HSDP and distributed layerwise offload also require a shared skip decision across weight-sharding groups.
+Cosmos3 TeaCache cannot be combined with HSDP, layerwise offload, or distributed layerwise offload. The current TeaCache signal reads block zero's GEN weights before its forward. Layerwise offload loads that block synchronously at setup, then prefetches it asynchronously on a separate stream between runs. The early TeaCache read has not been validated with that prefetch. HSDP and distributed layerwise offload also require a shared skip decision across weight-sharding groups.
+
+SenseNova U1's default threshold of 0.2 is not quality validated. A one-MI300X comparison at 768×768, 50 steps and CFG scale 4 found mean SSIM 0.498 and LPIPS 0.443 against uncached output across ten prompt and seed pairs, with visible blur in one inspected image. A diagnostic request reused the cache in 90 of 100 branch calls. The inherited coefficients or threshold need further calibration before recommending this setting. U1.5 has not been checked with real weights.
 
 ---
 

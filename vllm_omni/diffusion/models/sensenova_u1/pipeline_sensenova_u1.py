@@ -494,6 +494,8 @@ class SenseNovaU1Pipeline(
         # Cache-DiT and TeaCache hook the decoder; the language-model wrapper
         # still runs first so its CPU-offload hook can load the weights.
         self.transformer = self.language_model.model
+        # Only paired CFG calls produce a TeaCache signal. Unpaired
+        # calls return modulated_input=None and do not advance branch parity.
         self.transformer.do_true_cfg = True
 
         # Vision model (understanding branch)

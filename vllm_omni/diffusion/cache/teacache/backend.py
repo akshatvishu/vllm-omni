@@ -56,7 +56,10 @@ def enable_hunyuan_image3_teacache(pipeline: Any, config: DiffusionCacheConfig) 
         transformer_type="HunyuanImage3Pipeline",
         rel_l1_thresh=config.rel_l1_thresh,
         coefficients=config.coefficients,
+        num_warmup_steps=0 if config.num_warmup_steps is None else config.num_warmup_steps,
     )
+    if teacache_config.num_warmup_steps:
+        raise NotImplementedError("HunyuanImage3's native TeaCache loop does not support num_warmup_steps")
     pipeline._tea_cache_config = teacache_config
 
     logger.info(f"TeaCache enabled for HunyuanImage3 with rel_l1_thresh={teacache_config.rel_l1_thresh}")
@@ -152,13 +155,8 @@ class TeaCacheBackend(CacheBackend):
             # Access parameters via attribute access: config.rel_l1_thresh
             try:
                 teacache_config = _make_teacache_config(transformer, transformer_type, self.config)
-            except Exception as e:
-                logger.error(f"Failed to create TeaCacheConfig: {e}")
-                raise ValueError(
-                    f"Invalid TeaCache configuration: {e}. "
-                    f"Expected keys: rel_l1_thresh, coefficients (optional). "
-                    f"transformer_type is automatically extracted from pipeline.transformer.__class__.__name__."
-                )
+            except (ValueError, KeyError) as e:
+                raise ValueError(f"Invalid TeaCache configuration for {transformer_type}: {e}") from e
 
             # Apply hook to transformer
             apply_teacache_hook(transformer, teacache_config)
