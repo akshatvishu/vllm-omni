@@ -215,13 +215,34 @@ def test_cfg_interval_bypass_does_not_replace_batched_residual():
     args = _args(3)
     hook = _install(model)
     first = model(**args)
-    bypass = dict(args, cfg_text_scale=1.0, cfg_img_scale=1.0)
+    bypass = dict(args, cfg_text_scale=1.0, cfg_img_scale=1.0, cfg_vae_lengths=[3])
     assert model.preprocess(**bypass).modulated_input is None
     model(**bypass)
     again = model(**args)
     torch.testing.assert_close(again, first)
     assert len(model.language_model.calls) == 2
     assert hook._forward_cnt == 2
+
+
+@pytest.mark.parametrize("cache_enabled", [False, True])
+@torch.no_grad()
+def test_invalid_cfg_scales_fail_before_computation_and_preserve_cache(cache_enabled):
+    model = _model()
+    args = _args(2)
+    hook = _install(model) if cache_enabled else None
+    expected = model(**args)
+
+    with patch.object(model.language_model, "forward", wraps=model.language_model.forward) as forward:
+        with pytest.raises(ValueError, match="cfg_text_scales must be provided with cfg_vae_lengths"):
+            model(**dict(args, cfg_vae_lengths=[3]))
+        forward.assert_not_called()
+
+    assert len(model.language_model.calls) == 1
+    if hook is not None:
+        assert hook._forward_cnt == 1
+        torch.testing.assert_close(model(**args), expected)
+        assert hook._forward_cnt == 2
+        assert len(model.language_model.calls) == 1
 
 
 @torch.no_grad()
@@ -287,9 +308,10 @@ class _CPUAttention(nn.Module):
 
 
 @torch.no_grad()
-def test_real_decoder_forward_and_final_norm_remain_inside_cache_boundary():
+def test_real_decoder_forward_and_final_norm_remain_inside_cache_boundary(monkeypatch):
     # Keep real decoder/model forwards, normalization and RoPE. Substitute CPU
     # attention and dense layers for the production Triton/tensor-parallel ops.
+    monkeypatch.setattr(MoTRMSNorm, "forward", MoTRMSNorm.forward_native)
     torch.manual_seed(103)
     layer = Qwen2MoTDecoderLayer.__new__(Qwen2MoTDecoderLayer)
     nn.Module.__init__(layer)

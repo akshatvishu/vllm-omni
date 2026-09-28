@@ -1256,6 +1256,7 @@ def get_flattened_position_ids_extrapolate(img_h, img_w, patch_size, max_num_pat
 
 @dataclass
 class BagelState:
+    use_cfg: bool
     packed_vae_token_indexes: torch.Tensor
     packed_text_indexes: torch.Tensor
     packed_position_ids: torch.Tensor
@@ -2498,6 +2499,13 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
         *,
         skip_modulated_input: bool = False,
     ) -> ForwardState[BagelState]:
+        has_cfg_branches = cfg_branch_pids is not None and cfg_branch_caches is not None
+        use_cfg = has_cfg_branches and (
+            cfg_text_scale > 1.0 or (cfg_text_scales is not None and any(scale > 1.0 for scale in cfg_text_scales))
+        )
+        if use_cfg and cfg_vae_lengths is not None and cfg_text_scales is None:
+            raise ValueError("cfg_text_scales must be provided with cfg_vae_lengths.")
+
         packed_text_embedding = self.language_model.forward(
             packed_text_ids=packed_text_ids,
             return_embeddings_only=True,
@@ -2513,15 +2521,10 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
             x_t = x_t.to(packed_sequence.dtype)
         packed_sequence[packed_vae_token_indexes] = x_t
 
-        has_cfg_branches = cfg_branch_pids is not None and cfg_branch_caches is not None
-        use_cfg = has_cfg_branches and (
-            cfg_text_scale > 1.0 or (cfg_text_scales is not None and any(scale > 1.0 for scale in cfg_text_scales))
-        )
         # The signal is identical across CFG branches; keep one copy.
         # Outside the CFG interval, bypass the differently sized cached residual.
-        modulated_input = None
-        if not skip_modulated_input and not (has_cfg_branches and not use_cfg):
-            modulated_input = packed_sequence
+        outside_cfg_window = has_cfg_branches and not use_cfg
+        modulated_input = None if skip_modulated_input or outside_cfg_window else packed_sequence
         vae_per_branch = packed_vae_token_indexes.shape[0]
         if use_cfg:
             assert cfg_branch_pids is not None
@@ -2541,6 +2544,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
             encoder_hidden_states=None,
             temb=None,
             intermediates=BagelState(
+                use_cfg=use_cfg,
                 packed_vae_token_indexes=packed_vae_token_indexes,
                 packed_text_indexes=packed_text_indexes,
                 packed_position_ids=packed_position_ids,
@@ -2568,9 +2572,11 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
                 "packed_text_indexes": state.packed_text_indexes,
             }
         # Merging prefix caches copies their tensors; do it only on compute steps.
-        past_key_values = (
-            NaiveCache.merge(state.cfg_branch_caches) if state.cfg_branch_caches is not None else state.past_key_values
-        )
+        if state.use_cfg:
+            assert state.cfg_branch_caches is not None
+            past_key_values = NaiveCache.merge(state.cfg_branch_caches)
+        else:
+            past_key_values = state.past_key_values
         output = self.language_model.forward(
             packed_query_sequence=ctx.hidden_states,
             query_lens=state.packed_seqlens,
@@ -2586,7 +2592,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
     def postprocess(self, ctx: ForwardState[BagelState]) -> torch.Tensor:
         state = ctx.intermediates
         v_t = self.llm2vae(ctx.hidden_states)[state.packed_vae_token_indexes]
-        if state.cfg_branch_caches is None:
+        if not state.use_cfg:
             return v_t
 
         branch_v_ts = v_t.split(state.vae_per_branch)
@@ -2602,8 +2608,7 @@ class Bagel(CFGParallelMixin, nn.Module, SupportsTeaCache):
                 state.cfg_renorm_type,
                 state.cfg_renorm_min,
             )
-        if state.cfg_text_scales is None:
-            raise ValueError("cfg_text_scales must be provided with cfg_vae_lengths.")
+        assert state.cfg_text_scales is not None
         cfg_img_scales = state.cfg_img_scales
         if cfg_img_scales is None:
             cfg_img_scales = [state.cfg_img_scale] * len(state.cfg_vae_lengths)
