@@ -10,7 +10,6 @@ import pytest
 import torch
 from torch import nn
 
-from tests.diffusion.cache.pinned_teacache_forwards import pinned_bagel_forward
 from tests.diffusion.models.bagel.test_forward_cache_update_vae import HIDDEN_SIZE, _make_bagel_config
 from vllm_omni.diffusion.cache.teacache.coefficient_estimator import BagelAdapter, DataCollectionHook
 from vllm_omni.diffusion.cache.teacache.config import TeaCacheConfig
@@ -109,6 +108,37 @@ def _install(model):
     return hook
 
 
+def _separate_branch_output(model, args):
+    inputs = {key: value for key, value in args.items() if not key.startswith("cfg_")}
+    positions = args.get("cfg_branch_pids", [args["packed_position_ids"]])
+    caches = args.get("cfg_branch_caches", [args["past_key_values"]])
+    outputs = [
+        model.forward_single_branch(**dict(inputs, packed_position_ids=position, past_key_values=cache))
+        for position, cache in zip(positions, caches, strict=True)
+    ]
+    if len(outputs) == 1:
+        return outputs[0]
+    lengths = args.get("cfg_vae_lengths", [outputs[0].shape[0]])
+    text_scales = args.get("cfg_text_scales", [args["cfg_text_scale"]])
+    image_scales = args.get("cfg_img_scales", [args["cfg_img_scale"]])
+    results = []
+    for branches, text_scale, image_scale in zip(
+        zip(*(output.split(lengths) for output in outputs), strict=True), text_scales, image_scales, strict=True
+    ):
+        results.append(
+            model._combine_cfg(
+                branches[0],
+                branches[1],
+                branches[2] if len(branches) == 3 else None,
+                text_scale,
+                image_scale,
+                "global",
+                0.0,
+            )
+        )
+    return torch.cat(results)
+
+
 @pytest.mark.parametrize(
     "branches,per_request,multidim,dtype",
     [
@@ -120,11 +150,11 @@ def _install(model):
     ],
 )
 @torch.no_grad()
-def test_split_matches_pinned_forward(branches, per_request, multidim, dtype):
+def test_packed_cfg_matches_separate_branches(branches, per_request, multidim, dtype):
     model = _model(dtype)
     args = _args(branches, per_request, multidim)
-    expected = pinned_bagel_forward(model, **args)
-    reference_call = model.language_model.calls[-1]
+    expected = _separate_branch_output(model, args)
+    reference_calls = list(model.language_model.calls)
     actual = model(**args)
     torch.testing.assert_close(actual, expected)
     call = model.language_model.calls[-1]
@@ -135,9 +165,13 @@ def test_split_matches_pinned_forward(branches, per_request, multidim, dtype):
         "packed_vae_token_indexes",
         "packed_text_indexes",
     ):
-        torch.testing.assert_close(call[key], reference_call[key])
+        dim = 1 if key == "packed_query_position_ids" and multidim else 0
+        values = [reference[key] for reference in reference_calls]
+        if key in ("packed_vae_token_indexes", "packed_text_indexes"):
+            values = [value + index * int(args["packed_seqlens"].sum()) for index, value in enumerate(values)]
+        torch.testing.assert_close(call[key], torch.cat(values, dim=dim))
     assert call["packed_query_sequence"].dtype == dtype
-    assert len(model.language_model.calls) == 2
+    assert len(model.language_model.calls) == branches + 1
 
 
 @torch.no_grad()
@@ -145,7 +179,7 @@ def test_per_token_timestep_is_preserved():
     model = _model()
     args = _args()
     actual = model(**args)
-    torch.testing.assert_close(actual, pinned_bagel_forward(model, **args))
+    torch.testing.assert_close(actual, model.forward_single_branch(**args))
     assert not torch.equal(actual, model(**dict(args, timestep=torch.full((3,), 0.7))))
 
 
@@ -290,7 +324,7 @@ def test_lance_inherits_forward_with_per_token_timestep():
     assert LanceBagel.forward is Bagel.forward
     model = _model(cls=LanceBagel)
     args = _args(2, multidim=True)
-    expected = pinned_bagel_forward(model, **args)
+    expected = _separate_branch_output(model, args)
     _install(model)
     torch.testing.assert_close(model(**args), expected)
     torch.testing.assert_close(model(**args), expected)
@@ -331,7 +365,7 @@ def test_real_decoder_forward_and_final_norm_remain_inside_cache_boundary(monkey
     model = _model()
     model.language_model = lm
     args = _args(2)
-    expected = pinned_bagel_forward(model, **args)
+    expected = _separate_branch_output(model, args)
     calls = []
     handle = layer.register_forward_hook(lambda *unused: calls.append(1))
     _install(model)

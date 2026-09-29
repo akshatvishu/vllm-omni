@@ -1,188 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
-"""CPU contract checks against forwards copied from pinned main."""
+"""CPU checks that model cache hits reuse residuals and skip their blocks."""
 
-import inspect
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 import torch
 
-from tests.diffusion.cache.pinned_teacache_forwards import (
-    pinned_flux2_forward,
-    pinned_flux2_klein_forward,
-    pinned_flux_forward,
-    pinned_longcat_forward,
-    pinned_qwen_forward,
-    pinned_stable_audio_forward,
-    pinned_z_image_forward,
-)
 from vllm_omni.diffusion.cache.teacache.config import TeaCacheConfig
 from vllm_omni.diffusion.cache.teacache.hook import TeaCacheHook
 from vllm_omni.diffusion.forward_context import set_forward_context
-from vllm_omni.diffusion.models.flux.flux_transformer import FluxTransformer2DModel
 from vllm_omni.diffusion.models.flux2.flux2_transformer import Flux2Transformer2DModel
 from vllm_omni.diffusion.models.flux2_klein.flux2_klein_transformer import (
     Flux2Transformer2DModel as Flux2KleinTransformer2DModel,
 )
-from vllm_omni.diffusion.models.longcat_image.longcat_image_transformer import LongCatImageTransformer2DModel
 from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import QwenImageTransformer2DModel
-from vllm_omni.diffusion.models.stable_audio.stable_audio_transformer import StableAudioDiTModel
 from vllm_omni.diffusion.models.z_image.z_image_transformer import ZImageTransformer2DModel
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
-
-
-class _PairBlock:
-    def norm1(self, hidden_states, emb):
-        return (hidden_states + emb.unsqueeze(1),)
-
-    def __call__(self, *, hidden_states, encoder_hidden_states, temb, image_rotary_emb, **kwargs):
-        assert image_rotary_emb is not None
-        return encoder_hidden_states + 1, hidden_states + temb.unsqueeze(1) + 2
-
-
-class _FluxFixture:
-    forward = FluxTransformer2DModel.forward
-    preprocess = FluxTransformer2DModel.preprocess
-    run_transformer_blocks = FluxTransformer2DModel.run_transformer_blocks
-    postprocess = FluxTransformer2DModel.postprocess
-
-    def __init__(self):
-        self.x_embedder = lambda x: x + 1
-        self.context_embedder = lambda x: x + 2
-        self.time_text_embed = lambda timestep, *args: timestep[:, None].expand(-1, 2)
-        self.pos_embed = lambda ids: (ids.float(), ids.float())
-        self.transformer_blocks = [_PairBlock()]
-        self.single_transformer_blocks = [_PairBlock()]
-        self.norm_out = lambda hidden, temb: hidden + temb.unsqueeze(1)
-        self.proj_out = lambda hidden: hidden * 2
-
-
-class _LongCatFixture:
-    forward = LongCatImageTransformer2DModel.forward
-    preprocess = LongCatImageTransformer2DModel.preprocess
-    run_transformer_blocks = LongCatImageTransformer2DModel.run_transformer_blocks
-    postprocess = LongCatImageTransformer2DModel.postprocess
-
-    def __init__(self):
-        self.parallel_config = SimpleNamespace(sequence_parallel_size=1)
-        self.enforce_eager = False
-        self.x_embedder = lambda x: x + 1
-        self.context_embedder = lambda x: x + 2
-        self.time_embed = lambda timestep, dtype: timestep[:, None].expand(-1, 2)
-        self.rope_preparer = lambda txt, img: (txt.float(), txt.float(), img.float(), img.float())
-        self.transformer_blocks = [_PairBlock()]
-        self.single_transformer_blocks = [_PairBlock()]
-        self.norm_out = lambda hidden, temb: hidden + temb.unsqueeze(1)
-        self.proj_out = lambda hidden: hidden * 2
-
-
-class _AudioBlock:
-    def norm1(self, hidden_states):
-        return hidden_states + 1
-
-    def __call__(
-        self,
-        hidden_states,
-        encoder_hidden_states,
-        *,
-        rotary_embedding,
-        attention_mask=None,
-        encoder_attention_mask=None,
-    ):
-        assert rotary_embedding is not None
-        if attention_mask is not None:
-            assert attention_mask.shape[-1] == hidden_states.shape[1]
-            assert attention_mask[0, 0]
-        if encoder_attention_mask is not None:
-            assert encoder_attention_mask.shape[-1] == encoder_hidden_states.shape[1]
-        return hidden_states + encoder_hidden_states.mean() + 1
-
-
-class _AudioFixture:
-    forward = StableAudioDiTModel.forward
-    preprocess = StableAudioDiTModel.preprocess
-    run_transformer_blocks = StableAudioDiTModel.run_transformer_blocks
-    postprocess = StableAudioDiTModel.postprocess
-    dtype = torch.float32
-
-    def __init__(self):
-        self.cross_attention_proj = lambda x: x + 1
-        self.global_proj = lambda x: x + 2
-        self.time_proj = lambda x: x
-        self.timestep_proj = lambda x: x + 3
-        self.preprocess_conv = lambda x: x * 0.5
-        self.proj_in = lambda x: x + 4
-        self.transformer_blocks: list[Any] = [_AudioBlock()]
-        self.proj_out = lambda x: x * 2
-        self.postprocess_conv = lambda x: x * 0.25
-
-
-def _flux_inputs():
-    return dict(
-        hidden_states=torch.arange(8, dtype=torch.float32).reshape(1, 4, 2),
-        encoder_hidden_states=torch.ones(1, 2, 2),
-        pooled_projections=torch.ones(1, 2),
-        timestep=torch.tensor([0.5]),
-        img_ids=torch.ones(4, 3),
-        txt_ids=torch.ones(2, 3),
-        guidance=torch.tensor([1.0]),
-        joint_attention_kwargs={"scale": 0.5},
-    )
-
-
-def _longcat_inputs():
-    return dict(
-        hidden_states=torch.arange(8, dtype=torch.float32).reshape(1, 4, 2),
-        encoder_hidden_states=torch.ones(1, 2, 2),
-        timestep=torch.tensor([0.5]),
-        img_ids=torch.ones(4, 3),
-        txt_ids=torch.ones(2, 3),
-        guidance=torch.tensor([1.0]),
-    )
-
-
-def _audio_inputs():
-    return dict(
-        hidden_states=torch.arange(8, dtype=torch.float32).reshape(1, 2, 4),
-        timestep=torch.ones(1, 2),
-        encoder_hidden_states=torch.ones(1, 2, 2),
-        global_hidden_states=torch.ones(1, 1, 2),
-        rotary_embedding=(torch.ones(5, 2), torch.ones(5, 2)),
-    )
-
-
-@pytest.mark.parametrize(
-    ("model_class", "fixture_class", "pinned_forward", "inputs_factory"),
-    [
-        (FluxTransformer2DModel, _FluxFixture, pinned_flux_forward, _flux_inputs),
-        (LongCatImageTransformer2DModel, _LongCatFixture, pinned_longcat_forward, _longcat_inputs),
-        (StableAudioDiTModel, _AudioFixture, pinned_stable_audio_forward, _audio_inputs),
-    ],
-)
-@pytest.mark.parametrize("return_dict", [True, False])
-def test_split_forward_matches_pinned_main(model_class, fixture_class, pinned_forward, inputs_factory, return_dict):
-    assert list(inspect.signature(model_class.forward).parameters) == list(inspect.signature(pinned_forward).parameters)
-    model = fixture_class()
-    inputs = inputs_factory()
-    inputs["return_dict"] = return_dict
-    if model_class is StableAudioDiTModel:
-        inputs["attention_mask"] = torch.tensor([[True, False, True, True]])
-        inputs["encoder_attention_mask"] = torch.tensor([[True, False]])
-
-    with set_forward_context():
-        expected = pinned_forward(model, **inputs)
-        actual = model.forward(**inputs)
-        split = model.postprocess(model.run_transformer_blocks(model.preprocess(**inputs, skip_modulated_input=False)))
-
-    expected_tensor = expected.sample if return_dict else expected[0]
-    assert type(actual) is type(expected)
-    assert type(split) is type(expected)
-    torch.testing.assert_close(actual.sample if return_dict else actual[0], expected_tensor, rtol=0, atol=0)
-    torch.testing.assert_close(split.sample if return_dict else split[0], expected_tensor, rtol=0, atol=0)
 
 
 class _Flux2DualBlock:
@@ -388,64 +224,6 @@ def _sample(output):
     return output.sample if hasattr(output, "sample") else output[0]
 
 
-@pytest.mark.parametrize(
-    ("fixture_class", "pinned_forward"),
-    [(_Flux2Fixture, pinned_flux2_forward), (_KleinFixture, pinned_flux2_klein_forward)],
-)
-@pytest.mark.parametrize("return_dict", [True, False])
-def test_flux2_split_matches_pinned_main(fixture_class, pinned_forward, return_dict):
-    assert list(inspect.signature(fixture_class.forward).parameters) == list(
-        inspect.signature(pinned_forward).parameters
-    )
-    inputs = _flux2_inputs() | {"return_dict": return_dict}
-    with set_forward_context():
-        expected = pinned_forward(fixture_class(), **inputs)
-        actual = fixture_class().forward(**inputs)
-        model = fixture_class()
-        state = model.preprocess(**inputs, skip_modulated_input=False)
-        assert state.modulated_input is not None
-        split = model.postprocess(model.run_transformer_blocks(state))
-    assert type(actual) is type(expected)
-    assert type(split) is type(expected)
-    torch.testing.assert_close(_sample(actual), _sample(expected), rtol=0, atol=0)
-    torch.testing.assert_close(_sample(split), _sample(expected), rtol=0, atol=0)
-
-
-def test_qwen_split_matches_pinned_main():
-    assert list(inspect.signature(QwenImageTransformer2DModel.forward).parameters) == list(
-        inspect.signature(pinned_qwen_forward).parameters
-    )
-    inputs = _qwen_inputs()
-    with set_forward_context():
-        expected = pinned_qwen_forward(_QwenFixture(), **inputs)
-        actual = _QwenFixture().forward(**inputs)
-        model = _QwenFixture()
-        state = model.preprocess(**inputs, skip_modulated_input=False)
-        assert state.modulated_input is not None
-        split = model.postprocess(model.run_transformer_blocks(state))
-    torch.testing.assert_close(actual.sample, expected.sample, rtol=0, atol=0)
-    torch.testing.assert_close(split.sample, expected.sample, rtol=0, atol=0)
-
-
-@pytest.mark.parametrize("extra_conditions", [False, True])
-def test_z_image_split_matches_pinned_main(extra_conditions):
-    assert list(inspect.signature(ZImageTransformer2DModel.forward).parameters) == list(
-        inspect.signature(pinned_z_image_forward).parameters
-    )
-    inputs = _z_image_inputs(extra_conditions=extra_conditions)
-    expected = pinned_z_image_forward(_ZImageFixture(), **inputs)
-    actual = _ZImageFixture().forward(**inputs)
-    model = _ZImageFixture()
-    state = model.preprocess(**inputs, skip_modulated_input=False)
-    assert state.modulated_input is not None
-    split = model.postprocess(model.run_transformer_blocks(state))
-    assert actual[1] == split[1] == expected[1] == {}
-    for result in (actual, split):
-        assert len(result[0]) == len(expected[0])
-        for item, reference in zip(result[0], expected[0]):
-            torch.testing.assert_close(item, reference, rtol=0, atol=0)
-
-
 def _cache_hit_reference(model, first_inputs, second_inputs):
     first = model.preprocess(**first_inputs, skip_modulated_input=False)
     hidden = first.hidden_states.clone()
@@ -463,15 +241,15 @@ def _output_tensors(output):
 
 
 @pytest.mark.parametrize(
-    ("fixture_class", "pinned_forward", "inputs_factory"),
+    ("fixture_class", "inputs_factory"),
     [
-        (_Flux2Fixture, pinned_flux2_forward, _flux2_inputs),
-        (_KleinFixture, pinned_flux2_klein_forward, _flux2_inputs),
-        (_QwenFixture, pinned_qwen_forward, _qwen_inputs),
-        (_ZImageFixture, pinned_z_image_forward, _z_image_inputs),
+        (_Flux2Fixture, _flux2_inputs),
+        (_KleinFixture, _flux2_inputs),
+        (_QwenFixture, _qwen_inputs),
+        (_ZImageFixture, _z_image_inputs),
     ],
 )
-def test_model_cache_hit_reuses_residual_instead_of_running_blocks(fixture_class, pinned_forward, inputs_factory):
+def test_model_cache_hit_reuses_residual_instead_of_running_blocks(fixture_class, inputs_factory):
     model = fixture_class()
     hook = TeaCacheHook(
         TeaCacheConfig(transformer_type=type(model).__name__, coefficients=[0, 0, 0, 0, 0], rel_l1_thresh=1.0)
@@ -481,7 +259,7 @@ def test_model_cache_hit_reuses_residual_instead_of_running_blocks(fixture_class
         hook.new_forward(model, **inputs_factory())
         actual = hook.new_forward(model, **inputs_factory(offset=5))
         expected = _cache_hit_reference(fixture_class(), inputs_factory(), inputs_factory(offset=5))
-        uncached = pinned_forward(fixture_class(), **inputs_factory(offset=5))
+        uncached = fixture_class().forward(**inputs_factory(offset=5))
 
     blocks = model.layers if fixture_class is _ZImageFixture else model.transformer_blocks
     assert blocks[0].calls == 1

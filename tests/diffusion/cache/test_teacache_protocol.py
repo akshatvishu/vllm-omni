@@ -420,7 +420,7 @@ EQUIVALENCE_MODELS = {
     "StableAudio": _make_stable_audio,
     "LongCat": _make_longcat,
     "Qwen": _make_qwen,
-    # ZImage is covered by the CPU fixture in test_teacache_pinned_forwards.py.
+    # ZImage is covered by the CPU fixture in test_teacache_model_cache_hits.py.
 }
 
 
