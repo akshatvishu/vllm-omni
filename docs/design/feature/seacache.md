@@ -1,33 +1,90 @@
 # SeaCache forward protocol
 
-SeaCache currently supports the Cosmos3 pipelines, including the inherited Edge transformer implementation. Enable it with `cache_backend="sea_cache"`. The pipeline supplies the scheduler step, exact sigma and total step count through callbacks, registers the active branch tuple through `hook.begin_step(branches)` before each velocity evaluation, and names each CFG branch through `hook.cache_context(name)`.
+SeaCache (Spectral-Evolution-Aware Cache) is a training-free caching method for diffusion models. It applies a filter designed to preserve content while suppressing noise, then compares the filtered inputs to decide when to reuse previous computations. See the [SeaCache repository](https://github.com/jiwoogit/SeaCache) for details.
+
+In Cosmos3, the filter operates on the target latent, the model's internal representation of the image or video being generated. It uses the scheduler's noise level for the current step. For calls eligible for caching, the hook compares the accumulated change between filtered latents with a threshold. The first and last steps always compute, as do calls without residual history or after the configured limit on consecutive skips.
+
+On a skipped step, the Cosmos3 hook estimates a residual from previously computed steps and adds it to the current block input. A residual is the difference between the block output and its input. The default uses linear extrapolation when enough history is available; otherwise it reuses the latest residual. SeaCache does not require fitted polynomial coefficients for the cache decision.
+
+The reference implementations for Wan2.1, HunyuanVideo and FLUX filter the first block's modulated input and reuse a previous residual. Cosmos3 instead filters the target latent and supports residual extrapolation. The reference repository's quality and overhead measurements do not establish those results for Cosmos3.
+
+Caching can change the generated output, so compare it with uncached generation for your workload. SeaCache is implemented for the Cosmos3 pipelines, including Edge through its inherited transformer methods. GPU measurements cover Nano only. Enable it with `cache_backend="sea_cache"`.
+
+## Pipeline setup
+
+The pipeline tells the hook which denoising step is running and which classifier-free guidance (CFG) branches will run. A branch is a separate model call, such as the conditional or unconditional call used for CFG.
+
+Before running the branches:
+
+1. Update the values returned by the hook's callbacks for the current step index, scheduler noise level (`sigma`) and total step count.
+2. Call `hook.begin_step(branches)` with a tuple containing the active branch names. Do this before each group of CFG branch forwards, including repeated evaluations within the same denoising step.
+3. Run each branch inside `hook.cache_context(name)` so the hook uses that branch's cached residuals.
+
+When CFG runs across multiple ranks, every rank registers the same tuple of active branches. A rank must register the tuple even if it has no branch to run in that step.
+
+The hook checks registration by step index. It cannot detect an omitted `begin_step` call when the same index is reused, so the pipeline must call it before every group of branch forwards.
 
 ## Model contract
 
-A transformer implements `SupportsSeaCache` from `vllm_omni.diffusion.cache.seacache.protocol`. The protocol extends `SupportsDecomposedForward` with `get_seacache_inputs(ctx) -> SeaCacheInputs`; it does not require TeaCache coefficients or defaults.
+A transformer implements `SupportsSeaCache` from `vllm_omni.diffusion.cache.seacache.protocol`. This interface includes the methods from `SupportsDecomposedForward` and adds `get_seacache_inputs(ctx) -> SeaCacheInputs`. It does not require TeaCache coefficients or defaults.
 
-The uncached forward and SeaCache use the same model methods:
+Cached and uncached execution use the same model methods:
 
-1. `preprocess(..., skip_modulated_input=True)` creates the packed execution tensor and model-owned intermediates.
-2. `run_transformer_blocks(ctx)` returns the state after block execution. It may replace the state or mutate its hidden tensor.
-3. `postprocess(ctx)` produces the public model output. Its required intermediates must already exist after preprocess, because cache hits skip the blocks.
+1. `preprocess(..., skip_modulated_input=True)` prepares the block input and the other values the model needs, such as masks and positions.
+2. `run_transformer_blocks(ctx)` runs the blocks and returns the updated state. It may return a new state object or change the existing hidden-state tensor in place.
+3. `postprocess(ctx)` returns the model output. Everything it needs must be available after `preprocess`, because the blocks do not run on a cache hit.
 
-`get_seacache_inputs` returns the original five-dimensional BCTHW target tensor in `latent` and an optional noisy-frame mask. Cosmos3 supplies only the noisy target, retaining any clean prefix frames within that target. Separate control hints remain in model execution but do not enter the indicator. The packed execution tensor may also contain action and sound tokens; it is distinct from the indicator inputs. `modulated_input=None` does not bypass SeaCache: that field belongs to the TeaCache decision contract.
+`get_seacache_inputs` returns the unfiltered target in `latent`, with shape `(batch, channels, frames, height, width)`. It can also return a mask identifying which frames contain noise.
 
-SeaCache no longer accepts extractor callbacks or reads `CacheContext.extra_states`. Hook installation rejects models without the protocol and subclasses whose forward overrides the inherited decomposition.
+The hook filters the target latent to produce the **indicator**, the tensor it compares between steps. Cosmos3 includes any clean prefix frames in the target but excludes separate control hints from the indicator. The block input may also contain controls, action tokens and sound tokens, so it can differ from the indicator.
 
-## Residual ownership and synchronization
+Setting `modulated_input=None` only disables TeaCache for that call. It does not disable SeaCache.
 
-On a compute step, the hook snapshots the execution input before running blocks. It records `output - input_snapshot` before postprocessing, so block mutation and output conversion cannot corrupt the residual. Cosmos3's execution boundary includes the final GEN norm. A cache hit adds the extrapolated residual to the current packed input and calls postprocess.
+Hook installation rejects a model that does not implement the required methods. It also rejects a subclass that overrides `forward` while inheriting `preprocess` from a parent class, because the hook would skip the subclass's changes. SeaCache does not use extractor callbacks or read `CacheContext.extra_states`.
 
-The hook owns residual history and branch state. Parameter-sharding, sequence-parallel and distributed-offload decision reductions remain in the hook. Peers take the maximum of skip (0), compute (1) and bypass (2); bypass runs uncached and clears local histories. Residual shape, device and dtype are checked before this agreement, so a peer cannot fall back to block execution after a shared skip decision. Offload groups are discovered through the model's declared block attributes using the shared offloader helper.
+## Storing and reusing residuals
 
-Calls with autograd enabled, missing branch context, missing or invalid scheduler metadata, conditioning-only vision or invalid indicators vote to bypass caching. A forward also votes to bypass if its scheduler step was not registered with `begin_step`. If metadata is unavailable or invalid at `begin_step`, the hook warns once and resets the evaluation history. The subsequent forwards still join the bypass vote and run uncached. All CFG ranks register the same global branch tuple, including idle ranks. Changes in active branches, nonconsecutive or repeated solver evaluations, and branch exceptions reset histories. Residuals remain separate for each named branch; no vote is taken across CFG branches.
+On a compute step, the hook copies the block input before running the blocks. It then stores `block_output - input_copy` before calling `postprocess`. Copying the input preserves its original value even if a block changes it in place.
+
+For Cosmos3, the cached block output includes the final GEN normalization. On a cache hit, the hook estimates the residual from its saved history, adds it to the current block input and calls `postprocess`.
+
+The hook keeps separate residuals for each named CFG branch. It clears its local branch histories when the active branch names change, steps repeat or run out of sequence, or a branch raises an exception. Repeating an evaluation within one denoising step therefore starts a new history.
+
+## Keeping distributed ranks in agreement
+
+Ranks that share block computation must agree on whether to run the blocks. Otherwise, one rank could wait for communication from another rank that skipped them. The hook coordinates decisions across parameter-sharding, sequence-parallel and distributed-offload groups.
+
+Each rank chooses one of the following decisions. The group takes the highest value:
+
+| Decision | Value | Action |
+| --- | ---: | --- |
+| Skip | 0 | Reuse an estimated residual. |
+| Compute | 1 | Run the blocks and record a new residual. |
+| Bypass | 2 | Clear local histories and run without caching. |
+
+Within each reduction group, a compute or bypass decision takes precedence over a skip. Before the reduction, the hook checks cached residual shape, device and dtype. An incompatible residual clears that branch's history and forces computation.
+
+The hook uses the model's declared block attributes and the shared offloader helper to find distributed-offload groups. It does not combine decisions across the CFG group itself.
+
+## Calls that run without caching
+
+A rank chooses bypass when:
+
+- Gradient tracking is enabled.
+- No CFG branch name has been set with `cache_context`.
+- The scheduler information is missing or invalid.
+- The supplied frame mask marks no noisy vision frames.
+- The target latent cannot be filtered, for example because it has an unsupported shape.
+- The current step was not registered with `begin_step`.
+
+If scheduler information is missing or invalid at `begin_step`, the hook logs a warning once per distinct message and clears the saved history. Later forwards still take part in the group decision, with caching disabled until a valid step is registered.
+
+An incompatible indicator history or a nonfinite comparison distance forces computation rather than bypass. Errors from model preprocessing, block execution or postprocessing still propagate to the caller.
 
 ## Scope and validation
 
-This implementation adapts [#7939](https://github.com/vllm-project/vllm-omni/pull/7939) at `b9cadf2b47c40170558e59083f9dbcaaa9bdc4d7` to the forward protocol. It keeps the typed inputs and residual snapshot introduced by the migration. The target-only indicator and coordinated decisions intentionally change the old Transfer cache behavior; the PR's GPU quality results have not been reproduced on this protocol branch.
+Measurements on one MI300X cover Cosmos3 Nano text-to-video and Transfer with one or two controls, using sequential CFG. At 1280×720, 93 frames and 35 steps, text-to-video requests completed 1.81× faster with the default SeaCache settings. That ratio uses total request time, averaged over two repeats for each of two prompts. Cached outputs showed visible changes in position and motion. Super, Edge, image generation and distributed GPU execution remain unmeasured. The cost of copying block inputs has not been measured separately.
 
-The image implementation proposed in [#6975](https://github.com/vllm-project/vllm-omni/pull/6975) uses a two-dimensional token grid, a leading grid-token count and model-derived sigma. Those fields are not added without an image-model consumer; extending SeaCache to those models requires reconciling their indicator representation and metadata source.
+The current interface expects a five-dimensional target latent, including for Cosmos3 image generation. Models that store image latents as a sequence of tokens need an adapter or a different input interface; the hook cannot filter that layout directly.
 
-CPU tests cover branch separation, reset, fallbacks, protocol rejection, inherited methods, residual mutation, offload group discovery and the Cosmos3 execution boundary. GPU output quality, input-snapshot cost and distributed GPU compatibility require separate measurements; CPU checks do not establish those results.
+CPU tests check that branches keep separate state, histories reset when needed and ineligible calls run uncached. They also cover model interface checks, inherited methods, blocks that modify inputs in place, discovery of offload groups and the cached block range in Cosmos3. CPU tests do not establish output quality or GPU performance.

@@ -14,9 +14,11 @@
 
 ## Overview
 
-TeaCache accelerates diffusion model inference by caching transformer computations when consecutive timesteps are similar, providing **1.5x-2.0x speedup** with minimal quality loss. It dynamically decides whether to reuse cached outputs based on input similarity, making it ideal for production deployments where inference speed matters without sacrificing generation quality.
+TeaCache can reduce diffusion inference time by reusing transformer block residuals across denoising steps. A residual is the difference between the block output and its input. TeaCache compares a model-provided input signal between steps to decide when to run the blocks again.
 
-See supported models list in [Supported Models](../../diffusion_features.md#supported-models).
+Caching can change the generated output. Speed and output quality depend on the model, threshold and generation settings; compare cached and uncached output for your workload.
+
+See [Supported Models](../../diffusion_features.md#supported-models) for availability and [Model Notes](#model-notes) for restrictions.
 
 ---
 
@@ -76,7 +78,7 @@ omni = Omni(
 
 ### Offline Inference
 
-Use python script under `examples/offline_inference/text_to_image/` or `examples/offline_inference/image_to_image/` with CLI:
+Pass `--cache-backend tea_cache` to the text-to-image or image-editing example:
 
 ```bash
 # Text-to-image example
@@ -111,58 +113,45 @@ vllm serve Qwen/Qwen-Image --omni --port 8091 \
 
 ## Configuration Parameters
 
-In `OmniDiffusionConfig`
+Set these options in `cache_config` for offline inference or `--cache-config` for serving.
 
 | Parameter | Type | Default | Description |
 | ----------- | ------ | --------- | ------------- |
-| `rel_l1_thresh` | float | `0.2` | Similarity threshold for cache reuse. Lower values prioritize quality (less caching), higher values prioritize speed (more caching). Suggested range: 0.1-0.8 |
+| `rel_l1_thresh` | float \| None | Model default, usually `0.2` | Positive threshold for accumulated, polynomial-rescaled input change. Lower values make reuse more conservative. MiniMax-H3 defaults to `0.17`. |
 | `coefficients` | list[float] \| None | `None` | Polynomial coefficients for rescaling L1 distance. Must contain exactly 5 elements if provided. If `None`, uses model-specific defaults based on transformer type. |
-| `num_warmup_steps` | int \| None | Model default | Initial denoising steps per CFG branch that always run the transformer. The default is 12 for Cosmos3 Nano and Super and 0 for other models. |
+| `num_warmup_steps` | int \| None | Model default | Nonnegative number of initial cache-eligible calls per cache state that always run the blocks. Defaults to 12 for Cosmos3 Nano and Super, and 0 otherwise. |
 
-HunyuanImage3's legacy TeaCache path does not support configurable warmup. A nonzero `num_warmup_steps` raises an error instead of being silently ignored.
+HunyuanImage3 does not support `num_warmup_steps`; a nonzero value raises an error.
 
-Ported models define their defaults in `get_teacache_defaults()`. Legacy model defaults remain in [`vllm_omni/diffusion/cache/teacache/config.py`](https://github.com/vllm-project/vllm-omni/blob/main/vllm_omni/diffusion/cache/teacache/config.py), for example:
+Unspecified settings use the model defaults. Override coefficients only with values validated for the model and cached block range.
 
-```python
-_MODEL_COEFFICIENTS = {
-    # Qwen-Image transformer coefficients from ComfyUI-TeaCache
-    # Tuned specifically for Qwen's dual-stream transformer architecture
-    # Used for all Qwen-Image Family pipelines, in general
-    "QwenImageTransformer2DModel": [
-        -4.50000000e02,
-        2.80000000e02,
-        -4.50000000e01,
-        3.20000000e00,
-        -2.00000000e-02,
-    ],
-    ...
-}
-```
+### Model Notes
 
-Cosmos3 Nano and Super use the coefficients proposed in [PR #4389](https://github.com/vllm-project/vllm-omni/pull/4389). That PR fitted them on Cosmos3 Nano text-to-video runs and recommended 12 warmup steps to reduce early-step quality loss. The protocol path includes the final GEN norm in the cached residual, while #4389 fitted a residual before that norm. On one MI300X with four prompt and seed pairs, the measured speedups were comparable (1.52× for #4389 and 1.55× for the protocol path). The protocol path had less measured output change against its own uncached reference. The runs used different vLLM versions (0.24.0 and 0.30.0), so the comparison does not isolate the rewrite's effect. This check covers Nano text-to-video only. Transfer requests run without TeaCache because their branches have different GEN layouts. Cosmos3 Edge has no calibrated default coefficients and requires an explicit coefficient override. Edge also defaults to zero warmup steps; set `num_warmup_steps` explicitly when supplying Edge coefficients.
+#### Cosmos3
 
-Cosmos3 TeaCache cannot be combined with HSDP, layerwise offload, or distributed layerwise offload. The current TeaCache signal reads block zero's GEN weights before its forward. Layerwise offload loads that block synchronously at setup, then prefetches it asynchronously on a separate stream between runs. The early TeaCache read has not been validated with that prefetch. HSDP and distributed layerwise offload also require a shared skip decision across weight-sharding groups.
+- **Defaults:** Nano and Super use threshold 0.2 and 12 warmup steps. Edge requires explicit `coefficients`; its warmup count defaults to 0.
+- **Measured:** On one MI300X, Nano text-to-video (1280×720, 189 frames, 35 steps, CFG 6, threshold 0.2, four prompt and seed pairs) reduced mean API request time from 250.1 to 161.3 seconds, a 1.55× speedup. Mean SSIM was 0.866 and LPIPS was 0.052 against matching uncached outputs. Super, Edge, image generation and distributed modes have not been measured.
+- **Restrictions:** HSDP, layerwise offload and distributed layerwise offload raise an error. Transfer requests run without TeaCache.
 
-Bagel uses its decomposed forward with the existing coefficients and default threshold of 0.2. The legacy TeaCache extractor ignored CFG arguments and ran only the conditional branch. The protocol path restores CFG, so earlier measurements of the legacy path do not establish quality or speed for this path. Batched CFG branches occupy separate rows in the cached residual. Calls outside the CFG interval run without caching, because they use a different packed layout. The port preserves prefix KV caches and applies CFG after the cached blocks. CPU tests cover these paths; output quality and speed with real weights remain unverified. Generation paths that call `forward_single_branch`, including the existing SP and CFG-parallel paths, bypass TeaCache.
+#### Bagel
 
-SenseNova U1's default threshold of 0.2 is not quality validated. A one-MI300X comparison at 768×768, 50 steps and CFG scale 4 found mean SSIM 0.498 and LPIPS 0.443 against uncached output across ten prompt and seed pairs, with visible blur in one inspected image. A diagnostic request reused the cache in 90 of 100 branch calls. The inherited coefficients or threshold need further calibration before recommending this setting. U1.5 has not been checked with real weights.
+- **Defaults:** Threshold 0.2 with the existing coefficients.
+- **Restrictions:** With SP or CFG-parallel, Bagel runs without TeaCache. Calls outside the CFG interval also run without caching.
+- **Measured:** On one MI300X, text-to-image at 512×512 with 50 requested timesteps and text CFG 4 reduced median request time from 5.904 to 1.931 seconds. Mean SSIM was 0.745 and LPIPS was 0.195 across ten prompt and seed pairs repeated three times. Both modes used the corrected CFG implementation. Cached images changed composition and detail; the run predates the subsequent CFG state cleanup.
+
+#### SenseNova-U1
+
+- **Defaults:** Threshold 0.2 with the coefficients from [PR #4164](https://github.com/vllm-project/vllm-omni/pull/4164).
+- **Measured:** On one MI300X (768×768, 50 steps, CFG 4, ten prompt and seed pairs), the default gave mean SSIM 0.498 and LPIPS 0.443 against uncached output, with visible blur in one inspected image. The cache was reused in 90 of 100 branch calls in one request. Try a lower threshold and compare outputs again, or disable caching if the changes are unacceptable. U1.5 has not been measured.
+- **Restrictions:** Requests without CFG run without TeaCache. Three-branch image editing with `cfg_parallel_size=2` raises an error.
 
 ---
 
 ## Best Practices
 
-### When to Use
+Compare with `cache_backend="none"` or `--cache-backend none`, using the same checkpoint, prompts, seeds, resolution, inference steps, CFG, dtype and offload settings. Warm up both configurations before measuring request latency and denoising time.
 
-**Good for:**
-
-- Production deployments requiring faster inference, tolerant of minimal quality loss
-- Scenarios where 1.5-2x speedup is valuable
-- Useful for single-card acceleration
-
-**Not for:**
-
-- Maximum quality requirements where no degradation is acceptable
-- Very short inference runs (< 20 steps) where caching overhead may outweigh benefits
+SSIM and LPIPS measure similarity to uncached output. They do not establish an acceptable quality level for every workload, so inspect the saved outputs as well. If exact agreement is required, run without caching.
 
 ---
 
@@ -181,20 +170,16 @@ cache_config={"rel_l1_thresh": 0.1}
 
 ### Common Issue 2: Limited Speedup
 
-**Symptoms**: Actual speedup is less than expected (< 1.3x)
+**Symptoms**: Caching produces few hits or little reduction in request latency.
 
 **Solutions**:
 
-1. Increase the threshold to enable more aggressive caching:
-   ```python
-   cache_config={"rel_l1_thresh": 0.8}
-   ```
-2. Ensure you're using sufficient inference steps (35+ recommended)
-3. Check that your model architecture is supported (see Supported Models section)
+1. Enable `VLLM_LOGGING_LEVEL=DEBUG` to inspect `TeaCache step=... cache_hit=...` messages from `TeaCacheHook`. An enablement message only confirms that the hook was installed. HunyuanImage3 uses a separate native loop.
+2. Check [Model Notes](#model-notes) for calls that run uncached. Warmup calls also execute the blocks.
+3. Measure denoising time separately from text encoding, VAE work and request overhead. Increasing the threshold permits more reuse, but requires another output comparison.
 
 ---
 
 ## Summary
 
-1. ✅ **Enable TeaCache** - Set `cache_backend="tea_cache"` to get 1.5x-2.0x speedup with optimized defaults
-2. ✅ **(Optional) Customize** - Adjust thresholds and polynomial coefficients for specific speed/quality trade-offs
+Enable TeaCache with `cache_backend="tea_cache"`, check the model restrictions and compare against uncached generation before choosing a threshold.
