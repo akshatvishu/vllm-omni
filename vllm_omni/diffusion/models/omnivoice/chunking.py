@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 # Copyright 2026 Xiaomi Corp. (authors: Han Zhu)
 
 from __future__ import annotations
@@ -89,6 +89,10 @@ def _period_belongs_to_abbreviation(text: str, period_index: int) -> bool:
     return word in _ABBREVIATIONS
 
 
+def _is_numeric_separator(text: str, index: int) -> bool:
+    return text[index] in ".," and 0 < index < len(text) - 1 and text[index - 1].isdigit() and text[index + 1].isdigit()
+
+
 def _split_at_sentence_boundaries(text: str) -> list[str]:
     sentences: list[list[str]] = []
     current_sentence: list[str] = []
@@ -101,7 +105,7 @@ def _split_at_sentence_boundaries(text: str) -> list[str]:
         current_sentence.append(character)
         if character not in _SENTENCE_BOUNDARIES:
             continue
-        if character == "." and _period_belongs_to_abbreviation(text, index):
+        if _is_numeric_separator(text, index) or (character == "." and _period_belongs_to_abbreviation(text, index)):
             continue
 
         sentences.append(current_sentence)
@@ -153,7 +157,11 @@ def _split_oversized_chunk(text: str, max_characters: int) -> list[str]:
     while len(remaining) > max_characters:
         window = remaining[:max_characters]
         split_index = max(
-            (index + 1 for index, character in enumerate(window) if character in _CLAUSE_BOUNDARIES),
+            (
+                index + 1
+                for index, character in enumerate(window)
+                if character in _CLAUSE_BOUNDARIES and not _is_numeric_separator(remaining, index)
+            ),
             default=0,
         )
         if split_index == 0:

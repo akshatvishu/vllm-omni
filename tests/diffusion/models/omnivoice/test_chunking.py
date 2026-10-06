@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 from types import SimpleNamespace
 
@@ -16,6 +16,7 @@ from vllm_omni.diffusion.models.omnivoice.pipeline_omnivoice import (
     _copy_audio_to_cpu,
     _parse_chunking_seconds,
 )
+from vllm_omni.errors import OmniClientError
 from vllm_omni.model_executor.models.omnivoice.omnivoice_generator import OmniVoiceGenerator
 from vllm_omni.transformers_utils.configs.omnivoice import OmniVoiceConfig
 
@@ -51,44 +52,6 @@ def test_chunking_seconds_rejects_invalid_values(value, allow_zero):
         _parse_chunking_seconds("audio_chunk_duration", value, allow_zero=allow_zero)
 
 
-def test_pipeline_marks_invalid_chunking_values_as_client_errors():
-    pipeline = SimpleNamespace(
-        config=SimpleNamespace(
-            audio_chunk_duration=15.0,
-            audio_chunk_threshold=30.0,
-        )
-    )
-    request = SimpleNamespace(
-        prompts=["Hello"],
-        sampling_params=SimpleNamespace(
-            extra_args={"audio_chunk_duration": 0},
-            generator=torch.Generator(),
-        ),
-    )
-
-    output = OmniVoicePipeline.forward(pipeline, request)
-
-    assert output.error == "audio_chunk_duration must be a finite positive number"
-    assert output.error_status_code == 400
-    assert output.error_type == "BadRequestError"
-
-
-def test_pipeline_rejects_missing_request_generator():
-    pipeline = SimpleNamespace(
-        config=SimpleNamespace(
-            audio_chunk_duration=15.0,
-            audio_chunk_threshold=30.0,
-        )
-    )
-    request = SimpleNamespace(
-        prompts=["Hello"],
-        sampling_params=SimpleNamespace(extra_args={}, generator=None),
-    )
-
-    with pytest.raises(RuntimeError, match="diffusion worker"):
-        OmniVoicePipeline.forward(pipeline, request)
-
-
 def test_split_text_preserves_abbreviations_and_closing_marks():
     text = 'Dr. Smith left. "Next sentence!" Final sentence.'
 
@@ -120,6 +83,32 @@ def test_split_text_handles_multi_period_abbreviation_and_cjk_punctuation():
 )
 def test_sentence_boundaries_preserve_additional_abbreviations(text, expected):
     assert _split_at_sentence_boundaries(text) == expected
+
+
+@pytest.mark.parametrize("number", ["0.26", "0,26"])
+def test_sentence_boundaries_preserve_numeric_separators(number):
+    text = f"Value {number} stays intact."
+    assert _split_at_sentence_boundaries(text + " Next.") == [text, " Next."]
+
+
+@pytest.mark.parametrize("number", ["0.26", "0,26"])
+def test_oversized_sentence_keeps_numeric_separator(number):
+    text = f"Value {number} stays intact, then we continue."
+    chunks = split_text_into_chunks(text, max_characters=9)
+    assert any(number in chunk for chunk in chunks)
+    assert all(len(chunk) <= 9 for chunk in chunks)
+    assert "".join(chunks).replace(" ", "") == text.replace(" ", "")
+
+
+def test_numeric_protection_keeps_sentence_and_list_boundaries():
+    assert _split_at_sentence_boundaries("Value 0.26. Next, please.") == ["Value 0.26.", " Next,", " please."]
+
+
+def test_decimal_list_keeps_numbers_whole():
+    text = "See releases 0.26, 0.28 and 0.30 now."
+    chunks = split_text_into_chunks(text, max_characters=20)
+    assert all(any(number in chunk for chunk in chunks) for number in ("0.26", "0.28", "0.30"))
+    assert all(len(chunk) <= 20 for chunk in chunks)
 
 
 @pytest.mark.parametrize(
@@ -182,88 +171,101 @@ def test_copy_audio_to_cpu_does_not_copy_cpu_input():
     assert _copy_audio_to_cpu(audio, copy_stream=None) is audio
 
 
-class _RecordingPipeline:
+class _RecordingPipeline(OmniVoicePipeline):
     def __init__(self):
-        self.config = SimpleNamespace(frame_rate=1)
-        self.sample_rate = 10
-        self.pin_memory = False
-        self.calls = []
-
-    def _estimate_target_length(self, text, ref_text, ref_audio_tokens):
-        return len(text)
-
-    def _generate_tokens(
-        self,
-        *,
-        text,
-        target_length,
-        lang,
-        instruct,
-        ref_text,
-        ref_audio_tokens,
-        generator,
-    ):
-        token_value = len(self.calls) + 1
-        tokens = torch.full((1, 8, target_length), token_value, dtype=torch.long)
-        self.calls.append(
-            {
-                "text": text,
-                "ref_text": ref_text,
-                "ref_audio_tokens": ref_audio_tokens,
-                "generator": generator,
-                "random_value": torch.rand((), generator=generator).item(),
-                "tokens": tokens,
-            }
+        torch.nn.Module.__init__(self)
+        self.config = SimpleNamespace(
+            frame_rate=1,
+            num_audio_codebook=8,
+            audio_mask_id=100,
+            audio_chunk_duration=8.0,
+            audio_chunk_threshold=30.0,
         )
-        return tokens
+        self.device = torch.device("cpu")
+        self.sample_rate = 10
+        self.tokenizer = SimpleNamespace(encode=lambda text: SimpleNamespace(ids=[1]))
+        self.duration_estimator = SimpleNamespace(estimate_duration=lambda text, ref_text, ref_len: len(text))
+        self.audio_tokenizer = object()
+        self.num_step = 2
+        self.guidance_scale = 2.0
+        self.t_shift = 0.1
+        self.layer_penalty_factor = 5.0
+        self.position_temperature = 5.0
+        self.class_temperature = 0.0
+        self.calls = []
+        self.draws = []
+        self.reference = torch.full((8, 4), 9)
+
+    def _encode_ref_audio(self, audio_signal, sr):
+        return self.reference
+
+    def _prepare_chunk_input(self, text, lang, instruct, ref_text, ref_audio_tokens, seed, chunks=None):
+        self.calls.append({"text": text, "ref_text": ref_text, "ref_audio_tokens": ref_audio_tokens})
+        return super()._prepare_chunk_input(text, lang, instruct, ref_text, ref_audio_tokens, seed, chunks)
+
+    def generator(self, *, target_lens, generators, **kwargs):
+        tokens = []
+        for length, generator in zip(target_lens, generators, strict=True):
+            self.draws.append((generator, torch.rand((), generator=generator).item()))
+            tokens.append(torch.full((1, 8, length), generator.initial_seed(), dtype=torch.long))
+        return torch.cat(tokens, dim=-1)
 
     @staticmethod
     def decoder(tokens):
         return tokens[:, :1].float()
 
 
-def _generate_audio(
-    pipeline,
-    text,
-    *,
-    threshold,
-    generator,
-    chunk_duration=8.0,
-    ref_text=None,
-    ref_audio_tokens=None,
-):
-    return OmniVoicePipeline._generate_audio(
-        pipeline,
-        text=text,
-        lang="None",
-        instruct="None",
-        ref_text=ref_text,
-        ref_audio_tokens=ref_audio_tokens,
-        audio_chunk_duration=chunk_duration,
-        audio_chunk_threshold=threshold,
-        generator=generator,
+def _request(prompt, *, seed=3, **extra):
+    return SimpleNamespace(
+        prompt=prompt,
+        sampling_params=SimpleNamespace(
+            extra_args=extra,
+            seed=seed,
+            num_inference_steps=2,
+            guidance_scale=None,
+        ),
     )
+
+
+def _run(pipeline, prompt, *, threshold=0, chunk_duration=8.0, seed=3):
+    return pipeline(
+        SimpleNamespace(
+            requests=[
+                _request(
+                    prompt,
+                    seed=seed,
+                    audio_chunk_duration=chunk_duration,
+                    audio_chunk_threshold=threshold,
+                )
+            ]
+        )
+    )
+
+
+def test_pipeline_marks_invalid_chunking_values_as_client_errors():
+    pipeline = _RecordingPipeline()
+    request = _request("Hello", audio_chunk_duration=0)
+    outputs = pipeline(SimpleNamespace(requests=[request]))
+    assert len(outputs) == 1
+    assert outputs[0].error == "audio_chunk_duration must be a finite positive number"
+    assert outputs[0].error_status_code == 400
+    assert outputs[0].error_type == "BadRequestError"
+    assert not pipeline.draws
+
+    state = SimpleNamespace(prompt=request.prompt, sampling=request.sampling_params, extra={})
+    with pytest.raises(OmniClientError) as error:
+        pipeline.prepare_encode(state)
+    assert error.value.status_code == 400
+    assert error.value.error_type == "BadRequestError"
 
 
 def test_threshold_is_inclusive_and_one_frame_over_uses_chunking():
     text = "One. Two. Three."
     pipeline = _RecordingPipeline()
-
-    _generate_audio(
-        pipeline,
-        text,
-        threshold=len(text),
-        generator=torch.Generator().manual_seed(1),
-    )
+    _run(pipeline, text, threshold=len(text))
     assert [call["text"] for call in pipeline.calls] == [text]
-
     pipeline.calls.clear()
-    _generate_audio(
-        pipeline,
-        text,
-        threshold=len(text) - 1,
-        generator=torch.Generator().manual_seed(1),
-    )
+    _run(pipeline, text, threshold=len(text) - 1)
     assert len(pipeline.calls) > 1
 
 
@@ -273,59 +275,80 @@ def test_threshold_is_inclusive_and_one_frame_over_uses_chunking():
 )
 def test_extreme_finite_chunking_values_do_not_overflow(chunk_duration, threshold):
     pipeline = _RecordingPipeline()
-
-    _generate_audio(
-        pipeline,
-        "One. Two. Three.",
-        threshold=threshold,
-        chunk_duration=chunk_duration,
-        generator=torch.Generator().manual_seed(1),
-    )
-
+    _run(pipeline, "One. Two. Three.", threshold=threshold, chunk_duration=chunk_duration)
     assert len(pipeline.calls) == 1
 
 
 def test_explicit_reference_is_reused_for_every_chunk():
     pipeline = _RecordingPipeline()
-    ref_audio_tokens = torch.full((8, 4), 9)
-
-    _generate_audio(
+    _run(
         pipeline,
-        "First sentence. Second sentence. Third sentence.",
-        threshold=0,
-        generator=torch.Generator().manual_seed(2),
-        ref_text="Reference text.",
-        ref_audio_tokens=ref_audio_tokens,
+        {
+            "input": "First sentence. Second sentence. Third sentence.",
+            "ref_text": "Reference text.",
+            "ref_audio": (torch.ones(4), 10),
+        },
     )
-
     assert len(pipeline.calls) > 1
     assert all(call["ref_text"] == "Reference text." for call in pipeline.calls)
-    assert all(call["ref_audio_tokens"] is ref_audio_tokens for call in pipeline.calls)
+    assert all(call["ref_audio_tokens"] is pipeline.reference for call in pipeline.calls)
 
 
 def test_auto_voice_uses_first_chunk_as_fixed_reference_and_advances_generator():
     pipeline = _RecordingPipeline()
-    generator = torch.Generator().manual_seed(3)
-
-    _generate_audio(
-        pipeline,
-        "First sentence. Second sentence. Third sentence.",
-        threshold=0,
-        generator=generator,
-    )
-
+    _run(pipeline, "First sentence. Second sentence. Third sentence.", seed=3)
     assert len(pipeline.calls) > 2
-    first_call = pipeline.calls[0]
-    assert first_call["ref_text"] is None
-    assert first_call["ref_audio_tokens"] is None
+    first = pipeline.calls[0]
+    assert first["ref_text"] is None
+    assert first["ref_audio_tokens"] is None
+    reference = pipeline.calls[1]["ref_audio_tokens"]
+    torch.testing.assert_close(reference, torch.full((8, len(first["text"])), 3, dtype=torch.long))
     for call in pipeline.calls[1:]:
-        assert call["ref_text"] == first_call["text"]
-        torch.testing.assert_close(call["ref_audio_tokens"], first_call["tokens"][0])
-        assert call["generator"] is generator
+        assert call["ref_text"] == first["text"]
+        assert call["ref_audio_tokens"] is reference
+    generator = pipeline.draws[0][0]
+    expected = torch.Generator().manual_seed(3)
+    assert all(draw[0] is generator for draw in pipeline.draws)
+    assert [draw[1] for draw in pipeline.draws] == [torch.rand((), generator=expected).item() for _ in pipeline.draws]
 
-    expected_generator = torch.Generator().manual_seed(3)
-    expected_values = [torch.rand((), generator=expected_generator).item() for _ in pipeline.calls]
-    assert [call["random_value"] for call in pipeline.calls] == expected_values
+
+def test_mixed_short_and_long_batch_preserves_output_order():
+    pipeline = _RecordingPipeline()
+    requests = [
+        _request("First sentence. Second sentence. Third sentence.", seed=3, audio_chunk_threshold=10),
+        _request("Short", seed=7),
+        _request("Another long sentence. And one more sentence.", seed=5, audio_chunk_threshold=10),
+    ]
+    outputs = pipeline(SimpleNamespace(requests=requests))
+    assert len(outputs) == 3
+    for output, seed in zip(outputs, (3, 7, 5), strict=True):
+        assert output.error is None
+        assert output.output.max().item() == seed
+    torch.testing.assert_close(outputs[1].output, torch.full((1, 1, 5), 7.0))
+    assert sum(generator.initial_seed() == 7 for generator, _ in pipeline.draws) == 1
+
+
+def test_step_decode_resets_schedule_and_retains_generator_until_final_chunk():
+    pipeline = _RecordingPipeline()
+    request = _request("One. Two. Three.", audio_chunk_threshold=0)
+    state = SimpleNamespace(prompt=request.prompt, sampling=request.sampling_params, extra={}, step_index=0)
+    pipeline.prepare_encode(state)
+    generator = state.extra["generator"]
+    count = len(state.extra["prepared"].chunks.texts)
+    assert count > 1
+    for index in range(count):
+        state.extra["tokens"].fill_(index + 1)
+        state.step_index = len(state.timesteps)
+        output = pipeline.post_decode(state)
+        assert state.extra["generator"] is generator
+        if index < count - 1:
+            assert output is None
+            assert state.step_index == 0
+            assert torch.all(state.extra["tokens"] == pipeline.config.audio_mask_id)
+            assert state.timesteps.sum().item() == state.extra["target_len"] * 8
+        else:
+            assert output.output.shape[-1] > state.extra["target_len"]
+            assert state.step_index == len(state.timesteps)
 
 
 def test_generator_uses_and_advances_the_supplied_random_state(monkeypatch):
@@ -336,7 +359,7 @@ def test_generator_uses_and_advances_the_supplied_random_state(monkeypatch):
         enable_cuda_graph=False,
         llm_config={
             "hidden_size": 16,
-            "num_hidden_layers": 1,
+            "num_hidden_layers": 0,
             "num_attention_heads": 2,
             "num_key_value_heads": 1,
             "intermediate_size": 32,
@@ -345,23 +368,22 @@ def test_generator_uses_and_advances_the_supplied_random_state(monkeypatch):
             "head_dim": 8,
         },
     )
-    model = OmniVoiceGenerator(config)
+    model = OmniVoiceGenerator(config, od_config=SimpleNamespace())
     monkeypatch.setattr(
         model,
         "_transformer_forward",
-        lambda inputs_embeds, attention_mask, cos, sin: torch.zeros_like(inputs_embeds),
+        lambda inputs_embeds, cu_seqs, max_seqlen=None, rope_table=None: torch.zeros_like(inputs_embeds),
     )
     generator = torch.Generator().manual_seed(4)
 
     def run_generation():
-        input_ids = torch.full((2, 2, 3), config.audio_mask_id, dtype=torch.long)
+        input_ids = torch.full((6, 2), config.audio_mask_id, dtype=torch.long)
         return model(
             input_ids=input_ids,
-            audio_mask=torch.ones(2, 3, dtype=torch.bool),
-            attention_mask=torch.zeros(2, 1, 3, 3, dtype=torch.bool),
+            audio_mask=torch.ones(6, dtype=torch.bool),
+            cond_lens=[3],
             target_lens=[3],
-            conditional_lens=[3],
-            generator=generator,
+            generators=[generator],
             num_step=2,
         )
 
@@ -375,13 +397,27 @@ def test_generator_uses_and_advances_the_supplied_random_state(monkeypatch):
     assert not torch.equal(state_after_first_call, state_after_second_call)
 
 
+def test_generator_rejects_wrong_number_of_supplied_generators():
+    model = SimpleNamespace(config=SimpleNamespace(audio_mask_id=4, num_audio_codebook=2))
+    with pytest.raises(ValueError, match="one generator per request"):
+        OmniVoiceGenerator.forward(
+            model,
+            input_ids=torch.full((6, 2), 4, dtype=torch.long),
+            audio_mask=torch.ones(6, dtype=torch.bool),
+            cond_lens=[3],
+            target_lens=[3],
+            generators=[],
+        )
+
+
 def test_duration_estimate_uses_reference_text_and_token_count_together():
     calls = []
-    pipeline = SimpleNamespace(
-        duration_estimator=SimpleNamespace(
-            estimate_duration=lambda text, ref_text, ref_length: calls.append((text, ref_text, ref_length)) or 42.8
-        )
-    )
+
+    def estimate_duration(text, ref_text, ref_length):
+        calls.append((text, ref_text, ref_length))
+        return 42.8
+
+    pipeline = SimpleNamespace(duration_estimator=SimpleNamespace(estimate_duration=estimate_duration))
     ref_audio_tokens = torch.zeros(8, 17)
 
     target_length = OmniVoicePipeline._estimate_target_length(
