@@ -100,8 +100,49 @@ def test_oversized_sentence_keeps_numeric_separator(number):
     assert "".join(chunks).replace(" ", "") == text.replace(" ", "")
 
 
-def test_numeric_protection_keeps_sentence_and_list_boundaries():
-    assert _split_at_sentence_boundaries("Value 0.26. Next, please.") == ["Value 0.26.", " Next,", " please."]
+def test_numeric_protection_keeps_sentence_boundaries():
+    assert _split_at_sentence_boundaries("Value 0.26. Next, please.") == ["Value 0.26.", " Next, please."]
+
+
+@pytest.mark.parametrize("punctuation", [",", ";", ":", "，", "；", "："])
+def test_split_text_prefers_whole_sentences_over_clauses(punctuation):
+    text = f"Done. Alpha{punctuation} beta gamma delta."
+
+    assert split_text_into_chunks(text, max_characters=25) == ["Done.", f"Alpha{punctuation} beta gamma delta."]
+
+
+@pytest.mark.parametrize("punctuation", [",", ";", ":", "，", "；", "："])
+def test_oversized_sentence_falls_back_to_clause_boundaries(punctuation):
+    text = f"Alpha{punctuation} beta gamma delta."
+
+    assert split_text_into_chunks(text, max_characters=18) == [f"Alpha{punctuation}", "beta gamma delta."]
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\n\n"])
+def test_split_text_prefers_line_boundaries(newline):
+    lines = ["First item on this line", "Second item on this line", "Last three words"]
+    text = newline.join(lines)
+
+    assert "".join(_split_at_sentence_boundaries(text)) == text
+    assert split_text_into_chunks(text, max_characters=30) == lines
+
+
+def test_short_lines_can_share_a_chunk():
+    assert split_text_into_chunks("First\nSecond\nThird", max_characters=30) == ["First\nSecond\nThird"]
+
+
+def test_sentence_can_end_in_a_number():
+    assert split_text_into_chunks("Meet me at apt. 5. Then leave.", max_characters=24) == [
+        "Meet me at apt. 5.",
+        "Then leave.",
+    ]
+
+
+def test_abbreviation_before_clause_punctuation_stays_intact():
+    assert _split_at_sentence_boundaries("Acme Co., based here. Next.") == [
+        "Acme Co., based here.",
+        " Next.",
+    ]
 
 
 def test_decimal_list_keeps_numbers_whole():

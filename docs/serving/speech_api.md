@@ -848,6 +848,8 @@ OmniVoice splits long input into smaller text chunks and joins the decoded audio
 | `audio_chunk_duration`  | float  | 15.0      | Target duration in seconds for each generated text chunk. The value must be positive.      |
 | `audio_chunk_threshold` | float  | 30.0      | Estimated duration in seconds above which chunking starts. The value must be non-negative. |
 
+The splitter prefers complete sentences and line endings, merging adjacent segments when they fit the character budget. Commas, semicolons, and colons are fallback split points only when a sentence or line exceeds that budget. This avoids unnecessary audio joins inside sentences.
+
 Unlike the upstream OmniVoice splitter, this implementation protects periods and commas between digits from punctuation-based splitting, so numbers such as `0.26` and `0,26` remain intact when they fit the character budget. Oversized chunks still fall back to clause boundaries, whitespace, and finally a hard character split; a single token longer than the budget can therefore still be split. Chunk duration is an estimate, not a hard duration or memory limit.
 
 Use the defaults unless you have tested output quality for your workload. To retain protection from long text word loss, keep `audio_chunk_duration` at or below 15 seconds and `audio_chunk_threshold` at or below 30 seconds. Lower values create more chunks and audio joins, which can increase generation time and introduce audible pauses.

@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import torch
 
-_SENTENCE_BOUNDARIES = frozenset(".,;:!?。，；：！？")
+# Prefer whole sentences so chunk joins do not add pauses inside a sentence.
+# Clause punctuation is a fallback only when a sentence exceeds the size limit.
+_SENTENCE_BOUNDARIES = frozenset(".!?。！？")
 _CLAUSE_BOUNDARIES = frozenset(",;:，；：、")
 _CLOSING_MARKS = frozenset("\"'“”‘’）]》>」】")
 _ABBREVIATIONS = frozenset(
@@ -85,7 +87,9 @@ def _period_belongs_to_abbreviation(text: str, period_index: int) -> bool:
     while word_end < len(text) and not text[word_end].isspace():
         word_end += 1
 
-    word = text[word_start:word_end].rstrip("".join(_CLOSING_MARKS | (_SENTENCE_BOUNDARIES - {"."})))
+    word = text[word_start:word_end].rstrip(
+        "".join(_CLOSING_MARKS | _CLAUSE_BOUNDARIES | (_SENTENCE_BOUNDARIES - {"."}))
+    )
     return word in _ABBREVIATIONS
 
 
@@ -103,7 +107,8 @@ def _split_at_sentence_boundaries(text: str) -> list[str]:
             continue
 
         current_sentence.append(character)
-        if character not in _SENTENCE_BOUNDARIES:
+        # Newlines offer natural boundaries for lists, even without punctuation.
+        if character not in _SENTENCE_BOUNDARIES and character != "\n":
             continue
         if _is_numeric_separator(text, index) or (character == "." and _period_belongs_to_abbreviation(text, index)):
             continue
