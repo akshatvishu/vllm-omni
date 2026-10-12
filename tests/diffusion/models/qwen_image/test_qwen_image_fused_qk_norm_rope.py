@@ -263,6 +263,7 @@ def _joint_reference(txt: QwenImageQKInput, img: QwenImageQKInput, *, use_fused:
     return torch.cat([txt_q, img_q], dim=1), torch.cat([txt_k, img_k], dim=1)
 
 
+@pytest.mark.cuda
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 @pytest.mark.parametrize("txt_len,img_len", [(512, 4096), (77, 1024)])
 def test_joint_launch_matches_per_stream_then_cat(txt_len, img_len, force_always_fuse):
