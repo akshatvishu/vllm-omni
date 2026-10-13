@@ -110,9 +110,8 @@ def _run(data: QwenImageQKInput, *, use_fused: bool = True) -> tuple[torch.Tenso
 
 @pytest.fixture
 def force_always_fuse(monkeypatch):
-    """Disable the short-seq host gate so fused-kernel correctness tests keep
-    exercising the Triton path on tiny shapes."""
-    monkeypatch.setattr(qwen_mod, "fused_qk_norm_rope_min_tokens", lambda _default: 0)
+    """Exercise Triton on small test inputs."""
+    monkeypatch.setattr(qwen_mod, "_FUSED_MIN_TOKENS", 0)
 
 
 @pytest.mark.cuda
@@ -210,7 +209,6 @@ def test_qwen_image_fused_qk_norm_rope_torch_compile_fullgraph_capture(force_alw
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 def test_qwen_image_short_seq_default_gate_uses_eager_path(monkeypatch):
     """Below _FUSED_MIN_TOKENS the helper must stay on the eager chain (#7780)."""
-    monkeypatch.delenv("VLLM_OMNI_FUSED_QK_NORM_ROPE_MIN_TOKENS", raising=False)
     # BATCH*seq_len = 2*512 = 1024 < 2048
     data = _make_input(
         seq_len=512,
@@ -230,7 +228,6 @@ def test_qwen_image_short_seq_default_gate_uses_eager_path(monkeypatch):
 @pytest.mark.cuda
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 def test_qwen_image_above_gate_uses_fused_path(monkeypatch):
-    monkeypatch.delenv("VLLM_OMNI_FUSED_QK_NORM_ROPE_MIN_TOKENS", raising=False)
     # BATCH*seq_len = 2*1024 = 2048 == _FUSED_MIN_TOKENS → fuse
     data = _make_input(
         seq_len=1024,
@@ -301,11 +298,10 @@ def test_joint_launch_matches_per_stream_then_cat(txt_len, img_len, force_always
     assert torch.equal(joint_v, torch.cat([txt_v, img_v], dim=1))
 
 
-def test_packed_table_skipped_when_fused_path_unavailable(monkeypatch):
+def test_packed_table_skipped_when_fused_path_unavailable():
     """No table, no allocation, where the CUDA kernel cannot run."""
     from vllm_omni.diffusion.models.qwen_image.qwen_image_transformer import _packed_qk_norm_rope_table
 
-    monkeypatch.setenv("VLLM_OMNI_FUSED_QK_NORM_ROPE_MIN_TOKENS", "0")
     vid = torch.polar(torch.ones(64, HEAD_DIM // 2), torch.randn(64, HEAD_DIM // 2))
     txt = torch.polar(torch.ones(16, HEAD_DIM // 2), torch.randn(16, HEAD_DIM // 2))
     assert _packed_qk_norm_rope_table(vid, txt, 1, torch.bfloat16) is None  # CPU
@@ -314,5 +310,3 @@ def test_packed_table_skipped_when_fused_path_unavailable(monkeypatch):
         assert _packed_qk_norm_rope_table(vid, txt, 1, torch.float16) is None  # non-bf16 activations
         table = _packed_qk_norm_rope_table(vid, txt, 1, torch.bfloat16)
         assert table is not None and table.dtype == torch.float32  # same dtype as the per-stream table
-        monkeypatch.setenv("VLLM_OMNI_FUSED_QK_NORM_ROPE_MIN_TOKENS", "1000000")
-        assert _packed_qk_norm_rope_table(vid, txt, 1, torch.bfloat16) is None

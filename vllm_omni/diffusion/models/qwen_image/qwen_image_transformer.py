@@ -51,7 +51,6 @@ from vllm_omni.diffusion.layers.fused_qk_norm_rope import (
     fused_joint_qkv_norm_rope,
     fused_qk_norm_rope,
     fused_qk_norm_rope_available,
-    fused_qk_norm_rope_min_tokens,
 )
 from vllm_omni.diffusion.layers.qwen_select01_modulation import (
     can_use_qwen_select01_triton,
@@ -64,13 +63,7 @@ from vllm_omni.diffusion.layers.rope import RotaryEmbedding
 logger = init_logger(__name__)
 
 # Fuse only when B*S >= this; below it host launch overhead dominates (#7780).
-# Override: VLLM_OMNI_FUSED_QK_NORM_ROPE_MIN_TOKENS (0 = always fuse).
 _FUSED_MIN_TOKENS = 2048
-
-
-# The joint launch replaces both per-stream launches and three cats, so it has
-# a different default crossover from the existing per-stream fused path.
-_JOINT_FUSED_MIN_TOKENS = 0
 
 
 def _packed_qk_norm_rope_table(
@@ -79,27 +72,18 @@ def _packed_qk_norm_rope_table(
     batch_size: int,
     activation_dtype: torch.dtype,
 ) -> torch.Tensor | None:
-    """Pack the complex ``(txt, img)`` frequencies into the joint op's table.
+    """Pack text/image frequencies into a text-first ``[B*S, D]`` table.
 
-    ``vid_freqs``/``txt_freqs`` are complex ``[S, D/2]`` (one entry per
-    interleaved pair, shared by the batch); the joint op wants a real
-    ``[B*S_joint, D] = [cos(theta) | sin(theta)]`` table in joint token order
-    (text first, as the attention concatenates). Float32, exactly like the
-    per-stream table ``_qwen_image_qk_norm_rope`` builds, so the joint launch
-    rotates with the same coefficients as the path it replaces. ``None`` —
-    no allocation — when the CUDA kernel would not run or below the gate.
+    Keep FP32 coefficients, as in the per-stream fusion. Return ``None``
+    for unsupported CUDA inputs.
     """
     rotary_dim = 2 * vid_freqs.shape[-1]
     if not fused_qk_norm_rope_available(vid_freqs.device, activation_dtype, rotary_dim, rotary_dim):
         return None
-    seq_total = txt_freqs.shape[0] + vid_freqs.shape[0]
-    tokens = batch_size * seq_total
-    if tokens < fused_qk_norm_rope_min_tokens(_JOINT_FUSED_MIN_TOKENS):
-        return None
     freqs = torch.cat((txt_freqs, vid_freqs), dim=0)
     table = torch.cat((freqs.real, freqs.imag), dim=-1)
     if batch_size > 1:
-        table = table.unsqueeze(0).expand(batch_size, -1, -1).reshape(tokens, -1)
+        table = table.unsqueeze(0).expand(batch_size, -1, -1).reshape(batch_size * freqs.shape[0], -1)
     return table
 
 
@@ -120,7 +104,7 @@ def _qwen_image_qk_norm_rope(
     tokens = batch * seq_len
     if (
         use_fused
-        and tokens >= fused_qk_norm_rope_min_tokens(_FUSED_MIN_TOKENS)
+        and tokens >= _FUSED_MIN_TOKENS
         and _fused_cuda_supported(q, k, head_dim, rotary_dim, interleaved=True)
     ):
         num_kv_heads = k.shape[2]
