@@ -28,8 +28,8 @@ def main():
             entry = {"index": lreq["index"], "pixels_equal": lreq["pixel_sha256"] == rreq["pixel_sha256"]}
             if left["args"]["phase"] == "correctness":
                 import torch
-                la = torch.load(baseline / "audit" / f'request-{lreq["index"]:03d}.pt', weights_only=True)
-                ra = torch.load(candidate / "audit" / f'request-{rreq["index"]:03d}.pt', weights_only=True)
+                la = torch.load(baseline / lreq["audit_file"], weights_only=True)
+                ra = torch.load(candidate / rreq["audit_file"], weights_only=True)
                 entry["latents_equal"] = torch.equal(la["latents"], ra["latents"])
                 entry["latent_max_abs"] = (la["latents"].float()-ra["latents"].float()).abs().max().item()
                 entry["build_input_devices"] = {"baseline": la["build_input_devices"], "candidate": ra["build_input_devices"]}

@@ -56,12 +56,18 @@ python "$SYNC/run_sync.py" --model "$MODEL" --arm timestep --mode step --phase c
 python "$SYNC/compare_sync.py" --baseline "$SYNC/results/ordinary-baseline" "$SYNC/results/step-baseline" --candidate "$SYNC/results/ordinary-timestep" "$SYNC/results/step-timestep" --output "$SYNC/results/correctness.json"
 python "$SYNC/compare_sync.py" --baseline "$SYNC/results/ordinary-baseline" --candidate "$SYNC/results/step-baseline" --output "$SYNC/results/mode-parity.json"
 
-# Ordinary request latency: fresh processes in ABBA order, two warmups and six samples each.
-python "$SYNC/run_sync.py" --model "$MODEL" --arm baseline --mode ordinary --phase timing --output "$SYNC/results/timing-a1"
-python "$SYNC/run_sync.py" --model "$MODEL" --arm timestep --mode ordinary --phase timing --output "$SYNC/results/timing-b1"
-python "$SYNC/run_sync.py" --model "$MODEL" --arm timestep --mode ordinary --phase timing --output "$SYNC/results/timing-b2"
-python "$SYNC/run_sync.py" --model "$MODEL" --arm baseline --mode ordinary --phase timing --output "$SYNC/results/timing-a2"
-python "$SYNC/compare_sync.py" --baseline "$SYNC/results/timing-a1" "$SYNC/results/timing-a2" --candidate "$SYNC/results/timing-b1" "$SYNC/results/timing-b2" --output "$SYNC/results/timing.json"
+# Ordinary request latency: three fresh AB / BA / AB pairs plus independent A/A.
+# Each process uses two warmups and six measured samples; all share compilation caches.
+python "$SYNC/run_sync.py" --model "$MODEL" --arm baseline --mode ordinary --phase timing --output "$SYNC/results/timing-p1-a"
+python "$SYNC/run_sync.py" --model "$MODEL" --arm timestep --mode ordinary --phase timing --output "$SYNC/results/timing-p1-b"
+python "$SYNC/run_sync.py" --model "$MODEL" --arm timestep --mode ordinary --phase timing --output "$SYNC/results/timing-p2-b"
+python "$SYNC/run_sync.py" --model "$MODEL" --arm baseline --mode ordinary --phase timing --output "$SYNC/results/timing-p2-a"
+python "$SYNC/run_sync.py" --model "$MODEL" --arm baseline --mode ordinary --phase timing --output "$SYNC/results/timing-p3-a"
+python "$SYNC/run_sync.py" --model "$MODEL" --arm timestep --mode ordinary --phase timing --output "$SYNC/results/timing-p3-b"
+python "$SYNC/run_sync.py" --model "$MODEL" --arm baseline --mode ordinary --phase timing --output "$SYNC/results/timing-aa-1"
+python "$SYNC/run_sync.py" --model "$MODEL" --arm baseline --mode ordinary --phase timing --output "$SYNC/results/timing-aa-2"
+python "$SYNC/compare_sync.py" --baseline "$SYNC/results/timing-p1-a" "$SYNC/results/timing-p2-a" "$SYNC/results/timing-p3-a" --candidate "$SYNC/results/timing-p1-b" "$SYNC/results/timing-p2-b" "$SYNC/results/timing-p3-b" --output "$SYNC/results/timing.json"
+python "$SYNC/compare_sync.py" --baseline "$SYNC/results/timing-aa-1" --candidate "$SYNC/results/timing-aa-2" --output "$SYNC/results/timing-aa.json"
 
 # Separate, short profiles. Do not use these request times as benchmark samples.
 python "$SYNC/run_sync.py" --model "$MODEL" --arm baseline --mode ordinary --phase profile --steps 2 --output "$SYNC/results/profile-baseline"
@@ -76,7 +82,9 @@ must be consistent between arms; it is not the default.
 
 ## Evidence and limits
 
-Correctness writes a PNG and CPU audit tensor file per request. Audits contain
+Correctness writes a PNG and CPU audit tensor file per request. Startup dummy
+requests are recorded separately. Each measured request records the exact audit
+filename created during its synchronous generation, avoiding startup index offsets. Audits contain
 final latents, model timestep values/dtypes/devices, scheduler timestep values,
 and step-mode input devices. Scheduler audits assert CPU inputs. The comparator
 requires bitwise identical pixels, latents, and timestep values. Any mismatch
@@ -87,8 +95,8 @@ should show GPU inputs. Both model outputs must be BF16 and identical.
 Timing measures synchronous `Omni.generate()` completion, including orchestration,
 text encoding, denoising, decoding, and output transfer. Image hashing and saving
 happen after that interval. Correctness hooks are disabled in timing processes.
-Fresh process ABBA pairs provide a repeatability check; baseline pair spread
-indicates drift. Warmups do not prove there were zero later recompiles. Check logs
+Three fresh process AB / BA / AB pairs check repeatability. An independent A/A
+pair estimates variation between baseline runs. Warmups do not prove there were zero later recompiles. Check logs
 and profiles for compilation before making a small latency claim. Record GPU
 utilization and clocks externally around these runs.
 
@@ -100,5 +108,17 @@ coverage is outside this harness. Review traces to confirm the expected reductio
 in timestep copies and synchronizations; wall time alone does not establish the
 cause or a general speedup.
 
-Local preparation completed source hash generation and Python AST checks only.
+Local preparation completed source hash generation and Python AST, CLI help, and shell syntax checks only.
 No GPU correctness, model execution, timing, or trace result is claimed here.
+
+## Remote launcher
+
+`remote/run_sync.sh` runs against the pinned container and checked-out sync branch.
+It requires `SYNC_EXPECTED_SHA` to identify the exact pushed harness commit. Run
+`bash run_sync.sh diagnostic diagnostic-1` first for ordinary baseline correctness
+with two prompts and two steps, including a self-comparison of audit associations.
+Then run `bash run_sync.sh full full-1`. Every output tag must be new. The launcher
+checks the GPU is idle, the container identity, branch and source revision, model
+shards, repository import path, and source hashes. Shared Inductor and Triton caches
+live outside the repository. Dependencies come from the isolated staging directory;
+the launcher does not install packages or edit installed source.

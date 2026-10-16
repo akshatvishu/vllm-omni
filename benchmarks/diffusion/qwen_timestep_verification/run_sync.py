@@ -52,7 +52,8 @@ def main():
     engine_kwargs = dict(model=args.model, dtype="bfloat16", quantization="fp8",
         enforce_eager=args.eager, step_execution=args.mode == "step", max_num_seqs=1,
         diffusion_compile_granularity="regional", diffusion_compile_dynamic=True,
-        diffusion_kv_cache_dtype="auto", enable_cpu_offload=False, enable_layerwise_offload=False)
+        diffusion_kv_cache_dtype="auto", enable_cpu_offload=False, enable_layerwise_offload=False,
+        init_timeout=1800, stage_init_timeout=1800)
     if args.phase == "profile":
         engine_kwargs["profiler_config"] = {"profiler": "torch", "torch_profiler_dir": str(args.output / "trace"),
             "torch_profiler_with_stack": True}
@@ -64,11 +65,15 @@ def main():
         (args.output / "report.json").write_text(json.dumps(report, indent=2, default=str) + "\n")
     save()
     omni = Omni(**engine_kwargs)
+    audit_dir = args.output / "audit"
+    report["startup_audit_files"] = sorted(str(p.relative_to(args.output)) for p in audit_dir.glob("*.pt"))
+    save()
     try:
         def one(prompt_index, measured, request_index):
             params = OmniDiffusionSamplingParams(height=args.size, width=args.size, seed=142+prompt_index,
                 true_cfg_scale=4.0, guidance_scale=1.0, num_inference_steps=args.steps)
             prompt = {"prompt": PROMPTS[prompt_index], "negative_prompt": "", "modalities": ["image"]}
+            audit_before = set(audit_dir.glob("*.pt")) if args.phase == "correctness" else set()
             start = time.perf_counter()
             outputs = omni.generate(prompt, sampling_params_list=[params], use_tqdm=False)
             elapsed = (time.perf_counter() - start) * 1000
@@ -79,6 +84,12 @@ def main():
             item = dict(index=request_index, prompt_index=prompt_index, prompt=PROMPTS[prompt_index],
                 seed=142+prompt_index, measured=measured, request_ms=elapsed,
                 pixel_sha256=hashlib.sha256(pixels.tobytes()).hexdigest())
+            if args.phase == "correctness":
+                # The worker writes its audit synchronously before decode returns.
+                # Startup dummy requests have their own files; associate by set difference.
+                new_audits = set(audit_dir.glob("*.pt")) - audit_before
+                assert len(new_audits) == 1, sorted(str(p) for p in new_audits)
+                item["audit_file"] = str(new_audits.pop().relative_to(args.output))
             image.save(args.output / f"request-{request_index:03d}.png")
             report["requests"].append(item)
             save()
