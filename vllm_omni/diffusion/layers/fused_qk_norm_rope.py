@@ -629,8 +629,16 @@ def fused_qk_norm_rope_available(
     """Whether the fused CUDA kernels would run for activations of this
     device/dtype/geometry. Consumers gate their per-forward rope-table packing
     on it so CPU, NPU, ROCm and non-bf16 paths pay no allocation or copy."""
-    if not (HAS_TRITON and current_platform.is_cuda() and device.type == "cuda" and dtype == torch.bfloat16):
+    if not (HAS_TRITON and device.type == "cuda" and dtype == torch.bfloat16):
         return False
+    if not current_platform.is_cuda():
+        if not (
+            current_platform.is_rocm()
+            and interleaved
+            and head_dim == rotary_dim == 128
+            and torch.cuda.get_device_properties(device).gcnArchName.split(":")[0] == "gfx942"
+        ):
+            return False
     if interleaved:
         return rotary_dim % 2 == 0 and 2 <= rotary_dim <= head_dim <= _FUSED_MAX_HEAD_DIM
     return head_dim == _FUSED_HEAD_DIM and rotary_dim == _FUSED_ROTARY_DIM
