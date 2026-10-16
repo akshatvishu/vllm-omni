@@ -1,0 +1,9 @@
+{
+  "base": "f6a0b5f99634ca9b1eecc6bed10328eac4d28b11",
+  "question": "Does model-only timestep preloading preserve ordinary and step-mode Qwen outputs, and what is its standalone request effect?",
+  "workload": "Qwen/Qwen-Image 75e0b4be04f60ec59a75f475837eced720f823b6, single gfx942 GPU, 1024 square, 50 steps, CFG4, BF16 activations, online FP8, regional dynamic compile. Installed quantizer and attention unchanged in both arms. This is current main, not the historical patched stack.",
+  "correctness": "Five fixed prompts/seeds in run_sync.py, ordinary and step modes, baseline and timestep-only. Compare exact final latents, pixels and all model/scheduler timestep values. Scheduler timesteps must remain CPU. Record actual step-mode model input devices. Shared compiler cache across arms to control autotune choices; baseline repeat required if any candidate image differs.",
+  "timing": "Ordinary mode only. Three fresh-process pairs in AB, BA, AB order plus one independent A/A pair; two warmups and six measured requests each. No correctness audit hooks in timing. Same prewarmed Inductor/Triton caches and flags. Short two-step profiler traces are separate from timing.",
+  "decision": "Exactness is required. Report paired median request differences and A/A variation. Classify latency as unresolved when candidate effect does not exceed A/A variation or pairs disagree. Do not add repetitions to rescue results. This screen does not redefine the prior campaign's 1% adoption gate.",
+  "scope": "One active text-to-image request. Editing, layered models, multi-GPU, concurrent request batching and offload are not validated. No public PR is created by this experiment."
+}

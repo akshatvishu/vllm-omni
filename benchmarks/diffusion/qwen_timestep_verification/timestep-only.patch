@@ -1,0 +1,44 @@
+--- a/vllm_omni/diffusion/models/qwen_image/cfg_parallel.py
++++ b/vllm_omni/diffusion/models/qwen_image/cfg_parallel.py
+@@ -70,6 +70,8 @@
+         self.transformer.do_true_cfg = do_true_cfg
+         additional_transformer_kwargs = additional_transformer_kwargs or {}
+ 
++        model_timesteps = timesteps.to(device=latents.device, dtype=latents.dtype)
++
+         with self.progress_bar(total=len(timesteps)) as pbar:
+             for i, t in enumerate(timesteps):
+                 if self.interrupt:
+@@ -77,7 +79,7 @@
+                 self._current_timestep = t
+ 
+                 # Broadcast timestep to match batch size
+-                timestep = t.expand(latents.shape[0]).to(device=latents.device, dtype=latents.dtype)
++                timestep = model_timesteps[i].expand(latents.shape[0])
+ 
+                 # Concatenate image latents with noise latents if available (for editing pipelines)
+                 latent_model_input = latents
+--- a/vllm_omni/diffusion/models/qwen_image/pipeline_qwen_image.py
++++ b/vllm_omni/diffusion/models/qwen_image/pipeline_qwen_image.py
+@@ -818,6 +818,9 @@
+         state.negative_prompt_embeds_mask = ctx["negative_prompt_embeds_mask"]
+         state.latents = ctx["latents"]
+         state.timesteps = ctx["timesteps"]
++        state.extra["sync_model_timesteps"] = state.timesteps.to(
++            device=state.latents.device, dtype=state.latents.dtype
++        )
+         state.step_index = 0
+         state.scheduler = req_scheduler
+         state.do_true_cfg = ctx["do_true_cfg"]
+@@ -943,7 +946,10 @@
+ 
+         positive_kwargs, negative_kwargs, output_slice = self._build_denoise_kwargs(
+             latents=input_batch.latents,
+-            timestep=t,
++            timestep=torch.cat([
++                state.extra["sync_model_timesteps"][state.step_index].expand(state.latents.shape[0])
++                for state in input_batch.states
++            ]),
+             guidance=input_batch.guidance,
+             prompt_embeds=input_batch.prompt_embeds,
+             prompt_embeds_mask=input_batch.prompt_embeds_mask,
