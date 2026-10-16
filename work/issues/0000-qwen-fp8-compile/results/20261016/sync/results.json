@@ -1,0 +1,1013 @@
+{
+  "correctness": {
+    "ordinary": {
+      "requests": [
+        {
+          "prompt_index": 0,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "be8e30a19d9dc35ffd288fd89060727f6a4d83088db0e8972e4fce832d3de7d4"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "be8e30a19d9dc35ffd288fd89060727f6a4d83088db0e8972e4fce832d3de7d4"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {},
+            "candidate": {}
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        },
+        {
+          "prompt_index": 1,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "80360ea97672fdcbc2e685f884bd0fce54c0437311f62f99be98912701e438d9"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "80360ea97672fdcbc2e685f884bd0fce54c0437311f62f99be98912701e438d9"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {},
+            "candidate": {}
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        },
+        {
+          "prompt_index": 2,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "a8fcaf00794ad3e7d6d32aa45eb3d3284aa16c1a19425f9a85ebe1b438caada7"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "a8fcaf00794ad3e7d6d32aa45eb3d3284aa16c1a19425f9a85ebe1b438caada7"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {},
+            "candidate": {}
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        },
+        {
+          "prompt_index": 3,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "ca43c232703ea7a988800e0967c8878812ea172b82eab4fda0be29bbfa3b8ecf"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "ca43c232703ea7a988800e0967c8878812ea172b82eab4fda0be29bbfa3b8ecf"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {},
+            "candidate": {}
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        },
+        {
+          "prompt_index": 4,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "131b2394b768498da348286cc49a1d3c630b873d6abf70c56b36395f3e4f7582"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "131b2394b768498da348286cc49a1d3c630b873d6abf70c56b36395f3e4f7582"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {},
+            "candidate": {}
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        }
+      ],
+      "pass": true
+    },
+    "step": {
+      "requests": [
+        {
+          "prompt_index": 0,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "be8e30a19d9dc35ffd288fd89060727f6a4d83088db0e8972e4fce832d3de7d4"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "be8e30a19d9dc35ffd288fd89060727f6a4d83088db0e8972e4fce832d3de7d4"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        },
+        {
+          "prompt_index": 1,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "80360ea97672fdcbc2e685f884bd0fce54c0437311f62f99be98912701e438d9"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "80360ea97672fdcbc2e685f884bd0fce54c0437311f62f99be98912701e438d9"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        },
+        {
+          "prompt_index": 2,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "a8fcaf00794ad3e7d6d32aa45eb3d3284aa16c1a19425f9a85ebe1b438caada7"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "a8fcaf00794ad3e7d6d32aa45eb3d3284aa16c1a19425f9a85ebe1b438caada7"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        },
+        {
+          "prompt_index": 3,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "ca43c232703ea7a988800e0967c8878812ea172b82eab4fda0be29bbfa3b8ecf"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "ca43c232703ea7a988800e0967c8878812ea172b82eab4fda0be29bbfa3b8ecf"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        },
+        {
+          "prompt_index": 4,
+          "pixels_equal": true,
+          "latents_equal": true,
+          "latent_byte_proof": {
+            "baseline": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "131b2394b768498da348286cc49a1d3c630b873d6abf70c56b36395f3e4f7582"
+            },
+            "candidate": {
+              "dtype": "torch.bfloat16",
+              "shape": [
+                1,
+                4096,
+                64
+              ],
+              "sha256": "131b2394b768498da348286cc49a1d3c630b873d6abf70c56b36395f3e4f7582"
+            }
+          },
+          "latent_max_abs": 0.0,
+          "build_input_device_counts": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "model_timesteps_equal": true,
+          "model_timesteps_byte_sequence_sha256": {
+            "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+            "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+          },
+          "model_timesteps_devices": {
+            "baseline": {
+              "cuda:0": 50
+            },
+            "candidate": {
+              "cuda:0": 50
+            }
+          },
+          "scheduler_timesteps_equal": true,
+          "scheduler_timesteps_byte_sequence_sha256": {
+            "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+            "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+          },
+          "scheduler_timesteps_devices": {
+            "baseline": {
+              "cpu": 50
+            },
+            "candidate": {
+              "cpu": 50
+            }
+          },
+          "pass": true
+        }
+      ],
+      "pass": true
+    },
+    "cross_mode_informational": [
+      {
+        "pixels_equal": true,
+        "latents_equal": true,
+        "latent_byte_proof": {
+          "baseline": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "be8e30a19d9dc35ffd288fd89060727f6a4d83088db0e8972e4fce832d3de7d4"
+          },
+          "candidate": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "be8e30a19d9dc35ffd288fd89060727f6a4d83088db0e8972e4fce832d3de7d4"
+          }
+        },
+        "latent_max_abs": 0.0,
+        "build_input_device_counts": {
+          "baseline": {},
+          "candidate": {
+            "cpu": 50
+          }
+        },
+        "model_timesteps_equal": true,
+        "model_timesteps_byte_sequence_sha256": {
+          "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+          "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+        },
+        "model_timesteps_devices": {
+          "baseline": {
+            "cuda:0": 50
+          },
+          "candidate": {
+            "cuda:0": 50
+          }
+        },
+        "scheduler_timesteps_equal": true,
+        "scheduler_timesteps_byte_sequence_sha256": {
+          "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+          "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+        },
+        "scheduler_timesteps_devices": {
+          "baseline": {
+            "cpu": 50
+          },
+          "candidate": {
+            "cpu": 50
+          }
+        }
+      },
+      {
+        "pixels_equal": true,
+        "latents_equal": true,
+        "latent_byte_proof": {
+          "baseline": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "80360ea97672fdcbc2e685f884bd0fce54c0437311f62f99be98912701e438d9"
+          },
+          "candidate": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "80360ea97672fdcbc2e685f884bd0fce54c0437311f62f99be98912701e438d9"
+          }
+        },
+        "latent_max_abs": 0.0,
+        "build_input_device_counts": {
+          "baseline": {},
+          "candidate": {
+            "cpu": 50
+          }
+        },
+        "model_timesteps_equal": true,
+        "model_timesteps_byte_sequence_sha256": {
+          "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+          "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+        },
+        "model_timesteps_devices": {
+          "baseline": {
+            "cuda:0": 50
+          },
+          "candidate": {
+            "cuda:0": 50
+          }
+        },
+        "scheduler_timesteps_equal": true,
+        "scheduler_timesteps_byte_sequence_sha256": {
+          "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+          "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+        },
+        "scheduler_timesteps_devices": {
+          "baseline": {
+            "cpu": 50
+          },
+          "candidate": {
+            "cpu": 50
+          }
+        }
+      },
+      {
+        "pixels_equal": true,
+        "latents_equal": true,
+        "latent_byte_proof": {
+          "baseline": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "a8fcaf00794ad3e7d6d32aa45eb3d3284aa16c1a19425f9a85ebe1b438caada7"
+          },
+          "candidate": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "a8fcaf00794ad3e7d6d32aa45eb3d3284aa16c1a19425f9a85ebe1b438caada7"
+          }
+        },
+        "latent_max_abs": 0.0,
+        "build_input_device_counts": {
+          "baseline": {},
+          "candidate": {
+            "cpu": 50
+          }
+        },
+        "model_timesteps_equal": true,
+        "model_timesteps_byte_sequence_sha256": {
+          "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+          "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+        },
+        "model_timesteps_devices": {
+          "baseline": {
+            "cuda:0": 50
+          },
+          "candidate": {
+            "cuda:0": 50
+          }
+        },
+        "scheduler_timesteps_equal": true,
+        "scheduler_timesteps_byte_sequence_sha256": {
+          "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+          "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+        },
+        "scheduler_timesteps_devices": {
+          "baseline": {
+            "cpu": 50
+          },
+          "candidate": {
+            "cpu": 50
+          }
+        }
+      },
+      {
+        "pixels_equal": true,
+        "latents_equal": true,
+        "latent_byte_proof": {
+          "baseline": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "ca43c232703ea7a988800e0967c8878812ea172b82eab4fda0be29bbfa3b8ecf"
+          },
+          "candidate": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "ca43c232703ea7a988800e0967c8878812ea172b82eab4fda0be29bbfa3b8ecf"
+          }
+        },
+        "latent_max_abs": 0.0,
+        "build_input_device_counts": {
+          "baseline": {},
+          "candidate": {
+            "cpu": 50
+          }
+        },
+        "model_timesteps_equal": true,
+        "model_timesteps_byte_sequence_sha256": {
+          "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+          "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+        },
+        "model_timesteps_devices": {
+          "baseline": {
+            "cuda:0": 50
+          },
+          "candidate": {
+            "cuda:0": 50
+          }
+        },
+        "scheduler_timesteps_equal": true,
+        "scheduler_timesteps_byte_sequence_sha256": {
+          "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+          "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+        },
+        "scheduler_timesteps_devices": {
+          "baseline": {
+            "cpu": 50
+          },
+          "candidate": {
+            "cpu": 50
+          }
+        }
+      },
+      {
+        "pixels_equal": true,
+        "latents_equal": true,
+        "latent_byte_proof": {
+          "baseline": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "131b2394b768498da348286cc49a1d3c630b873d6abf70c56b36395f3e4f7582"
+          },
+          "candidate": {
+            "dtype": "torch.bfloat16",
+            "shape": [
+              1,
+              4096,
+              64
+            ],
+            "sha256": "131b2394b768498da348286cc49a1d3c630b873d6abf70c56b36395f3e4f7582"
+          }
+        },
+        "latent_max_abs": 0.0,
+        "build_input_device_counts": {
+          "baseline": {},
+          "candidate": {
+            "cpu": 50
+          }
+        },
+        "model_timesteps_equal": true,
+        "model_timesteps_byte_sequence_sha256": {
+          "baseline": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2",
+          "candidate": "d509883bf4bfb5fa49395679db8448b3ddfcd033b136b084eee0049ffe2b92b2"
+        },
+        "model_timesteps_devices": {
+          "baseline": {
+            "cuda:0": 50
+          },
+          "candidate": {
+            "cuda:0": 50
+          }
+        },
+        "scheduler_timesteps_equal": true,
+        "scheduler_timesteps_byte_sequence_sha256": {
+          "baseline": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b",
+          "candidate": "acd27023d674901a18c7b6e73b5dce8cbe857ef6f087bca9ae4f59e2c3d2629b"
+        },
+        "scheduler_timesteps_devices": {
+          "baseline": {
+            "cpu": 50
+          },
+          "candidate": {
+            "cpu": 50
+          }
+        }
+      }
+    ]
+  },
+  "timing": {
+    "samples_ms": {
+      "timing-p1-a": [
+        14110.649152000406,
+        14139.144450999083,
+        14171.889842999008,
+        14203.46334199894,
+        14159.903604000647,
+        14216.005342999779
+      ],
+      "timing-p1-b": [
+        14126.485471000706,
+        14190.094488998511,
+        14140.550812999209,
+        14215.513923998515,
+        14154.606953999973,
+        14209.517481000148
+      ],
+      "timing-p2-b": [
+        14086.798009000631,
+        14161.80813200117,
+        14070.573966000666,
+        14170.052471999952,
+        14121.744571999443,
+        14205.972105999535
+      ],
+      "timing-p2-a": [
+        14110.03828200046,
+        14193.834683001114,
+        14153.117485999246,
+        14216.57811499972,
+        14193.71896300072,
+        14214.262965000671
+      ],
+      "timing-p3-a": [
+        14063.948352999432,
+        14175.418851000359,
+        14095.438067999567,
+        14140.200652998828,
+        14139.179153999066,
+        14169.013354001436
+      ],
+      "timing-p3-b": [
+        14136.574215999644,
+        14165.419439001198,
+        14144.971436999185,
+        14187.363707000259,
+        14184.069191998788,
+        14211.596725999698
+      ],
+      "timing-aa-1": [
+        14116.767933001029,
+        14164.19810699881,
+        14163.469577999422,
+        14187.936223001088,
+        14190.718304000256,
+        14226.625530000092
+      ],
+      "timing-aa-2": [
+        14109.823064000011,
+        14139.172200999383,
+        14155.763265998758,
+        14165.267473999847,
+        14133.358922999832,
+        14156.948142999681
+      ]
+    },
+    "pairs": [
+      {
+        "pair": 1,
+        "order": "AB",
+        "baseline_median_ms": 14165.896723499827,
+        "candidate_median_ms": 14172.350721499242,
+        "reduction_ms": -6.453997999415151,
+        "reduction_percent": -0.04556010908020107
+      },
+      {
+        "pair": 2,
+        "order": "BA",
+        "baseline_median_ms": 14193.776823000917,
+        "candidate_median_ms": 14141.776352000306,
+        "reduction_ms": 52.00047100061056,
+        "reduction_percent": 0.3663610584347371
+      },
+      {
+        "pair": 3,
+        "order": "AB",
+        "baseline_median_ms": 14139.689903498947,
+        "candidate_median_ms": 14174.744315499993,
+        "reduction_ms": -35.05441200104542,
+        "reduction_percent": -0.24791499842136572
+      }
+    ],
+    "observed_order": [
+      "timing-p1-a",
+      "timing-p1-b",
+      "timing-p2-b",
+      "timing-p2-a",
+      "timing-p3-a",
+      "timing-p3-b",
+      "timing-aa-1",
+      "timing-aa-2"
+    ],
+    "aa": {
+      "first_median_ms": 14176.06716499995,
+      "second_median_ms": 14147.46773349907,
+      "absolute_difference_ms": 28.59943150087929,
+      "absolute_difference_percent": 0.20174446952036146
+    },
+    "classification": "unresolved",
+    "median_paired_reduction_ms": -6.453997999415151,
+    "median_paired_reduction_percent": -0.04556010908020107,
+    "pair_signs_agree": false,
+    "median_effect_exceeds_aa": false,
+    "all_individual_effects_exceed_aa": false,
+    "decision_rule": "Compare absolute median of the three paired median differences with absolute A/A median difference; pair signs must agree.",
+    "adoption": "This screen does not redefine or establish the prior campaign's 1% adoption gate."
+  },
+  "errors": [],
+  "pending": [],
+  "complete": true,
+  "pass": true
+}

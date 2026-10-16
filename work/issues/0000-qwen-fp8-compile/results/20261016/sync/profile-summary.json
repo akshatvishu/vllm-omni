@@ -1,0 +1,344 @@
+{
+  "baseline": {
+    "sha256": "5b7835dec8813b9f9565404711d1c8bbd27721ed7f9a7b25307a1f6d69aa87fc",
+    "event_count": 718039,
+    "api_counts": {
+      "hipMemcpyWithStream": 19,
+      "hipStreamSynchronize": 6,
+      "hipMemcpyAsync": 44,
+      "hipDeviceSynchronize": 1
+    },
+    "copy_counts_by_hip_kind": {
+      "1": 12,
+      "2": 7,
+      "3": 44
+    },
+    "hip_kind_convention": {
+      "1": "host to device",
+      "2": "device to host",
+      "3": "device to device"
+    },
+    "copy_and_sync_groups": [
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "1",
+        "bytes_per_call": 424,
+        "count": 2,
+        "api_duration_us": 93.894
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "1",
+        "bytes_per_call": 312,
+        "count": 6,
+        "api_duration_us": 168.997
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "2",
+        "bytes_per_call": 4,
+        "count": 4,
+        "api_duration_us": 367.40700000000004
+      },
+      {
+        "name": "hipStreamSynchronize",
+        "kind": "",
+        "bytes_per_call": 0,
+        "count": 6,
+        "api_duration_us": 83.65299999999999
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "2",
+        "bytes_per_call": 8,
+        "count": 2,
+        "api_duration_us": 54.668
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 136192,
+        "count": 2,
+        "api_duration_us": 32.858
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 152,
+        "count": 2,
+        "api_duration_us": 14.23
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 35840,
+        "count": 2,
+        "api_duration_us": 20.490000000000002
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 40,
+        "count": 2,
+        "api_duration_us": 11.283000000000001
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "1",
+        "bytes_per_call": 2,
+        "count": 2,
+        "api_duration_us": 81.36699999999999
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 2097152,
+        "count": 4,
+        "api_duration_us": 40.566
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "1",
+        "bytes_per_call": 32,
+        "count": 2,
+        "api_duration_us": 57.6
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 524288,
+        "count": 2,
+        "api_duration_us": 19.332
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 12582912,
+        "count": 10,
+        "api_duration_us": 95.647
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 25165824,
+        "count": 2,
+        "api_duration_us": 21.204
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 50331648,
+        "count": 5,
+        "api_duration_us": 55.634
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 100663296,
+        "count": 6,
+        "api_duration_us": 47.379000000000005
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 201326592,
+        "count": 7,
+        "api_duration_us": 73.018
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "2",
+        "bytes_per_call": 6291456,
+        "count": 1,
+        "api_duration_us": 99324.999
+      },
+      {
+        "name": "hipDeviceSynchronize",
+        "kind": "",
+        "bytes_per_call": 0,
+        "count": 1,
+        "api_duration_us": 35.167
+      }
+    ],
+    "compiled_region_execution_count": 240,
+    "limits": [
+      "API duration includes host overhead and potential waiting; it is not isolated DMA time.",
+      "Attribution uses same-thread timestamp containment followed by explicit Python parent IDs; source function locations do not identify the exact statement line.",
+      "Direct Tensor.to under Qwen diffuse can be linked to timestep preparation by reviewing that function; other nested copies are not model timestep copies.",
+      "GPU memcpy lane coverage is incomplete here; use HIP API kind and byte metadata for counts, not the gpu_memcpy category alone. Some transfers appear as __amd_rocclr_copyBuffer.kd kernel events, linked by correlation ID.",
+      "Recognized compiler entry events use explicit names and exclude normal Torch-Compiled Region / CompiledFxGraph execution. Their absence is not a complete proof of no compilation.",
+      "These are two-step instrumented traces. They cannot establish a 50-step end-to-end speedup."
+    ]
+  },
+  "candidate": {
+    "sha256": "15adbb85e30343b15743bb054eca2ebc65e1cf5dabe92e106062b9714a0ce1f6",
+    "event_count": 722626,
+    "api_counts": {
+      "hipMemcpyWithStream": 18,
+      "hipStreamSynchronize": 6,
+      "hipMemcpyAsync": 44,
+      "hipDeviceSynchronize": 1
+    },
+    "copy_counts_by_hip_kind": {
+      "1": 11,
+      "2": 7,
+      "3": 44
+    },
+    "hip_kind_convention": {
+      "1": "host to device",
+      "2": "device to host",
+      "3": "device to device"
+    },
+    "copy_and_sync_groups": [
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "1",
+        "bytes_per_call": 424,
+        "count": 2,
+        "api_duration_us": 84.589
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "1",
+        "bytes_per_call": 312,
+        "count": 6,
+        "api_duration_us": 171.002
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "2",
+        "bytes_per_call": 4,
+        "count": 4,
+        "api_duration_us": 433.75199999999995
+      },
+      {
+        "name": "hipStreamSynchronize",
+        "kind": "",
+        "bytes_per_call": 0,
+        "count": 6,
+        "api_duration_us": 85.84100000000001
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "2",
+        "bytes_per_call": 8,
+        "count": 2,
+        "api_duration_us": 54.295
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 136192,
+        "count": 2,
+        "api_duration_us": 20.466
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 152,
+        "count": 2,
+        "api_duration_us": 19.68
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 35840,
+        "count": 2,
+        "api_duration_us": 21.96
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 40,
+        "count": 2,
+        "api_duration_us": 10.693999999999999
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "1",
+        "bytes_per_call": 4,
+        "count": 1,
+        "api_duration_us": 37.67
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 2097152,
+        "count": 4,
+        "api_duration_us": 43.4
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "1",
+        "bytes_per_call": 32,
+        "count": 2,
+        "api_duration_us": 69.46600000000001
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 524288,
+        "count": 2,
+        "api_duration_us": 26.23
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 12582912,
+        "count": 10,
+        "api_duration_us": 113.42599999999999
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 25165824,
+        "count": 2,
+        "api_duration_us": 29.604
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 50331648,
+        "count": 5,
+        "api_duration_us": 53.047000000000004
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 100663296,
+        "count": 6,
+        "api_duration_us": 52.836
+      },
+      {
+        "name": "hipMemcpyAsync",
+        "kind": "3",
+        "bytes_per_call": 201326592,
+        "count": 7,
+        "api_duration_us": 83.924
+      },
+      {
+        "name": "hipMemcpyWithStream",
+        "kind": "2",
+        "bytes_per_call": 6291456,
+        "count": 1,
+        "api_duration_us": 96533.617
+      },
+      {
+        "name": "hipDeviceSynchronize",
+        "kind": "",
+        "bytes_per_call": 0,
+        "count": 1,
+        "api_duration_us": 32.972
+      }
+    ],
+    "compiled_region_execution_count": 240,
+    "limits": [
+      "API duration includes host overhead and potential waiting; it is not isolated DMA time.",
+      "Attribution uses same-thread timestamp containment followed by explicit Python parent IDs; source function locations do not identify the exact statement line.",
+      "Direct Tensor.to under Qwen diffuse can be linked to timestep preparation by reviewing that function; other nested copies are not model timestep copies.",
+      "GPU memcpy lane coverage is incomplete here; use HIP API kind and byte metadata for counts, not the gpu_memcpy category alone. Some transfers appear as __amd_rocclr_copyBuffer.kd kernel events, linked by correlation ID.",
+      "Recognized compiler entry events use explicit names and exclude normal Torch-Compiled Region / CompiledFxGraph execution. Their absence is not a complete proof of no compilation.",
+      "These are two-step instrumented traces. They cannot establish a 50-step end-to-end speedup."
+    ]
+  }
+}
