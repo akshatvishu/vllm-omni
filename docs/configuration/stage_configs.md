@@ -35,7 +35,7 @@ Common `StagePipelineConfig` fields include:
 | `final_output` / `final_output_type` | Whether the stage produces a user-visible output and its modality. |
 | `owns_tokenizer` | Whether this stage owns the pipeline tokenizer. |
 | `model_arch`, `hf_config_name` | Stage-specific model architecture and nested HF config selector. |
-| `engine_output_type` | Runtime output representation such as `text`, `latent`, or `audio`. |
+| `engine_output_type` | Canonical runtime output type: `text`, `image`, `audio`, `latent`, or `token_ids`. |
 | `custom_process_input_func` | Processor applied to this stage's incoming payload. |
 | `custom_process_next_stage_input_func` | Processor used for full-payload handoff to the next stage. |
 | `async_chunk_process_next_stage_input_func` | Processor used for async chunk handoff. |
@@ -44,6 +44,50 @@ Common `StagePipelineConfig` fields include:
 To add or change topology, define and register a new pipeline variant. Use
 deploy YAML only for runtime placement, resource sizing, connectors, and other
 deployment overrides.
+
+### Engine output types
+
+`engine_output_type` is parsed when the LLM stage's output processor is built
+during service initialization. Invalid values fail startup before requests
+are accepted; engine replicas may already have been initialized at that point
+and are cleaned up on failure.
+
+Use the exact lowercase names listed above. Combinations such as `text+audio`
+or `text,audio` remain supported, with every component canonical. Omitted or
+`None` values retain the default behavior (`TEXT` in the output processor).
+Empty strings, whitespace, case variants, and aliases are rejected.
+
+For existing custom pipelines or direct callers, replace old aliases explicitly:
+
+| Old value | Canonical value |
+| ------- | ------- |
+| `speech`, `wav`, `waveform` | `audio` |
+| `images`, `pixel_values`, `pixels` | `image` |
+| `latents` | `latent` |
+| `tokens` | `text` for text output, or `token_ids` for discrete IDs |
+
+`token_ids` is a separate type, not a `text` alias. It describes discrete
+vocabulary or codebook indices, distinct from continuous latent representations.
+Existing models using `latent` retain their historical payload contracts.
+GLM-Image's AR stage keeps `engine_output_type="token_ids"`; generated IDs still
+travel through `cumulative_token_ids`, and source-image IDs through
+`ids.prior_image`.
+
+Bare primary tensors and generic producer keys (`model_outputs` or `hidden`)
+use the declared type as their default output key, including `token_ids`.
+The normalizer does not inspect or convert their dtype. Distinct auxiliary
+outputs must use explicit field names: `model_outputs` and `hidden` both map
+to the same default key and must not represent two independent outputs.
+GLM-Image disables auxiliary hidden output for its default GPU execution.
+Some runner paths still attach it; that field is then named `token_ids` even
+though it contains hidden states. The GLM-Image bridge ignores this auxiliary
+field and reads generated IDs from `cumulative_token_ids` instead.
+
+Token-ID tensors use the existing dimension-0 accumulation default, subject to
+registered per-key overrides, and remain available after DELTA emissions.
+This is separate from the existing accumulation of `cumulative_token_ids`.
+`final_output_type` and Diffusion's `output_type` are separate settings and are
+unchanged by these rules.
 
 ## Deploy configuration schema
 
@@ -78,7 +122,72 @@ explicit CLI or stage override, or the downstream vLLM engine default.
 Note: for the diffusion path, an omitted `distributed_executor_backend` selects
 `uni` on a single GPU (in-process worker, no MessageQueue / `/dev/shm` output
 segments) and `mp` when `num_gpus > 1`. Set `mp` explicitly to keep a worker
-subprocess on one GPU. `ray` / `external_launcher` are not fully supported yet.
+subprocess on one GPU. Set `ray` for Ray-managed single- or multi-node
+diffusion workers. `external_launcher` is not supported yet.
+
+The diffusion `ray` backend runs one worker actor per GPU and supports workers
+spanning Ray nodes. Enable it in the deploy YAML:
+
+```yaml
+distributed_executor_backend: ray
+```
+
+The executor reuses Ray when already initialized; otherwise it calls
+`ray.init()`, which handles cluster discovery or local startup and respects
+`RAY_ADDRESS`. There is no diffusion-specific address setting. Ray must be
+installed on every node.
+
+Ray diffusion workers receive the driver's `VLLM_*`, `OMNI_*`, `DIFFUSION_*`,
+`NCCL_*`, `TORCH_NCCL_*`, `UCX_*`, and Hugging Face environment settings,
+plus `PYTHONPATH`, `CUDA_LAUNCH_BLOCKING`, and `OMP_NUM_THREADS`.
+Explicit stage `runtime.env` entries are also forwarded and take precedence.
+Device visibility, rank/rendezvous settings, worker host addresses, and `RAY_*`
+variables are excluded so each worker retains its own assignment and identity.
+
+For multiple nodes, start the cluster before launching Omni. For example,
+with head IP `10.0.0.1`:
+
+```bash
+# On the head node:
+ray start --head --node-ip-address=10.0.0.1 --port=6379
+
+# On each additional worker node:
+ray start --address=10.0.0.1:6379
+
+# On the host launching Omni (MODEL and my_deploy.yaml are placeholders):
+RAY_ADDRESS=10.0.0.1:6379 vllm serve MODEL --omni --deploy-config my_deploy.yaml
+```
+
+Omni creates actors on the resources of that cluster; it does not start Ray
+on additional machines.
+
+### Stage CPU placement
+
+On Linux, stages can use vLLM's NUMA settings to select CPU lists. Add the
+settings to the existing stage entries in your deploy configuration:
+
+```yaml
+stages:
+  - stage_id: 0
+    numa_bind: true
+    numa_bind_nodes: [0]
+    numa_bind_cpus: ["2-3"]
+  - stage_id: 1
+    numa_bind: true
+    numa_bind_nodes: [0]
+    numa_bind_cpus: ["4-7"]
+```
+
+These CPU and NUMA indices are examples; choose indices available to the
+process or container. Use one CPU-list entry per visible GPU.
+Binding requires `numactl` and
+`VLLM_WORKER_MULTIPROC_METHOD=spawn`.
+
+With an in-process executor (`uni`), the worker's CPU list applies to the
+stage EngineCore itself. With a multiprocess executor (`mp`), workers use
+their CPU lists and EngineCore retains its wider NUMA-node binding. Choose
+CPU sets away from competing workloads; affinity does not reserve CPUs
+exclusively.
 
 ### Stage-level runner selection
 
@@ -88,12 +197,74 @@ one stage to migrate or roll back independently. This does not change
 `PipelineConfig` topology, input adapters, or the connector payload contract.
 An omitted stage override preserves the deploy-level selection.
 
-MRv2 native downstream receivers currently support turn-based requests only;
-streaming sessions and resumable input require the V1 prompt-replacement path.
-Selecting a runner does not add the session capabilities it lacks. Platform
-fallbacks and stage overrides are validated after configuration resolution.
+MRv2 native downstream receivers accept turn-based requests. A pipeline that
+sets `supports_duplex_mrv2` also accepts duplex sessions on those stages.
+Qwen3-Omni and MiniCPM-o 4.5 set that flag. Resumable streaming input uses the
+V1 prompt-replacement path unless the pipeline implements the MRv2 equivalent.
+Selecting a runner does not add session capabilities the pipeline lacks.
+Platform fallbacks and stage overrides are validated after configuration
+resolution.
 
 ### Stage fields
+
+#### Operator backends
+
+AR stages accept `attention_backend`, `moe_backend`, and `linear_backend`.
+Diffusion stages share `moe_backend` and `linear_backend`, but use their own
+`diffusion_attention_config` (or the deprecated `diffusion_attention_backend`
+shorthand), not AR's `attention_backend`.
+
+These backend fields are stage-only: set them under each `stages` entry, not
+at the deploy YAML top level, where they are ignored.
+
+For a pipeline with AR stage 0 and diffusion stage 1, the deploy fragment is:
+
+```yaml
+stages:
+  - stage_id: 0
+    attention_backend: TRITON_ATTN
+    moe_backend: auto
+    linear_backend: torch
+  - stage_id: 1
+    diffusion_attention_config:
+      default: TORCH_SDPA
+    moe_backend: auto
+    linear_backend: torch
+```
+
+The deploy fields default to `null` (no override). Effective MoE/linear
+defaults remain `auto`, and explicit `auto` remains distinct from omission.
+`KernelConfig` supplies validation and case/hyphen normalization. AR attention
+continues to use upstream enum parsing and `auto`/`None` semantics.
+
+CLI/runtime values retain their existing precedence. A first-class backend
+field wins over the same `engine_extras` key, with a warning on conflict;
+extras-only configurations remain supported. Existing backend fallback rules
+are unchanged, and this PR does not claim support for unvalidated platforms.
+For typed diffusion stages, an explicitly supplied model-config backend wins
+over a different explicitly supplied diffusion-config backend, with a warning.
+In vLLM 0.29, unquantized ROCm GEMM dispatch does not consult `linear_backend`;
+NPU plugin behavior is not validated here. Plain `torch.nn.Linear` layers do
+not consume vLLM's kernel configuration.
+
+An offline CUDA component smoke test runs a tiny, randomly initialized native
+FLUX transformer, checks the actual linear callable and SDPA implementation,
+and executes a forward pass (no weights download or image-quality claim):
+
+```bash
+pytest -s -v tests/diffusion/models/flux/test_backend_selection.py -m 'local_model and cuda'
+```
+
+The CPU config regression suite is collected by the existing L1 job:
+
+```bash
+pytest -s -v tests/config/test_backend_selection.py -m 'core_model and cpu'
+```
+
+Both commands require matching vLLM/vLLM-Omni dependencies. The component smoke
+test additionally needs one CUDA GPU; it is opt-in and not a performance claim.
+
+#### Field reference
 
 Each entry under `stages:` accepts any `StageDeployConfig` field directly (no nested `engine_args:`). Only fields whose value legitimately varies across stages live here; pipeline-wide settings (trust_remote_code, distributed_executor_backend, dtype, quantization, prefix/chunked prefill, DP/PP sizes) are declared at the top level and applied to every stage. Unknown keys fall through to `engine_extras:` and are forwarded to the engine. Frequently used fields are listed below; the source-of-truth schema is `StageDeployConfig` in `vllm_omni/config/stage_config.py`.
 
@@ -164,6 +335,8 @@ The stage-based CLI paradigm facilitates the execution of discrete pipeline stag
   `--omni-master-address`, `--omni-master-port`, and standard port declarations (e.g., `--port`).
 - **Worker Stages** operate without a distinct API server (i.e., using `--headless`), are assigned sequential `--stage-id` identifiers, and must reference the corresponding
   `--omni-master-address` and `--omni-master-port` parameters to successfully register with Stage 0.
+
+You may also explicitly pass `--stage-id none` to run only the API server and orchestrator if you want to run every stage as headless.
 
 For migrated architectures, the system automatically resolves and loads the bundled deployment YAML. Consequently, the primary execution path
 does **not** necessitate the explicit definition of `--deploy-config`:
@@ -517,47 +690,32 @@ the intended GPU, and warm the complete pipeline before measuring performance.
 
 ## MOSS-TTS Local 1.5 with Model Runner V2
 
-`OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5` can opt into CUDA MRV2 using
-the shared runtime introduced for Qwen3-TTS:
+`OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5` uses one default deployment,
+`moss_tts_local.yaml`. Omitting `--deploy-config` selects the same file:
 
 ```bash
 vllm serve OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5 --omni \
-  --deploy-config vllm_omni/deploy/moss_tts_local_mrv2.yaml
+  --deploy-config vllm_omni/deploy/moss_tts_local.yaml
 ```
 
-This profile inherits the batching, codec graph buckets and 1-frame/15-frame
-chunk geometry from `moss_tts_local.yaml`, and selects V2 for both the Local
-Talker and codec stages. The Local depth predictor exposes the MRV2 `mtp`
-capabilities while retaining its V1 `talker_mtp` implementation, sampling
-defaults and explicit request-seed handling. Codec chunks use the native data
-plane; the internal Talker retains its final-only orchestrator output policy.
+On CUDA, both stages use MRV2 and 128 stream slots on one GPU, with full-quota
+private MPS, a 32 GiB Talker KV budget, prefix caching and Triton attention.
+The Talker bounds prefill to 512 tokens and uses FULL CUDA graphs. The codec
+uses `triton_slot`, Inductor compilation, codec-owned graphs through batch
+128 and dispatch coalescing at 16 rows or 6 ms. Initial and steady chunks
+remain 1 and 15 codec frames; the Stage0 first-frame path follows the Talker
+capture sizes and safe-request/executor requirements.
 
-On CUDA, the profile bounds stage-0 prefill work to 512 tokens per iteration.
-The codec retains its own CUDA Graph capture/replay, including batch buckets
-through 64, but disables Inductor compilation (`compilation_config.mode: 0`)
-of the stateful decoder to avoid lengthy compilation at startup. This is
-independent of `enforce_eager`; the profile keeps `enforce_eager: false`.
-It explicitly selects `cudagraph_mode: FULL`, which works without Inductor;
-the default `FULL_AND_PIECEWISE` would otherwise normalize to `NONE` and clear
-the codec's capture buckets when compilation is disabled.
+These CUDA settings are validated on H200 and require memory for both stages
+and their graph/state pools, plus `nvidia-cuda-mps-control` on `PATH`. Smaller
+GPUs and services without MPS should provide deployment overrides for the
+capacities, capture sizes, KV budget and `platforms.cuda.cuda_mps`. The
+pipeline no longer changes configuration based on a GPU-memory or MPS probe.
 
-For sustained C128 serving on a large-memory CUDA GPU, select the
-separate `moss_tts_local_mrv2_high_concurrency.yaml` profile. It uses 128
-stream slots per stage, a 32 GiB Talker KV budget, and the codec's
-`triton_slot` backend with Inductor compilation and codec-owned CUDA graphs.
-The bounded KV budget leaves room for codec state and graphs; it does not
-guarantee that 128 maximum-length prompts fit simultaneously. See the
-[MOSS recipe](gh-file:recipes/OpenMOSS/MOSS-TTS.md#local-15-mrv2-and-slot-attention)
-for activation, backend comparisons, memory requirements and benchmark commands.
-
-Omitting `--deploy-config`, or selecting `moss_tts_local.yaml`, retains V1.
-NPU, XPU, ROCm and MUSA overrides also retain V1. This profile does not enable
-MRV2 for MOSS Delay, Realtime or Nano. Local 1.5 outputs 48 kHz stereo audio;
-set `VLLM_OMNI_BENCH_AUDIO_SAMPLE_RATE=48000` and
-`VLLM_OMNI_BENCH_AUDIO_CHANNELS=2` when benchmarking raw PCM.
-
-Event-driven orchestration remains independently selectable with
-`VLLM_OMNI_EVENT_DRIVEN_ORCH=0` or `1`. Keep the runner and deployment identical
-when comparing these modes. Model-runner selection does not change the
-orchestration default or enable experimental reference encoding, chunk ramps,
-generation-output draining or MPS.
+Other platforms use V1 in the same file; NPU keeps its codec graph override.
+The 2/3-NPU files retain their distinct multi-device topology. These changes
+do not enable MRV2 for MOSS Delay, Realtime or Nano. Local 1.5 emits 48 kHz
+stereo; benchmark raw PCM with `VLLM_OMNI_BENCH_AUDIO_SAMPLE_RATE=48000` and
+`VLLM_OMNI_BENCH_AUDIO_CHANNELS=2`. See the
+[MOSS recipe](gh-file:recipes/OpenMOSS/MOSS-TTS.md#local-15-unified-deployment-and-slot-attention)
+for the execution path and configuration overrides.
