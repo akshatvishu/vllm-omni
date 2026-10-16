@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
 import os
+import struct
 from collections.abc import Callable
 from dataclasses import replace
 from functools import cache, partial
@@ -10,6 +11,7 @@ from typing import NamedTuple
 import torch
 from vllm.logger import init_logger
 
+from vllm_omni.diffusion import envs
 from vllm_omni.diffusion.attention.backends.abstract import AttentionBackend, AttentionImpl, AttentionMetadata
 from vllm_omni.diffusion.attention.backends.sdpa import _maybe_reshape_attn_mask
 from vllm_omni.diffusion.attention.backends.utils.piecewise_attn import (
@@ -25,6 +27,11 @@ from vllm_omni.diffusion.attention.capabilities import (
     PackingMode,
     ParallelStrategy,
     SupportStatus,
+)
+from vllm_omni.diffusion.attention.ops.moonmath_attention import moonmath_attention, moonmath_devices
+from vllm_omni.diffusion.attention.ops.rocm_fp8_attention import (
+    rocm_fp8_attention,
+    rocm_fp8_attention_available,
 )
 from vllm_omni.diffusion.config import get_current_diffusion_config_or_none
 from vllm_omni.platforms import current_omni_platform
@@ -231,6 +238,7 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
     # ``Attention(disable_kv_quant=True)``.
     _supported_kv_cache_dtypes = {
         "npu": {"fp8", "mxfp8", "mxfp4"},
+        "rocm": {"fp8"},
     }
 
     def __init__(
@@ -254,6 +262,12 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
         from vllm_omni.diffusion.attention.backends.utils.fa import IS_AITER, IS_FLASH_ATTN_4
 
         self._kernel_variant = "fa4" if IS_FLASH_ATTN_4 else "aiter" if IS_AITER else None
+        self._rocm_fp8_available = rocm_fp8_attention_available()
+        self._moonmath_devices = moonmath_devices() if envs.VLLM_OMNI_ROCM_MOONMATH_ATTN else ()
+        # MoonMath hardcodes 1/sqrt(128); compare the scale at kernel float precision.
+        self._moonmath_scale = bool(self._moonmath_devices) and (
+            struct.pack("f", softmax_scale) == struct.pack("f", 128**-0.5)
+        )
         cfg = get_current_diffusion_config_or_none()
         self.fa_deterministic = bool(getattr(cfg, "fa_deterministic", False)) if cfg is not None else False
         if backend_kwargs:
@@ -657,6 +671,70 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
                 None,
             )
         return paged_kv_context.restore_output(output)
+
+    def forward_hip(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AttentionMetadata | None = None,
+    ) -> torch.Tensor:
+        extra = attn_metadata.extra if attn_metadata is not None else {}
+        use_fp8 = extra.get("kv_cache_dtype") == "fp8"
+        packed_keys = ("cu_seqlens_q", "cu_seqlens_k", "max_seqlen_q", "max_seqlen_k")
+        if (
+            self._moonmath_devices
+            and extra.get("kv_cache_dtype") in (None, "auto", "float")
+            and self._moonmath_scale
+            and not self.causal
+            and not self.is_cross_attn
+            and not self.fa_deterministic
+            and (
+                attn_metadata is None
+                or all(
+                    field is None
+                    for field in (
+                        attn_metadata.attn_mask,
+                        attn_metadata.joint_attn_mask,
+                        attn_metadata.full_attn_spans,
+                        attn_metadata.query_ranges,
+                        attn_metadata.packed_padding,
+                    )
+                )
+            )
+            and not any(name in extra for name in (*packed_keys, "valid_kv_length"))
+            # Validated 1024² Qwen range without MoonMath's shared split schedule.
+            and query.ndim == 4
+            and query.shape[0] == 1
+            and 4096 <= query.shape[1] <= 4608
+            and query.shape[2:] == (24, 128)
+            and query.shape == key.shape == value.shape
+            and all(t.dtype == torch.bfloat16 and t.is_contiguous() for t in (query, key, value))
+            and query.device.type == "cuda"
+            and query.device == key.device == value.device
+            and query.device.index in self._moonmath_devices
+        ):
+            return moonmath_attention(query, key, value)
+        if (
+            use_fp8
+            and self._rocm_fp8_available
+            and not self.causal
+            and not self.is_cross_attn
+            and not self.fa_deterministic
+            and (attn_metadata is None or (attn_metadata.attn_mask is None and attn_metadata.full_attn_spans is None))
+            and not any(name in extra for name in packed_keys)
+            and query.ndim == 4
+            and query.shape == key.shape == value.shape
+            and query.shape[0] > 0
+            and query.shape[1] > 128
+            and query.shape[2] > 0
+            and query.shape[3] == 128
+            and all(t.dtype == torch.bfloat16 and t.is_contiguous() for t in (query, key, value))
+            and query.device.type == "cuda"
+            and query.device == key.device == value.device
+        ):
+            return rocm_fp8_attention(query, key, value, self.softmax_scale)
+        return self.forward_cuda(query, key, value, attn_metadata)
 
     def forward_cuda(
         self,

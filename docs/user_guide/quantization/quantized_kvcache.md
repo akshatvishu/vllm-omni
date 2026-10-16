@@ -22,24 +22,32 @@ If `diffusion_kv_cache_dtype` is not set, attention runs in the native dtype.
 ## Hardware Support
 
 | Device | Dense FP8 | Dense MXFP8/MXFP4 | BSA FP8/MXFP4 |
-|--------|------------|-------------------|----------------|
+| -------- | ------------ | ------------------- | ---------------- |
 | Ascend NPU | ✅ | ✅ | ✅ |
 | NVIDIA GPU | ❌ | ❌ | ❌ |
-| AMD ROCm | ❌ | ❌ | ❌ |
+| AMD MI300X (gfx942) | Experimental | ❌ | ❌ |
 | Intel XPU | ❌ | ❌ | ❌ |
 
 Legend: `✅` supported, `❌` unsupported.
 
-These runtime methods are implemented only by the NPU Flash Attention and BSA
-backends. Other backends reject an incompatible explicit configuration.
+NPU Flash Attention and BSA implement the methods above. ROCm Flash Attention also has an experimental dense FP8 path. Other backends reject an incompatible explicit configuration.
+
+### Experimental ROCm FP8 attention
+
+On MI300X, `--diffusion-kv-cache-dtype fp8` enables dynamic per-tensor Q/K/V quantization through vLLM and dense AITER v3 FP8 attention. The default remains native BF16 attention. This setting does not enable FP8 linear layers; weight quantization is configured separately.
+
+The ROCm path accepts contiguous BF16 self-attention tensors in BSHD layout with head size 128, equal Q/K/V shapes and more than 128 tokens. It requires AITER with CK enabled on gfx942. Masks, packed sequences, piecewise attention, causal attention, `fa_deterministic=True`, and other unsupported inputs retain the native attention path. The existing skip-step and skip-layer selectors also retain native precision.
+
+This is an experimental option, not a pixel-exact optimization. Use an AITER build with the dense v3 FP8 probability-scaling correction described in [AITER PR #6139](https://github.com/ROCm/aiter/pull/6139) for evaluation. Merely enabling this flag does not install that correction. The original kernel can discard substantial probability mass; even the corrected kernel still has Q/K/V quantization error. Keep BF16 for production until image quality and full-operation speed have been validated for the workload.
 
 ## Model Type Support
 
 ### Diffusion Model
 
 | Model | Scope | Status | Notes |
-|-------|-------|--------|-------|
+| ------- | ------- | -------- | ------- |
 | Wan2.2 | Self-attention on Ascend NPU | NPU interface and T2V smoke tested | Compare quality and latency against a BF16 baseline before production use |
+| Qwen-Image | Dense self-attention on MI300X | Experimental ROCm v3 FP8 adapter | Keep BF16 as the default; input quantization changes images even with the probability-scaling fix |
 | Other diffusion models | Eligible DiT full-attention FA on Ascend NPU | Not tested | You can try `diffusion_kv_cache_dtype="fp8"`; tune `diffusion_kv_cache_skip_steps` and `diffusion_kv_cache_skip_layers` when higher precision is needed |
 
 ### Multi-Stage Omni/TTS Model (Qwen3-Omni, Qwen3-TTS)
@@ -99,7 +107,7 @@ The legacy keyword aliases `kv_cache_dtype`, `kv_cache_skip_steps`, and
 ## Parameters
 
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
+| ----------- | ------ | --------- | ------------- |
 | `diffusion_kv_cache_dtype` | str \| None | `None` | Runtime attention method. Dense FA supports `fp8`, `mxfp8`, and `mxfp4`; BSA supports `fp8` and `mxfp4` |
 | `diffusion_kv_cache_skip_steps` | str \| None | `None` | Denoising step selector to keep in native dtype, for example `"0,1,4-6"` |
 | `diffusion_kv_cache_skip_layers` | str \| None | `None` | Transformer layer selector to keep in native dtype, for example `"0-2,10"` |

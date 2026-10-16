@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     CUDA_HOME: str | None = None
     LOCAL_RANK: int = 0
     VLLM_OMNI_FUSED_QK_NORM_ROPE_MIN_TOKENS: str | None = None
+    VLLM_OMNI_ROCM_QWEN_IMAGE_QK_ROPE: bool = False
+    VLLM_OMNI_ROCM_MOONMATH_ATTN: bool = False
 
 environment_variables: dict[str, Callable[[], Any]] = {
     # ================== Runtime Env Vars ==================
@@ -34,6 +36,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # "0" = always fuse; unset = each consumer's own measured default. Raw
     # string or None; validated by fused_qk_norm_rope_min_tokens().
     "VLLM_OMNI_FUSED_QK_NORM_ROPE_MIN_TOKENS": lambda: os.environ.get("VLLM_OMNI_FUSED_QK_NORM_ROPE_MIN_TOKENS", None),
+    # Opt in to the packed Qwen-Image QK RMSNorm/RoPE epilogue on ROCm gfx942.
+    "VLLM_OMNI_ROCM_QWEN_IMAGE_QK_ROPE": lambda: os.environ.get("VLLM_OMNI_ROCM_QWEN_IMAGE_QK_ROPE", "0") == "1",
+    "VLLM_OMNI_ROCM_MOONMATH_ATTN": lambda: os.environ.get("VLLM_OMNI_ROCM_MOONMATH_ATTN", "0") == "1",
 }
 
 

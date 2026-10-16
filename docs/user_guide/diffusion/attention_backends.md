@@ -195,3 +195,17 @@ See [SageAttention](attention_backends/sage.md#sageattention3-installation).
 ## HuggingFace Kernels Hub Backends
 
 See [Hugging Face Hub Backends](attention_backends/huggingface_hub.md).
+
+## Experimental MoonMath on MI300X
+
+Set `VLLM_OMNI_ROCM_MOONMATH_ATTN=1` before model or server startup to enable an optional MoonMath path within `FLASH_ATTN`. It is disabled by default. The flag is resolved when attention is constructed. Install the optional [MoonMath dependency at commit `7fd8ee7900f42aa95d2d12b782dfe77b17519468`](https://github.com/moonmath-ai/amd-kernels/tree/7fd8ee7900f42aa95d2d12b782dfe77b17519468) in the same ROCm Python environment, with ROCm PyTorch and `hipcc` available:
+
+```bash
+.venv/bin/pip install --no-build-isolation 'git+https://github.com/moonmath-ai/amd-kernels.git@7fd8ee7900f42aa95d2d12b782dfe77b17519468'
+```
+
+The device guard requires `gfx942` and 304 compute units, matching the kernel planner. It does not inspect the device name because PyTorch can return an empty name on MI300X. Validation is limited to MI300X; other devices passing this architecture guard, including MI325X, have not been validated. Q, K and V must be contiguous BF16 tensors on the same device, with identical shape `(1, S, 24, 128)` and `4096 <= S <= 4608`. Every integer length in this range passed a numerical replay on operands derived from Qwen captures. The range covers 4096 image tokens plus up to 512 text tokens, so both CFG branches can use MoonMath when each branch fits. Lengths 4609 through 5120 use the existing attention path because the pinned MoonMath planner engages a split schedule with shared state. It requires self attention, no causal mask, no deterministic request, and the default `1/sqrt(128)` scale at float32 precision. Masks, packed sequences, piecewise metadata and explicit quantized attention requests use the existing attention path. A missing MoonMath dependency also uses that path. Other shapes are outside this experiment.
+
+The custom operation declares its output mutation and receives a separate output allocation for each call. It uses the public MoonMath API with `round_mode="rtna"`, `layout="bshd"` and `out=`, preserving V packing and internal workspace allocation. It does not change process environment variables or keep a shared output buffer. Leave MoonMath's own diagnostic environment variables, including `MOONMATH_NO_TAIL`, unset for this configuration.
+
+Image quality acceptance remains unresolved. Timing measurements and repeatable hashes do not establish acceptable image differences. This opt-in is for experiments; validate generated images and compiled execution on the intended software stack before adopting it.

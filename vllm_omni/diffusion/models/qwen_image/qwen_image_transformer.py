@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         QuantizationConfig,
     )
 
+from vllm_omni.diffusion import envs
 from vllm_omni.diffusion.attention.backends.abstract import (
     AttentionMetadata,
 )
@@ -49,6 +50,11 @@ from vllm_omni.diffusion.layers.fused_qk_norm_rope import (
     _fused_cuda_supported,
     fused_qk_norm_rope,
     fused_qk_norm_rope_min_tokens,
+)
+from vllm_omni.diffusion.layers.qwen_image_qk_rope import (
+    can_use_qwen_image_qk_rope,
+    qwen_image_qk_rope,
+    qwen_image_qk_rope_supported,
 )
 from vllm_omni.diffusion.layers.qwen_select01_modulation import (
     can_use_qwen_select01_triton,
@@ -605,6 +611,7 @@ class QwenImageCrossAttention(nn.Module):
         self.window_size = window_size
         self.qk_norm = qk_norm
         self.eps = eps
+        self.use_rocm_qk_rope = envs.VLLM_OMNI_ROCM_QWEN_IMAGE_QK_ROPE and qwen_image_qk_rope_supported()
 
         self.to_qkv = QKVParallelLinear(
             hidden_size=dim,
@@ -663,6 +670,7 @@ class QwenImageCrossAttention(nn.Module):
             softmax_scale=1.0 / (self.head_dim**0.5),
             causal=False,
             num_kv_heads=self.kv_num_heads,
+            prefix=prefix,
         )
         self.rope = RotaryEmbedding(is_neox_style=False)
 
@@ -682,47 +690,59 @@ class QwenImageCrossAttention(nn.Module):
         encoder_hidden_states_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         img_qkv, _ = self.to_qkv(hidden_states)
-        q_size = self.query_num_heads * self.head_dim
-        kv_size = self.kv_num_heads * self.head_dim
-        img_query, img_key, img_value = img_qkv.split([q_size, kv_size, kv_size], dim=-1)
-
         txt_qkv, _ = self.add_kv_proj(encoder_hidden_states)
-        add_q_size = self.add_query_num_heads * self.head_dim
-        add_kv_size = self.add_kv_num_heads * self.head_dim
-        txt_query, txt_key, txt_value = txt_qkv.split([add_q_size, add_kv_size, add_kv_size], dim=-1)
-
-        img_query = img_query.unflatten(-1, (self.query_num_heads, self.head_dim))
-        img_key = img_key.unflatten(-1, (self.kv_num_heads, self.head_dim))
-        img_value = img_value.unflatten(-1, (self.kv_num_heads, self.head_dim))
-
-        txt_query = txt_query.unflatten(-1, (self.add_query_num_heads, self.head_dim))
-        txt_key = txt_key.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
-        txt_value = txt_value.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
-
-        img_query, img_key = _qwen_image_qk_norm_rope(
-            img_query,
-            img_key,
-            self.norm_q,
-            self.norm_k,
-            vid_freqs,
-            self.rope,
-            self.eps,
-            use_fused=self.qk_norm,
-        )
-        txt_query, txt_key = _qwen_image_qk_norm_rope(
-            txt_query,
-            txt_key,
-            self.norm_added_q,
-            self.norm_added_k,
-            txt_freqs,
-            self.rope,
-            self.eps,
-        )
-
         seq_len_txt = encoder_hidden_states.shape[1]
-        joint_query = torch.cat([txt_query, img_query], dim=1)
-        joint_key = torch.cat([txt_key, img_key], dim=1)
-        joint_value = torch.cat([txt_value, img_value], dim=1)
+        if can_use_qwen_image_qk_rope(self, img_qkv, txt_qkv, vid_freqs, txt_freqs):
+            joint_query, joint_key, joint_value = qwen_image_qk_rope(
+                img_qkv,
+                txt_qkv,
+                self.norm_q.weight,
+                self.norm_k.weight,
+                self.norm_added_q.weight,
+                self.norm_added_k.weight,
+                vid_freqs,
+                txt_freqs,
+            )
+        else:
+            q_size = self.query_num_heads * self.head_dim
+            kv_size = self.kv_num_heads * self.head_dim
+            img_query, img_key, img_value = img_qkv.split([q_size, kv_size, kv_size], dim=-1)
+
+            add_q_size = self.add_query_num_heads * self.head_dim
+            add_kv_size = self.add_kv_num_heads * self.head_dim
+            txt_query, txt_key, txt_value = txt_qkv.split([add_q_size, add_kv_size, add_kv_size], dim=-1)
+
+            img_query = img_query.unflatten(-1, (self.query_num_heads, self.head_dim))
+            img_key = img_key.unflatten(-1, (self.kv_num_heads, self.head_dim))
+            img_value = img_value.unflatten(-1, (self.kv_num_heads, self.head_dim))
+
+            txt_query = txt_query.unflatten(-1, (self.add_query_num_heads, self.head_dim))
+            txt_key = txt_key.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
+            txt_value = txt_value.unflatten(-1, (self.add_kv_num_heads, self.head_dim))
+
+            img_query, img_key = _qwen_image_qk_norm_rope(
+                img_query,
+                img_key,
+                self.norm_q,
+                self.norm_k,
+                vid_freqs,
+                self.rope,
+                self.eps,
+                use_fused=self.qk_norm,
+            )
+            txt_query, txt_key = _qwen_image_qk_norm_rope(
+                txt_query,
+                txt_key,
+                self.norm_added_q,
+                self.norm_added_k,
+                txt_freqs,
+                self.rope,
+                self.eps,
+            )
+
+            joint_query = torch.cat([txt_query, img_query], dim=1)
+            joint_key = torch.cat([txt_key, img_key], dim=1)
+            joint_value = torch.cat([txt_value, img_value], dim=1)
 
         if (
             self.parallel_config is not None
