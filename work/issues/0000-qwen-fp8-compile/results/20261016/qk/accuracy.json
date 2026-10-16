@@ -1,0 +1,7160 @@
+[
+  {
+    "path": "block-0000.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2099799,
+            "different_bytes": 2117556,
+            "finite": true,
+            "relative_l2": 8.961689309217036e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2080504,
+            "different_bytes": 2097427,
+            "finite": true,
+            "relative_l2": 0.0001249805063707754,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 5,
+            "different_bytes": 5,
+            "finite": true,
+            "relative_l2": 3.084335675751504e-09,
+            "max_abs": 0.000244140625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 9,
+            "different_bytes": 9,
+            "finite": true,
+            "relative_l2": 8.619917224450546e-08,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2099802,
+            "different_bytes": 2117559,
+            "finite": true,
+            "relative_l2": 8.961689309217036e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2080509,
+            "different_bytes": 2097432,
+            "finite": true,
+            "relative_l2": 0.00012498053547460586,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2099829,
+            "different_bytes": 2117586,
+            "finite": true,
+            "relative_l2": 8.961700950749218e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2080565,
+            "different_bytes": 2097488,
+            "finite": true,
+            "relative_l2": 0.00012498217984102666,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 187,
+            "different_bytes": 187,
+            "finite": true,
+            "relative_l2": 5.345463023331831e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 195,
+            "different_bytes": 196,
+            "finite": true,
+            "relative_l2": 7.921871656435542e-07,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "shared_device_kernels": [
+      "_joint_qkv_norm_rope_kernel.kd"
+    ],
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2099799,
+            "different_bytes": 2117556,
+            "finite": true,
+            "relative_l2": 8.961689309217036e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2080504,
+            "different_bytes": 2097427,
+            "finite": true,
+            "relative_l2": 0.0001249805063707754,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 5,
+            "different_bytes": 5,
+            "finite": true,
+            "relative_l2": 3.084335675751504e-09,
+            "max_abs": 0.000244140625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 9,
+            "different_bytes": 9,
+            "finite": true,
+            "relative_l2": 8.619917224450546e-08,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2099802,
+            "different_bytes": 2117559,
+            "finite": true,
+            "relative_l2": 8.961689309217036e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2080509,
+            "different_bytes": 2097432,
+            "finite": true,
+            "relative_l2": 0.00012498053547460586,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2099829,
+            "different_bytes": 2117586,
+            "finite": true,
+            "relative_l2": 8.961700950749218e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2080565,
+            "different_bytes": 2097488,
+            "finite": true,
+            "relative_l2": 0.00012498217984102666,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 187,
+            "different_bytes": 187,
+            "finite": true,
+            "relative_l2": 5.345463023331831e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 195,
+            "different_bytes": 196,
+            "finite": true,
+            "relative_l2": 7.921871656435542e-07,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-0029.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2091797,
+            "different_bytes": 2109342,
+            "finite": true,
+            "relative_l2": 0.0017055876087397337,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2088720,
+            "different_bytes": 2106064,
+            "finite": true,
+            "relative_l2": 0.0018441028660163283,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 3,
+            "different_bytes": 3,
+            "finite": true,
+            "relative_l2": 1.464697447772778e-06,
+            "max_abs": 0.0078125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2091797,
+            "different_bytes": 2109342,
+            "finite": true,
+            "relative_l2": 0.0017055879579856992,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2088720,
+            "different_bytes": 2106064,
+            "finite": true,
+            "relative_l2": 0.0018441028660163283,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2091821,
+            "different_bytes": 2109366,
+            "finite": true,
+            "relative_l2": 0.0017054873751476407,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2088752,
+            "different_bytes": 2106097,
+            "finite": true,
+            "relative_l2": 0.0018439748091623187,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 176,
+            "different_bytes": 177,
+            "finite": true,
+            "relative_l2": 1.3727782061323524e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 189,
+            "different_bytes": 189,
+            "finite": true,
+            "relative_l2": 1.3558241334976628e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2091797,
+            "different_bytes": 2109342,
+            "finite": true,
+            "relative_l2": 0.0017055876087397337,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2088720,
+            "different_bytes": 2106064,
+            "finite": true,
+            "relative_l2": 0.0018441028660163283,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 3,
+            "different_bytes": 3,
+            "finite": true,
+            "relative_l2": 1.464697447772778e-06,
+            "max_abs": 0.0078125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2091797,
+            "different_bytes": 2109342,
+            "finite": true,
+            "relative_l2": 0.0017055879579856992,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2088720,
+            "different_bytes": 2106064,
+            "finite": true,
+            "relative_l2": 0.0018441028660163283,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2091821,
+            "different_bytes": 2109366,
+            "finite": true,
+            "relative_l2": 0.0017054873751476407,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2088752,
+            "different_bytes": 2106097,
+            "finite": true,
+            "relative_l2": 0.0018439748091623187,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 176,
+            "different_bytes": 177,
+            "finite": true,
+            "relative_l2": 1.3727782061323524e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 189,
+            "different_bytes": 189,
+            "finite": true,
+            "relative_l2": 1.3558241334976628e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-0059.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2105040,
+            "different_bytes": 2123221,
+            "finite": true,
+            "relative_l2": 0.0018226540414616466,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2099870,
+            "different_bytes": 2117572,
+            "finite": true,
+            "relative_l2": 0.0019081983482465148,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2,
+            "different_bytes": 2,
+            "finite": true,
+            "relative_l2": 1.465014406676346e-06,
+            "max_abs": 0.0078125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 5.423468607546056e-08,
+            "max_abs": 0.000244140625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2105042,
+            "different_bytes": 2123223,
+            "finite": true,
+            "relative_l2": 0.0018226547399535775,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2099871,
+            "different_bytes": 2117573,
+            "finite": true,
+            "relative_l2": 0.0019081983482465148,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2105062,
+            "different_bytes": 2123244,
+            "finite": true,
+            "relative_l2": 0.001822513877414167,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2099896,
+            "different_bytes": 2117599,
+            "finite": true,
+            "relative_l2": 0.0019080472411587834,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 173,
+            "different_bytes": 174,
+            "finite": true,
+            "relative_l2": 1.2188264918222558e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 168,
+            "different_bytes": 169,
+            "finite": true,
+            "relative_l2": 1.4556506357621402e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2105040,
+            "different_bytes": 2123221,
+            "finite": true,
+            "relative_l2": 0.0018226540414616466,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2099870,
+            "different_bytes": 2117572,
+            "finite": true,
+            "relative_l2": 0.0019081983482465148,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2,
+            "different_bytes": 2,
+            "finite": true,
+            "relative_l2": 1.465014406676346e-06,
+            "max_abs": 0.0078125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 5.423468607546056e-08,
+            "max_abs": 0.000244140625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2105042,
+            "different_bytes": 2123223,
+            "finite": true,
+            "relative_l2": 0.0018226547399535775,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2099871,
+            "different_bytes": 2117573,
+            "finite": true,
+            "relative_l2": 0.0019081983482465148,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2105062,
+            "different_bytes": 2123244,
+            "finite": true,
+            "relative_l2": 0.001822513877414167,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2099896,
+            "different_bytes": 2117599,
+            "finite": true,
+            "relative_l2": 0.0019080472411587834,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 173,
+            "different_bytes": 174,
+            "finite": true,
+            "relative_l2": 1.2188264918222558e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 168,
+            "different_bytes": 169,
+            "finite": true,
+            "relative_l2": 1.4556506357621402e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-0060.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088595,
+            "different_bytes": 2106258,
+            "finite": true,
+            "relative_l2": 8.950081246439368e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2069198,
+            "different_bytes": 2086037,
+            "finite": true,
+            "relative_l2": 0.00012470177898649126,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 5,
+            "different_bytes": 5,
+            "finite": true,
+            "relative_l2": 3.084341670955837e-09,
+            "max_abs": 0.000244140625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 9,
+            "different_bytes": 9,
+            "finite": true,
+            "relative_l2": 8.619971225698464e-08,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088598,
+            "different_bytes": 2106261,
+            "finite": true,
+            "relative_l2": 8.950081246439368e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2069203,
+            "different_bytes": 2086042,
+            "finite": true,
+            "relative_l2": 0.00012470182264223695,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088625,
+            "different_bytes": 2106288,
+            "finite": true,
+            "relative_l2": 8.95009288797155e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2069259,
+            "different_bytes": 2086098,
+            "finite": true,
+            "relative_l2": 0.00012470346700865775,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 188,
+            "different_bytes": 188,
+            "finite": true,
+            "relative_l2": 5.345477802620735e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 195,
+            "different_bytes": 196,
+            "finite": true,
+            "relative_l2": 7.921921110209951e-07,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "shared_device_kernels": [
+      "_joint_qkv_norm_rope_kernel.kd"
+    ],
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088595,
+            "different_bytes": 2106258,
+            "finite": true,
+            "relative_l2": 8.950081246439368e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2069198,
+            "different_bytes": 2086037,
+            "finite": true,
+            "relative_l2": 0.00012470177898649126,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 5,
+            "different_bytes": 5,
+            "finite": true,
+            "relative_l2": 3.084341670955837e-09,
+            "max_abs": 0.000244140625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 9,
+            "different_bytes": 9,
+            "finite": true,
+            "relative_l2": 8.619971225698464e-08,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088598,
+            "different_bytes": 2106261,
+            "finite": true,
+            "relative_l2": 8.950081246439368e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2069203,
+            "different_bytes": 2086042,
+            "finite": true,
+            "relative_l2": 0.00012470182264223695,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088625,
+            "different_bytes": 2106288,
+            "finite": true,
+            "relative_l2": 8.95009288797155e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2069259,
+            "different_bytes": 2086098,
+            "finite": true,
+            "relative_l2": 0.00012470346700865775,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 188,
+            "different_bytes": 188,
+            "finite": true,
+            "relative_l2": 5.345477802620735e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 195,
+            "different_bytes": 196,
+            "finite": true,
+            "relative_l2": 7.921921110209951e-07,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-0089.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2080891,
+            "different_bytes": 2098052,
+            "finite": true,
+            "relative_l2": 0.00170707271900028,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2076307,
+            "different_bytes": 2093631,
+            "finite": true,
+            "relative_l2": 0.0018823634600266814,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 7.803034236530948e-07,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2080891,
+            "different_bytes": 2098052,
+            "finite": true,
+            "relative_l2": 0.00170707271900028,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2076308,
+            "different_bytes": 2093632,
+            "finite": true,
+            "relative_l2": 0.001882363692857325,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2080909,
+            "different_bytes": 2098070,
+            "finite": true,
+            "relative_l2": 0.0017069564200937748,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2076323,
+            "different_bytes": 2093648,
+            "finite": true,
+            "relative_l2": 0.0018822209676727653,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 131,
+            "different_bytes": 131,
+            "finite": true,
+            "relative_l2": 9.306409083364997e-06,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 163,
+            "different_bytes": 164,
+            "finite": true,
+            "relative_l2": 1.207682907988783e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2080891,
+            "different_bytes": 2098052,
+            "finite": true,
+            "relative_l2": 0.00170707271900028,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2076307,
+            "different_bytes": 2093631,
+            "finite": true,
+            "relative_l2": 0.0018823634600266814,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 7.803034236530948e-07,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2080891,
+            "different_bytes": 2098052,
+            "finite": true,
+            "relative_l2": 0.00170707271900028,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2076308,
+            "different_bytes": 2093632,
+            "finite": true,
+            "relative_l2": 0.001882363692857325,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2080909,
+            "different_bytes": 2098070,
+            "finite": true,
+            "relative_l2": 0.0017069564200937748,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2076323,
+            "different_bytes": 2093648,
+            "finite": true,
+            "relative_l2": 0.0018822209676727653,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 131,
+            "different_bytes": 131,
+            "finite": true,
+            "relative_l2": 9.306409083364997e-06,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 163,
+            "different_bytes": 164,
+            "finite": true,
+            "relative_l2": 1.207682907988783e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-0119.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2094558,
+            "different_bytes": 2112905,
+            "finite": true,
+            "relative_l2": 0.0017727940576151013,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088243,
+            "different_bytes": 2106178,
+            "finite": true,
+            "relative_l2": 0.0018458444392308593,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2094558,
+            "different_bytes": 2112905,
+            "finite": true,
+            "relative_l2": 0.0017727940576151013,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088243,
+            "different_bytes": 2106178,
+            "finite": true,
+            "relative_l2": 0.0018458444392308593,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2094594,
+            "different_bytes": 2112941,
+            "finite": true,
+            "relative_l2": 0.001772648305632174,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088273,
+            "different_bytes": 2106210,
+            "finite": true,
+            "relative_l2": 0.001845675753429532,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 190,
+            "different_bytes": 190,
+            "finite": true,
+            "relative_l2": 1.2958901606907602e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 165,
+            "different_bytes": 167,
+            "finite": true,
+            "relative_l2": 1.1205685950699262e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2094558,
+            "different_bytes": 2112905,
+            "finite": true,
+            "relative_l2": 0.0017727940576151013,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088243,
+            "different_bytes": 2106178,
+            "finite": true,
+            "relative_l2": 0.0018458444392308593,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2094558,
+            "different_bytes": 2112905,
+            "finite": true,
+            "relative_l2": 0.0017727940576151013,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088243,
+            "different_bytes": 2106178,
+            "finite": true,
+            "relative_l2": 0.0018458444392308593,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2094594,
+            "different_bytes": 2112941,
+            "finite": true,
+            "relative_l2": 0.001772648305632174,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088273,
+            "different_bytes": 2106210,
+            "finite": true,
+            "relative_l2": 0.001845675753429532,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 190,
+            "different_bytes": 190,
+            "finite": true,
+            "relative_l2": 1.2958901606907602e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 165,
+            "different_bytes": 167,
+            "finite": true,
+            "relative_l2": 1.1205685950699262e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-5880.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2102639,
+            "different_bytes": 2120811,
+            "finite": true,
+            "relative_l2": 8.857445936882868e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2082764,
+            "different_bytes": 2100055,
+            "finite": true,
+            "relative_l2": 0.00013379173469729722,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 8,
+            "different_bytes": 8,
+            "finite": true,
+            "relative_l2": 1.2933276671844851e-08,
+            "max_abs": 0.0009765625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 9.464687922289272e-10,
+            "max_abs": 6.103515625e-05
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2102647,
+            "different_bytes": 2120819,
+            "finite": true,
+            "relative_l2": 8.857445936882868e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2082765,
+            "different_bytes": 2100056,
+            "finite": true,
+            "relative_l2": 0.00013379173469729722,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2102692,
+            "different_bytes": 2120864,
+            "finite": true,
+            "relative_l2": 8.857547072693706e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2082792,
+            "different_bytes": 2100084,
+            "finite": true,
+            "relative_l2": 0.00013379222946241498,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 197,
+            "different_bytes": 197,
+            "finite": true,
+            "relative_l2": 5.639695928039146e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 193,
+            "different_bytes": 194,
+            "finite": true,
+            "relative_l2": 5.45562841125502e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2102639,
+            "different_bytes": 2120811,
+            "finite": true,
+            "relative_l2": 8.857445936882868e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2082764,
+            "different_bytes": 2100055,
+            "finite": true,
+            "relative_l2": 0.00013379173469729722,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 8,
+            "different_bytes": 8,
+            "finite": true,
+            "relative_l2": 1.2933276671844851e-08,
+            "max_abs": 0.0009765625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 9.464687922289272e-10,
+            "max_abs": 6.103515625e-05
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2102647,
+            "different_bytes": 2120819,
+            "finite": true,
+            "relative_l2": 8.857445936882868e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2082765,
+            "different_bytes": 2100056,
+            "finite": true,
+            "relative_l2": 0.00013379173469729722,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2102692,
+            "different_bytes": 2120864,
+            "finite": true,
+            "relative_l2": 8.857547072693706e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2082792,
+            "different_bytes": 2100084,
+            "finite": true,
+            "relative_l2": 0.00013379222946241498,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 197,
+            "different_bytes": 197,
+            "finite": true,
+            "relative_l2": 5.639695928039146e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 193,
+            "different_bytes": 194,
+            "finite": true,
+            "relative_l2": 5.45562841125502e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-5909.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2090979,
+            "different_bytes": 2108643,
+            "finite": true,
+            "relative_l2": 0.0016978596104308963,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2094372,
+            "different_bytes": 2111993,
+            "finite": true,
+            "relative_l2": 0.0018997568404302,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 7.689280892009265e-07,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2090979,
+            "different_bytes": 2108643,
+            "finite": true,
+            "relative_l2": 0.0016978596104308963,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2094373,
+            "different_bytes": 2111994,
+            "finite": true,
+            "relative_l2": 0.0018997570732608438,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2090999,
+            "different_bytes": 2108663,
+            "finite": true,
+            "relative_l2": 0.0016977479681372643,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2094406,
+            "different_bytes": 2112027,
+            "finite": true,
+            "relative_l2": 0.001899639843031764,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 180,
+            "different_bytes": 181,
+            "finite": true,
+            "relative_l2": 1.3149046026228461e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 160,
+            "different_bytes": 160,
+            "finite": true,
+            "relative_l2": 1.2310345482546836e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2090979,
+            "different_bytes": 2108643,
+            "finite": true,
+            "relative_l2": 0.0016978596104308963,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2094372,
+            "different_bytes": 2111993,
+            "finite": true,
+            "relative_l2": 0.0018997568404302,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 7.689280892009265e-07,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2090979,
+            "different_bytes": 2108643,
+            "finite": true,
+            "relative_l2": 0.0016978596104308963,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2094373,
+            "different_bytes": 2111994,
+            "finite": true,
+            "relative_l2": 0.0018997570732608438,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2090999,
+            "different_bytes": 2108663,
+            "finite": true,
+            "relative_l2": 0.0016977479681372643,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2094406,
+            "different_bytes": 2112027,
+            "finite": true,
+            "relative_l2": 0.001899639843031764,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 180,
+            "different_bytes": 181,
+            "finite": true,
+            "relative_l2": 1.3149046026228461e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 160,
+            "different_bytes": 160,
+            "finite": true,
+            "relative_l2": 1.2310345482546836e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-5939.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2098596,
+            "different_bytes": 2116455,
+            "finite": true,
+            "relative_l2": 0.001810612273402512,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2096571,
+            "different_bytes": 2114362,
+            "finite": true,
+            "relative_l2": 0.0020691663958132267,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 3,
+            "different_bytes": 3,
+            "finite": true,
+            "relative_l2": 7.041596745693823e-07,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2098599,
+            "different_bytes": 2116458,
+            "finite": true,
+            "relative_l2": 0.001810612389817834,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2096571,
+            "different_bytes": 2114362,
+            "finite": true,
+            "relative_l2": 0.0020691663958132267,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2098620,
+            "different_bytes": 2116480,
+            "finite": true,
+            "relative_l2": 0.0018105095950886607,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2096609,
+            "different_bytes": 2114401,
+            "finite": true,
+            "relative_l2": 0.002069135894998908,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 158,
+            "different_bytes": 158,
+            "finite": true,
+            "relative_l2": 1.5128213817661162e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 166,
+            "different_bytes": 167,
+            "finite": true,
+            "relative_l2": 1.0262009709549602e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2098596,
+            "different_bytes": 2116455,
+            "finite": true,
+            "relative_l2": 0.001810612273402512,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2096571,
+            "different_bytes": 2114362,
+            "finite": true,
+            "relative_l2": 0.0020691663958132267,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 3,
+            "different_bytes": 3,
+            "finite": true,
+            "relative_l2": 7.041596745693823e-07,
+            "max_abs": 0.00390625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 2098599,
+            "different_bytes": 2116458,
+            "finite": true,
+            "relative_l2": 0.001810612389817834,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2096571,
+            "different_bytes": 2114362,
+            "finite": true,
+            "relative_l2": 0.0020691663958132267,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12647424,
+            "different_elements": 2098620,
+            "different_bytes": 2116480,
+            "finite": true,
+            "relative_l2": 0.0018105095950886607,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 2096609,
+            "different_bytes": 2114401,
+            "finite": true,
+            "relative_l2": 0.002069135894998908,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12647424,
+            "different_elements": 158,
+            "different_bytes": 158,
+            "finite": true,
+            "relative_l2": 1.5128213817661162e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 166,
+            "different_bytes": 167,
+            "finite": true,
+            "relative_l2": 1.0262009709549602e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12647424,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ],
+          [
+            1,
+            4117,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-5940.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2091374,
+            "different_bytes": 2109461,
+            "finite": true,
+            "relative_l2": 8.845638512866572e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2071471,
+            "different_bytes": 2088657,
+            "finite": true,
+            "relative_l2": 0.00013350072549656034,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 8,
+            "different_bytes": 8,
+            "finite": true,
+            "relative_l2": 1.2933300652662183e-08,
+            "max_abs": 0.0009765625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 9.464753425447725e-10,
+            "max_abs": 6.103515625e-05
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2091382,
+            "different_bytes": 2109469,
+            "finite": true,
+            "relative_l2": 8.845638512866572e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2071472,
+            "different_bytes": 2088658,
+            "finite": true,
+            "relative_l2": 0.00013350072549656034,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2091427,
+            "different_bytes": 2109514,
+            "finite": true,
+            "relative_l2": 8.845741103868932e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2071499,
+            "different_bytes": 2088686,
+            "finite": true,
+            "relative_l2": 0.0001335012202616781,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 197,
+            "different_bytes": 197,
+            "finite": true,
+            "relative_l2": 5.639706728288729e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 193,
+            "different_bytes": 194,
+            "finite": true,
+            "relative_l2": 5.455665927911468e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2091374,
+            "different_bytes": 2109461,
+            "finite": true,
+            "relative_l2": 8.845638512866572e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2071471,
+            "different_bytes": 2088657,
+            "finite": true,
+            "relative_l2": 0.00013350072549656034,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 8,
+            "different_bytes": 8,
+            "finite": true,
+            "relative_l2": 1.2933300652662183e-08,
+            "max_abs": 0.0009765625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 9.464753425447725e-10,
+            "max_abs": 6.103515625e-05
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2091382,
+            "different_bytes": 2109469,
+            "finite": true,
+            "relative_l2": 8.845638512866572e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2071472,
+            "different_bytes": 2088658,
+            "finite": true,
+            "relative_l2": 0.00013350072549656034,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2091427,
+            "different_bytes": 2109514,
+            "finite": true,
+            "relative_l2": 8.845741103868932e-05,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2071499,
+            "different_bytes": 2088686,
+            "finite": true,
+            "relative_l2": 0.0001335012202616781,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 197,
+            "different_bytes": 197,
+            "finite": true,
+            "relative_l2": 5.639706728288729e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 193,
+            "different_bytes": 194,
+            "finite": true,
+            "relative_l2": 5.455665927911468e-07,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-5969.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2079775,
+            "different_bytes": 2097198,
+            "finite": true,
+            "relative_l2": 0.0016931828577071428,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2083026,
+            "different_bytes": 2100408,
+            "finite": true,
+            "relative_l2": 0.001904772245325148,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2,
+            "different_bytes": 2,
+            "finite": true,
+            "relative_l2": 3.650000735433423e-06,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2079777,
+            "different_bytes": 2097200,
+            "finite": true,
+            "relative_l2": 0.001693186815828085,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2083026,
+            "different_bytes": 2100408,
+            "finite": true,
+            "relative_l2": 0.001904772245325148,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2079806,
+            "different_bytes": 2097229,
+            "finite": true,
+            "relative_l2": 0.0016930726123973727,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2083050,
+            "different_bytes": 2100434,
+            "finite": true,
+            "relative_l2": 0.0019046466331928968,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 158,
+            "different_bytes": 159,
+            "finite": true,
+            "relative_l2": 1.4402062333829235e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 133,
+            "different_bytes": 136,
+            "finite": true,
+            "relative_l2": 1.0667024071153719e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2079775,
+            "different_bytes": 2097198,
+            "finite": true,
+            "relative_l2": 0.0016931828577071428,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2083026,
+            "different_bytes": 2100408,
+            "finite": true,
+            "relative_l2": 0.001904772245325148,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2,
+            "different_bytes": 2,
+            "finite": true,
+            "relative_l2": 3.650000735433423e-06,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2079777,
+            "different_bytes": 2097200,
+            "finite": true,
+            "relative_l2": 0.001693186815828085,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2083026,
+            "different_bytes": 2100408,
+            "finite": true,
+            "relative_l2": 0.001904772245325148,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2079806,
+            "different_bytes": 2097229,
+            "finite": true,
+            "relative_l2": 0.0016930726123973727,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2083050,
+            "different_bytes": 2100434,
+            "finite": true,
+            "relative_l2": 0.0019046466331928968,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 158,
+            "different_bytes": 159,
+            "finite": true,
+            "relative_l2": 1.4402062333829235e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 133,
+            "different_bytes": 136,
+            "finite": true,
+            "relative_l2": 1.0667024071153719e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  },
+  {
+    "path": "block-5999.pt",
+    "pre": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088262,
+            "different_bytes": 2105965,
+            "finite": true,
+            "relative_l2": 0.0018050973303616047,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088237,
+            "different_bytes": 2106018,
+            "finite": true,
+            "relative_l2": 0.0020699792075902224,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 1.0005438610960482e-07,
+            "max_abs": 0.00048828125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088262,
+            "different_bytes": 2105965,
+            "finite": true,
+            "relative_l2": 0.0018050973303616047,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088238,
+            "different_bytes": 2106019,
+            "finite": true,
+            "relative_l2": 0.0020699792075902224,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088293,
+            "different_bytes": 2105996,
+            "finite": true,
+            "relative_l2": 0.0018049877835437655,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088261,
+            "different_bytes": 2106046,
+            "finite": true,
+            "relative_l2": 0.002069947076961398,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 190,
+            "different_bytes": 190,
+            "finite": true,
+            "relative_l2": 1.1695219654939137e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 191,
+            "different_bytes": 192,
+            "finite": true,
+            "relative_l2": 1.5107340914255474e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "post": {
+      "native": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088262,
+            "different_bytes": 2105965,
+            "finite": true,
+            "relative_l2": 0.0018050973303616047,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088237,
+            "different_bytes": 2106018,
+            "finite": true,
+            "relative_l2": 0.0020699792075902224,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ]
+      },
+      "accepted": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 1,
+            "different_bytes": 1,
+            "finite": true,
+            "relative_l2": 1.0005438610960482e-07,
+            "max_abs": 0.00048828125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088262,
+            "different_bytes": 2105965,
+            "finite": true,
+            "relative_l2": 0.0018050973303616047,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088238,
+            "different_bytes": 2106019,
+            "finite": true,
+            "relative_l2": 0.0020699792075902224,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      },
+      "shared_fp32": {
+        "vs_native": [
+          {
+            "elements": 12598272,
+            "different_elements": 2088293,
+            "different_bytes": 2105996,
+            "finite": true,
+            "relative_l2": 0.0018049877835437655,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 2088261,
+            "different_bytes": 2106046,
+            "finite": true,
+            "relative_l2": 0.002069947076961398,
+            "max_abs": 0.0625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "vs_op_reference": [
+          {
+            "elements": 12598272,
+            "different_elements": 190,
+            "different_bytes": 190,
+            "finite": true,
+            "relative_l2": 1.1695219654939137e-05,
+            "max_abs": 0.015625
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 191,
+            "different_bytes": 192,
+            "finite": true,
+            "relative_l2": 1.5107340914255474e-05,
+            "max_abs": 0.03125
+          },
+          {
+            "elements": 12598272,
+            "different_elements": 0,
+            "different_bytes": 0,
+            "finite": true,
+            "relative_l2": 0.0,
+            "max_abs": 0.0
+          }
+        ],
+        "repeat_exact": [
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ],
+          [
+            true,
+            true,
+            true
+          ]
+        ],
+        "operator_contract_pass": true,
+        "poison_allocations": [
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ],
+          [
+            1,
+            4101,
+            24,
+            128
+          ]
+        ],
+        "poison_matches": [
+          true,
+          true,
+          true
+        ]
+      }
+    },
+    "counters_unchanged": true
+  }
+]

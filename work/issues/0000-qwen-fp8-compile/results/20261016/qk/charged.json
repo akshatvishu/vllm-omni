@@ -1,0 +1,162 @@
+[
+  {
+    "path": "block-0000.pt",
+    "condition": "hot",
+    "round": 0,
+    "shared_charged_us": 165.98687623937926,
+    "accepted_us": 132.42432475090027,
+    "aa_drift_us": -2.429521083831787
+  },
+  {
+    "path": "block-0000.pt",
+    "condition": "hot",
+    "round": 1,
+    "shared_charged_us": 165.07576356331506,
+    "accepted_us": 131.86797499656677,
+    "aa_drift_us": -0.4159271717071533
+  },
+  {
+    "path": "block-0000.pt",
+    "condition": "hot",
+    "round": 2,
+    "shared_charged_us": 163.42332224051157,
+    "accepted_us": 131.18442296981812,
+    "aa_drift_us": 0.7206559181213379
+  },
+  {
+    "path": "block-0000.pt",
+    "condition": "hot",
+    "round": 3,
+    "shared_charged_us": 169.79915862282118,
+    "accepted_us": 142.0571506023407,
+    "aa_drift_us": -10.673272609710693
+  },
+  {
+    "path": "block-0000.pt",
+    "condition": "hot",
+    "round": 4,
+    "shared_charged_us": 182.47576033075651,
+    "accepted_us": 132.40427374839783,
+    "aa_drift_us": -1.5535473823547363
+  },
+  {
+    "path": "block-0000.pt",
+    "condition": "flushed",
+    "round": 0,
+    "shared_charged_us": 101.67747392163922,
+    "accepted_us": 100.02350006252527,
+    "aa_drift_us": -1.5494497492909431
+  },
+  {
+    "path": "block-0000.pt",
+    "condition": "flushed",
+    "round": 1,
+    "shared_charged_us": 101.09439486870542,
+    "accepted_us": 98.69762491434813,
+    "aa_drift_us": -0.13237521052360535
+  },
+  {
+    "path": "block-0000.pt",
+    "condition": "flushed",
+    "round": 2,
+    "shared_charged_us": 105.41656432440504,
+    "accepted_us": 99.52647518366575,
+    "aa_drift_us": -1.0444499552249908
+  },
+  {
+    "path": "block-0000.pt",
+    "condition": "flushed",
+    "round": 3,
+    "shared_charged_us": 104.32374550650518,
+    "accepted_us": 98.12914989888668,
+    "aa_drift_us": 0.11534970253705978
+  },
+  {
+    "path": "block-0000.pt",
+    "condition": "flushed",
+    "round": 4,
+    "shared_charged_us": 103.85237855836749,
+    "accepted_us": 100.29132552444935,
+    "aa_drift_us": -0.9764015674591064
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "hot",
+    "round": 0,
+    "shared_charged_us": 180.35548637310663,
+    "accepted_us": 133.06275010108948,
+    "aa_drift_us": -0.6645262241363525
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "hot",
+    "round": 1,
+    "shared_charged_us": 167.9187636077404,
+    "accepted_us": 133.15495252609253,
+    "aa_drift_us": 0.013023614883422852
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "hot",
+    "round": 2,
+    "shared_charged_us": 167.41264273722967,
+    "accepted_us": 133.6210012435913,
+    "aa_drift_us": -1.4683246612548828
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "hot",
+    "round": 3,
+    "shared_charged_us": 167.36322104930878,
+    "accepted_us": 134.05799865722656,
+    "aa_drift_us": -1.7870783805847168
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "hot",
+    "round": 4,
+    "shared_charged_us": 167.78802374998727,
+    "accepted_us": 133.53277444839478,
+    "aa_drift_us": 0.22852420806884766
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "flushed",
+    "round": 0,
+    "shared_charged_us": 108.92082638960953,
+    "accepted_us": 99.78304971009493,
+    "aa_drift_us": -1.5464244410395622
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "flushed",
+    "round": 1,
+    "shared_charged_us": 107.90826892247424,
+    "accepted_us": 97.7493504062295,
+    "aa_drift_us": 0.3999246284365654
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "flushed",
+    "round": 2,
+    "shared_charged_us": 108.72079817500587,
+    "accepted_us": 97.85064980387688,
+    "aa_drift_us": 0.29667485505342484
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "flushed",
+    "round": 3,
+    "shared_charged_us": 106.74670433897215,
+    "accepted_us": 98.29447530210018,
+    "aa_drift_us": 1.2781497091054916
+  },
+  {
+    "path": "block-0060.pt",
+    "condition": "flushed",
+    "round": 4,
+    "shared_charged_us": 107.81063277934057,
+    "accepted_us": 100.11577550321817,
+    "aa_drift_us": 0.39799921214580536
+  }
+]

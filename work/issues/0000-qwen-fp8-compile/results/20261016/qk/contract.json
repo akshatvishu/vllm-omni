@@ -1,0 +1,35 @@
+{
+  "pr_head": "7e052ecd6dd5858d9770b1965036d5c4c6dce36a",
+  "omni_head": "f6a0b5f99634ca9b1eecc6bed10328eac4d28b11",
+  "atol": 0.0625,
+  "rtol": 0.02,
+  "tolerance_source": "source/pr7594-tests.py:299-301 (joint op vs eager reference Q/K close, V exact)",
+  "repeats": 5,
+  "rounds": 5,
+  "observations": 12,
+  "calls": 20,
+  "flush_bytes": 536870912,
+  "table_blocks": 60,
+  "timing_captures": [
+    "block-0000.pt",
+    "block-0060.pt"
+  ],
+  "quality": "Operator tolerance is frozen; production exactness is diagnostic, not image quality acceptance. No G4 without a separate promising-gate decision.",
+  "sha256": {
+    "source/pr7594-original.py": "cdecc93c0ec9cd08d3313677cf6ea684be30738cd14be70e520f2bdb257a2158",
+    "source/shared_candidate.py": "20134300bbab676c3c7d4a9f1b0f708c9f90d1e6b35c5dadad589b84261e0e42",
+    "source/pr7594-tests.py": "fede4a95276c140abdbfbcf6d3e7a1453025c2de7202d855b026305c9a3813e7"
+  },
+  "dependency_sha256": {
+    "scripts/replay.py": "5c498c3845bb4d9858c4b7f4bfbc986479326f1804be6a1daeb1930ac1cdc2b7",
+    "scripts/roctx.py": "c4dcb243d7b54b9d49c29cfbd33404ee069d6013f7f6500bc918e84c144659a9",
+    "source/accepted-production.py": "f0741e875d00e0017faafaa700042a2d95263a7774c7f75a2da1f0f3ce940abc",
+    "captures/manifest.json": "ccafc7f148186aca31c8c49b7973634263c5373dad7429edb591e1008642e260"
+  },
+  "expected_stack": {
+    "torch": "2.13 git 733fca1",
+    "triton": "3.8.0",
+    "vllm": "0.31",
+    "rocm": "7.2"
+  }
+}

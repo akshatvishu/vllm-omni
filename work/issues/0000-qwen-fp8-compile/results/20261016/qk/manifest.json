@@ -1,0 +1,39 @@
+{
+  "measurement_date": "2026-10-16",
+  "publication_date": "2026-10-17",
+  "new_gpu_work": false,
+  "files": {
+    "README.md": {
+      "sha256": "c9d36db8083ef8bd4a0a7595c9f3f3b1ab2015061d1ddd14eda293b3a141cbe9",
+      "bytes": 3228
+    },
+    "accuracy.json": {
+      "sha256": "aae8d55e15d21d849da5aa94c40d01f242b1bde7a5dadfc1d235875a19b2805d",
+      "bytes": 160053
+    },
+    "audit-summary.json": {
+      "sha256": "7f8e4aa695c7fc386b52173bc34a559c288ee413c645b4e3d9e58e8d56c0888b",
+      "bytes": 2667
+    },
+    "charged.json": {
+      "sha256": "d8611d5841910a7dd25317dc80e7a1411109348005c6754976701faadb290900",
+      "bytes": 4050
+    },
+    "contract.json": {
+      "sha256": "e28d7ea55757d9210986fac09c6e71648be240fd63eb3bd3d154483247e27b0e",
+      "bytes": 1464
+    },
+    "packing.json": {
+      "sha256": "88aec180ec16c8e170c56acbaf8ce96b4b46bf2a15f9ef2903689fbd3d7ebe32",
+      "bytes": 23801
+    },
+    "timings.json": {
+      "sha256": "262c4ddffc4055fc512d3d33089b50e67eaf7ffc1fe5ea602988cbbc8f94f4ca",
+      "bytes": 97092
+    },
+    "trace-and-source-check.json": {
+      "sha256": "04c34a83cb383121429955a6ff24a582215cd29637a74aba1a37077d17c60580",
+      "bytes": 1004
+    }
+  }
+}

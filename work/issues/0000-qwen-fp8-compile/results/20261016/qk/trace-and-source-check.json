@@ -1,0 +1,36 @@
+{
+  "joint_function_ast_identical": true,
+  "joint_function_source_identical": true,
+  "norm_helper_last_arg": "cuda_rms_norm",
+  "norm_helper_default": false,
+  "joint_norm_call_positional_args": 21,
+  "joint_norm_call_keyword_args": [],
+  "norm_helper_total_args": 22,
+  "default_inv_rms_ast_identical": true,
+  "traces": [
+    {
+      "file": "qk/analysis/block-0060.pt.trace.json",
+      "sha256": "8c687156f7badaa75d64153cb87618f16c159d8e48d217a0d8adc3f39cbf0da5",
+      "kernels": [
+        {
+          "name": "_joint_qkv_norm_rope_kernel.kd",
+          "dur_us": 62.301
+        }
+      ]
+    },
+    {
+      "file": "qk/analysis/block-0000.pt.trace.json",
+      "sha256": "d8b88a2dd48141055c9d170163e9b05bef40c7e0cd4dadc26a69286611a207dd",
+      "kernels": [
+        {
+          "name": "_joint_qkv_norm_rope_kernel.kd",
+          "dur_us": 62.301
+        }
+      ]
+    }
+  ],
+  "flushed_table_charge_us": {
+    "block-0000.pt": 0.28309541443983716,
+    "block-0060.pt": 0.26404833343500894
+  }
+}
