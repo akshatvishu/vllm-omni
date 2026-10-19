@@ -86,6 +86,14 @@ _fa4_dense_attention_op = torch.ops.vllm_omni.fa4_dense_attention
 _PACKED_KEYS = ("cu_seqlens_q", "cu_seqlens_k", "max_seqlen_q", "max_seqlen_k")
 
 
+class _Qwen21DecodeVarlen(NamedTuple):
+    indices_k: torch.Tensor
+    cu_seqlens_k: torch.Tensor
+    max_seqlen_k: int
+    cu_seqlens_q: torch.Tensor
+    max_seqlen_q: int
+
+
 class _FlashAttentionMetadataPlan(NamedTuple):
     attention_mask: torch.Tensor | None
     mask_mode: MaskMode
@@ -446,6 +454,7 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
         key: torch.Tensor,
         value: torch.Tensor,
         attention_mask: torch.Tensor,
+        qwen21_decode_varlen: _Qwen21DecodeVarlen | None = None,
     ) -> torch.Tensor:
         from vllm_omni.diffusion.attention.backends.utils.fa import (
             _index_first_axis,
@@ -466,12 +475,24 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
             )
         else:
             # Cross-attention: the mask covers keys only, so keep every query row.
-            k, indices_k, cu_seq_lens_k, max_length_k, _ = _unpad_input(key, attention_mask)
+            if (
+                qwen21_decode_varlen is not None
+                and torch.version.hip is not None
+                and query.dtype == key.dtype == value.dtype == torch.bfloat16
+                and query_length != key.size(1)
+                and qwen21_decode_varlen.max_seqlen_q == query_length
+                and attention_mask.shape == key.shape[:2]
+                and qwen21_decode_varlen.cu_seqlens_q.numel() == batch_size + 1
+            ):
+                indices_k, cu_seq_lens_k, max_length_k, cu_seq_lens_q, _ = qwen21_decode_varlen
+                k = _index_first_axis(key, indices_k)
+            else:
+                k, indices_k, cu_seq_lens_k, max_length_k, _ = _unpad_input(key, attention_mask)
+                cu_seq_lens_q = torch.arange(
+                    0, (batch_size + 1) * query_length, query_length, dtype=torch.int32, device=query.device
+                )
             v = _index_first_axis(value, indices_k)
             q = query.flatten(0, 1)
-            cu_seq_lens_q = torch.arange(
-                0, (batch_size + 1) * query_length, query_length, dtype=torch.int32, device=query.device
-            )
             max_length_q = query_length
             indices_q = None
 
@@ -773,6 +794,7 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
                 key,
                 value,
                 attention_mask,
+                qwen21_decode_varlen=extra.get("qwen21_decode_varlen"),
             )
 
         if flash_attn_func is not None:

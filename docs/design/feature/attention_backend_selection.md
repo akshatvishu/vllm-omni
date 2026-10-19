@@ -79,6 +79,15 @@ preserve common `self` or `cross` policies. A model also decides whether its
 path is compatible with automatic TRTLLM selection, because only the model
 knows whether masking and packing satisfy the kernel contract.
 
+Qwen-Image-2.1 prepares variable-length key-padding metadata once per padded
+decode forward when the resolved backend is `FLASH_ATTN` on ROCm, using BF16
+with SP1 and ordinary prefix KV storage. It shares the indices and sequence
+lengths across transformer layers, while each layer still gathers its own
+K/V values. The metadata is rebuilt for each forward and is not cached by
+mask shape. Preparation is skipped when platform resolution selects SDPA.
+This optimization retains the existing padded-decode graph fallback and does
+not change backend selection or the prefill mask semantics.
+
 ### Model-owned implementation specializations
 
 Use `Attention(..., impl_overrides={backend_name: implementation_class})`
