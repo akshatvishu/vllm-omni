@@ -3195,6 +3195,7 @@ async def test_interaction_backlog_is_bounded_without_blocking_dispatch() -> Non
     with pytest.raises(RuntimeError, match="Too many pending interactions"):
         consumer._handle_output_message(error)
 
+
 @pytest.mark.asyncio
 async def test_stage_pool_preserves_scheduler_stats_only_outputs():
     pool = object.__new__(StagePool)
@@ -3211,15 +3212,16 @@ async def test_stage_pool_preserves_scheduler_stats_only_outputs():
 async def test_publish_stage_post_warmup_memory_records_initialized_replica():
     logger = SimpleNamespace(record_stage_post_warmup_memory=Mock())
     pool = SimpleNamespace(
-        stage_id=1,
+        stage_id=0,
         stage_vllm_config=SimpleNamespace(),
+        clients=[SimpleNamespace()],
         live_replica_ids=lambda: [0],
         collective_rpc=AsyncMock(return_value=[None, {"allocated_bytes": 11, "reserved_bytes": 13}]),
     )
     orchestrator = object.__new__(Orchestrator)
     orchestrator._stat_logger = logger
     orchestrator.stage_pools = [pool]
-    orchestrator._stage_replica_to_engine_idx = {(1, 0): 4}
+    orchestrator._stage_replica_to_engine_idx = {(0, 0): 4}
 
     await orchestrator.publish_stage_post_warmup_memory()
 

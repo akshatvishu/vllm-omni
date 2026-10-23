@@ -107,7 +107,11 @@ The Orchestrator instantiates `OmniPrometheusStatLogger` (a thin subclass of ups
 After stage workers finish warmup, the orchestrator requests an optional
 allocator snapshot once over the worker control-plane RPC and records it before
 frontend readiness. The snapshot never enters model-runner, request, or API
-output. Code2Wav currently supplies this post-warmup snapshot.
+output. Code2Wav currently supplies this post-warmup snapshot. In distributed
+mode, the orchestrator also collects a snapshot when a remote replica attaches.
+Detaching or evicting a replica removes its memory series. A replacement in the
+same slot publishes its own values, and late replies from a removed worker are
+ignored.
 
 ### Shared State Between Threads
 
@@ -158,7 +162,7 @@ Behavior with `log_stats=False` (the Python-interface default, or API serving wi
 - `OmniPrometheusStatLogger` is not constructed in `_init_metrics_state`, so the ~65 upstream `vllm:*` wrap families are not registered in the default registry at all.
 - The engine core's `Scheduler.make_stats()` also short-circuits inside upstream (`if not self.log_stats: return None`), so no `SchedulerStats` is produced per step — the per-iteration cost is bounded by the existing upstream gate.
 
-Behavior with `log_stats=True`: the post-warmup memory snapshot is published once at readiness. Request-time metric paths fire normally, as described below.
+Behavior with `log_stats=True`: the post-warmup memory snapshot is published at readiness and on remote replica attachment. Request-time metric paths fire normally, as described below.
 
 The overhead with the flag on is small enough that an A/B benchmark on Qwen3-Omni-30B single replica (30 sequential audio requests) showed a mean latency delta of +0.6% (Welch's t = 0.318, n=30, not statistically significant at α=0.05); the `/metrics` line count drops from 1358 to 124 lines when the flag is off.
 
@@ -265,12 +269,13 @@ Labels: `{model_name, from_stage, from_replica, to_stage, to_replica}`.
 ### Generation-stage post-warmup memory (2)
 
 Labels: `{model_name, stage, replica}`. These `vllm_omni:` gauges are emitted
-at stage readiness when statistics are enabled and rank 0 supplies a memory
-snapshot. Values describe that worker's device and are not aggregated across
+at stage readiness and remote replica attachment when statistics are enabled
+and rank 0 supplies a memory snapshot. The series are removed on detachment or
+eviction. Values describe that worker's device and are not aggregated across
 tensor- or pipeline-parallel ranks.
 
 | Metric | Description |
-|---|---|
+| --- | --- |
 | `vllm_omni:stage_post_warmup_memory_allocated_bytes` | CUDA allocator bytes allocated after decoder CUDA-graph warmup |
 | `vllm_omni:stage_post_warmup_memory_reserved_bytes` | CUDA allocator bytes reserved after decoder CUDA-graph warmup |
 

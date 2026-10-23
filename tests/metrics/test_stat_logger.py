@@ -455,6 +455,45 @@ class TestOmniPrometheusStatLogger:
         assert registry.get_sample_value(defs.STAGE_POST_WARMUP_MEMORY_ALLOCATED_BYTES, replica_0) == 13
         assert registry.get_sample_value(defs.STAGE_POST_WARMUP_MEMORY_ALLOCATED_BYTES, replica_1) == 17
 
+    def test_remove_stage_post_warmup_memory_preserves_slots_and_other_replicas(self, stats_config):
+        sl = OmniPrometheusStatLogger(stats_config, {0: ("0", "0"), 1: ("0", "1")})
+        iteration = IterationStats()
+        iteration.num_generation_tokens = 7
+        sl.record(None, iteration, engine_idx=0)
+        for engine_idx in (0, 1):
+            sl.record_stage_post_warmup_memory(
+                StagePostWarmupMemoryStats(allocated_bytes=11, reserved_bytes=13),
+                engine_idx=engine_idx,
+            )
+
+        sl.remove_stage_post_warmup_memory(engine_idx=0)
+        sl.remove_stage_post_warmup_memory(engine_idx=0)
+        sl.remove_stage_post_warmup_memory(engine_idx=99)
+
+        removed = {"model_name": "test-model", "stage": "0", "replica": "0"}
+        retained = removed | {"replica": "1"}
+        for metric, value in (
+            (defs.STAGE_POST_WARMUP_MEMORY_ALLOCATED_BYTES, 11),
+            (defs.STAGE_POST_WARMUP_MEMORY_RESERVED_BYTES, 13),
+        ):
+            assert REGISTRY.get_sample_value(metric, removed) is None
+            assert REGISTRY.get_sample_value(metric, retained) == value
+        assert sl.stage_replica_map == {0: ("0", "0"), 1: ("0", "1")}
+        assert sl.per_engine_labelvalues[0] == ["test-model", "0", "0"]
+        assert REGISTRY.get_sample_value("vllm:generation_tokens_total", removed) == 7
+
+        sl.remove_stage_post_warmup_memory(engine_idx=1)
+        exposition = generate_latest(REGISTRY).decode()
+        assert f"# HELP {defs.STAGE_POST_WARMUP_MEMORY_ALLOCATED_BYTES}" in exposition
+        assert f"# HELP {defs.STAGE_POST_WARMUP_MEMORY_RESERVED_BYTES}" in exposition
+        sl.record_stage_post_warmup_memory(
+            StagePostWarmupMemoryStats(allocated_bytes=17, reserved_bytes=19),
+            engine_idx=0,
+        )
+        assert REGISTRY.get_sample_value(defs.STAGE_POST_WARMUP_MEMORY_ALLOCATED_BYTES, removed) == 17
+        assert REGISTRY.get_sample_value(defs.STAGE_POST_WARMUP_MEMORY_RESERVED_BYTES, removed) == 19
+        sl.remove_stage_post_warmup_memory(engine_idx=0)
+
 
 # ---------------------------------------------------------------------------
 # Helper-class wraps for upstream's spec_decoding / kv_connector /

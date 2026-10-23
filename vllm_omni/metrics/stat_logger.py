@@ -349,3 +349,11 @@ class OmniPrometheusStatLogger(PrometheusStatLogger):
         labels = (model_name, stage, replica)
         self._stage_post_warmup_memory_allocated_family.labels(*labels).set(stats.allocated_bytes)
         self._stage_post_warmup_memory_reserved_family.labels(*labels).set(stats.reserved_bytes)
+
+    def remove_stage_post_warmup_memory(self, *, engine_idx: int) -> None:
+        """Remove a detached replica's snapshot while retaining its metric slot."""
+        labels = self.per_engine_labelvalues.get(engine_idx)
+        if labels is None:
+            return
+        self._stage_post_warmup_memory_allocated_family.remove(*labels)
+        self._stage_post_warmup_memory_reserved_family.remove(*labels)
