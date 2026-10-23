@@ -569,6 +569,21 @@ class QwenImage21Pipeline(
             out_mask.append(pad_mask[keep])
         return out_hs, out_mask
 
+    def _use_host_prompt_masks(self, has_images: bool, dtype: torch.dtype) -> bool:
+        """Keep authoritative T2I masks on CPU only for the measured ROCm path."""
+        if has_images or torch.version.hip is None or self.device.type != "cuda" or dtype != torch.bfloat16:
+            return False
+        model = self.transformer
+        backend = model.transformer_blocks[0].attn.attn.attn_backend
+        return (
+            backend is not None
+            and backend.get_name() == "FLASH_ATTN"
+            and model.prefix_kv_cache_dtype is None
+            and (model.parallel_config is None or model.parallel_config.sequence_parallel_size == 1)
+            and not torch.is_grad_enabled()
+            and not torch.compiler.is_compiling()
+        )
+
     def _get_qwen_prompt_embeds(
         self,
         prompt: str | list[str] = None,
@@ -581,7 +596,8 @@ class QwenImage21Pipeline(
         Returns:
             `tuple` of `(prompt_embeds, encoder_attention_mask, image_pad_mask)`, all padded to the
             batch's maximum (post-downsample) sequence length. `image_pad_mask` is `True` at the
-            vision-language image slots.
+            vision-language image slots. Eligible ROCm text-to-image masks stay
+            on CPU through caching/batching; the transformer transfers them.
         """
         dtype = self.text_encoder.dtype
         prompt = [prompt] if isinstance(prompt, str) else prompt
@@ -651,7 +667,16 @@ class QwenImage21Pipeline(
         }
         if has_images:
             processor_kwargs["images"] = condition_pil_list
-        model_inputs = self.processor(**processor_kwargs).to(self.device)
+        model_inputs = self.processor(**processor_kwargs)
+        host_image_pad_mask = None
+        if self._use_host_prompt_masks(has_images, dtype):
+            # The processor still owns CPU token IDs here. Retain exact slot
+            # positions before moving its inputs to the text encoder's device.
+            host_image_pad_mask = [
+                (ids[mask.bool()] == self._img_token_id)[self._drop_idx :]
+                for ids, mask in zip(model_inputs.input_ids, model_inputs.attention_mask)
+            ]
+        model_inputs = model_inputs.to(self.device)
 
         forward_kwargs: dict[str, Any] = {
             "input_ids": model_inputs.input_ids,
@@ -679,11 +704,14 @@ class QwenImage21Pipeline(
         split_hidden_states = list(self._extract_masked_hidden(hidden_states, model_inputs.attention_mask))
         split_hidden_states = [e[self._drop_idx :] for e in split_hidden_states]
 
-        image_pad_mask = [
-            (sample_ids[sample_mask.bool()] == self._img_token_id)
-            for sample_ids, sample_mask in zip(model_inputs.input_ids, model_inputs.attention_mask)
-        ]
-        image_pad_mask = [e[self._drop_idx :] for e in image_pad_mask]
+        if host_image_pad_mask is not None:
+            image_pad_mask = host_image_pad_mask
+        else:
+            image_pad_mask = [
+                (sample_ids[sample_mask.bool()] == self._img_token_id)
+                for sample_ids, sample_mask in zip(model_inputs.input_ids, model_inputs.attention_mask)
+            ]
+            image_pad_mask = [e[self._drop_idx :] for e in image_pad_mask]
 
         if has_images:
             # Expected slot counts: one VLM token slot per 2x2 group of latent
@@ -698,7 +726,10 @@ class QwenImage21Pipeline(
                 split_hidden_states, image_pad_mask, expected_slots, image_sizes
             )
 
-        attn_mask_list = [torch.ones(e.size(0), dtype=torch.long, device=e.device) for e in split_hidden_states]
+        attn_mask_list = [
+            torch.ones(e.size(0), dtype=torch.long, device="cpu" if host_image_pad_mask is not None else e.device)
+            for e in split_hidden_states
+        ]
         max_seq_len = max(e.size(0) for e in split_hidden_states)
         prompt_embeds = torch.stack(
             [torch.cat([u, u.new_zeros(max_seq_len - u.size(0), u.size(1))]) for u in split_hidden_states]

@@ -61,6 +61,25 @@ def _prepare_qwen21_decode_varlen(mask: torch.Tensor, query_length: int) -> _Qwe
     return _Qwen21DecodeVarlen(indices_k, cu_seqlens_k, max_seqlen_k, cu_seqlens_q, query_length)
 
 
+def _prepare_qwen21_decode_varlen_host(
+    encoder_mask: torch.Tensor, img_mask: torch.Tensor, query_length: int, device: torch.device
+) -> _Qwen21DecodeVarlen:
+    """Rebuild the exact joint-key metadata from this forward's two CPU masks."""
+    image_pad_mask = QwenImage21SequencePrepare.expand_image_pad_mask(img_mask[0])
+    key_valid = torch.ones(encoder_mask.shape[0], image_pad_mask.numel(), dtype=torch.bool)
+    # Image slots expand fourfold; text slots preserve their original order,
+    # including holes. Length sums alone cannot describe these positions.
+    text_positions = (~image_pad_mask).nonzero(as_tuple=True)[0]
+    vlm_text_positions = ~img_mask[0][: encoder_mask.shape[1]]
+    key_valid[:, text_positions] = encoder_mask.bool()[:, vlm_text_positions]
+    prepared = _prepare_qwen21_decode_varlen(key_valid, query_length)
+    return prepared._replace(
+        indices_k=prepared.indices_k.to(device=device, non_blocking=True),
+        cu_seqlens_k=prepared.cu_seqlens_k.to(device=device, non_blocking=True),
+        cu_seqlens_q=prepared.cu_seqlens_q.to(device=device, non_blocking=True),
+    )
+
+
 class QwenImage21KVCache(list[dict[str, dict[str, torch.Tensor]]]):
     """Request prefix cache supporting weakrefs used by this transformer's geometry reuse.
 
@@ -1197,6 +1216,21 @@ class QwenImage21Transformer2DModel(CachedTransformer):
         attention_kwargs = attention_kwargs or {}
         attn_path_hint = attention_kwargs.get("attn_path", "auto")
 
+        # The pipeline can keep both masks on the host through prompt caching
+        # and batching. Use their current contents, never a shape-keyed copy.
+        host_masks = None
+        if (
+            encoder_hidden_states_mask is not None
+            and encoder_hidden_states_mask.device.type == "cpu"
+            and img_mask.device.type == "cpu"
+        ):
+            host_masks = (encoder_hidden_states_mask, img_mask)
+        # Graph eligibility and sequence preparation index masks with device
+        # tensors. Preserve those existing boundaries even on fallback paths.
+        if encoder_hidden_states_mask is not None:
+            encoder_hidden_states_mask = encoder_hidden_states_mask.to(device=hidden_states.device, non_blocking=True)
+        img_mask = img_mask.to(device=hidden_states.device, non_blocking=True)
+
         batch_size = hidden_states.shape[0]
 
         if kv_cache is not None and not self.causal_condition:
@@ -1321,6 +1355,7 @@ class QwenImage21Transformer2DModel(CachedTransformer):
         joint_key_valid = None
         cached_key_valid = (
             geometry is not None
+            and host_masks is None
             and geometry.get("key_valid_mask_source") is encoder_hidden_states_mask
             and "key_valid" in geometry
             and geometry.get("sp_padding") == sp_padding
@@ -1382,9 +1417,13 @@ class QwenImage21Transformer2DModel(CachedTransformer):
                     # Rebuild for this forward and CFG branch, even if the mask
                     # shape is unchanged. Preparation stays outside regionally
                     # compiled blocks; each layer still gathers its own K/V.
-                    attn_metadata.extra["qwen21_decode_varlen"] = _prepare_qwen21_decode_varlen(
-                        joint_key_valid, joint_hidden_states.shape[1]
-                    )
+                    if host_masks is not None:
+                        prepared = _prepare_qwen21_decode_varlen_host(
+                            *host_masks, joint_hidden_states.shape[1], joint_key_valid.device
+                        )
+                    else:
+                        prepared = _prepare_qwen21_decode_varlen(joint_key_valid, joint_hidden_states.shape[1])
+                    attn_metadata.extra["qwen21_decode_varlen"] = prepared
                     # Publish known padding semantics to avoid per-layer GPU mask checks.
                     attn_metadata.extra["attention_mask_mode"] = "padding"
         else:

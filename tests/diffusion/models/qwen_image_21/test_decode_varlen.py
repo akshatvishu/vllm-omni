@@ -187,6 +187,25 @@ def test_prefill_does_not_prepare_decode_metadata(monkeypatch, decode_model):
         assert "qwen21_decode_varlen" not in metadata.extra
 
 
+@torch.inference_mode()
+def test_host_forward_refreshes_inference_mask_without_version_counter(monkeypatch, decode_model):
+    model, inputs = decode_model(num_blocks=32)
+    prepare = Mock(wraps=transformer._prepare_qwen21_decode_varlen_host)
+    monkeypatch.setattr(transformer, "_prepare_qwen21_decode_varlen_host", prepare)
+    assert inputs["encoder_hidden_states_mask"].is_inference()
+    model(**inputs)
+    first = model.transformer_blocks[0].call_args.kwargs["attn_metadata"].extra["qwen21_decode_varlen"]
+    saved_indices = first.indices_k.clone()
+    inputs["encoder_hidden_states_mask"][:, :3] = torch.tensor([[False, True, False], [True, True, False]])
+    model(**inputs)
+    second = model.transformer_blocks[0].call_args.kwargs["attn_metadata"].extra["qwen21_decode_varlen"]
+    assert prepare.call_count == 2
+    assert second.cu_seqlens_k.tolist() == [0, 5, 11]
+    torch.testing.assert_close(first.indices_k, saved_indices, rtol=0, atol=0)
+    for block in model.transformer_blocks:
+        assert block.call_args.kwargs["attn_metadata"].extra["qwen21_decode_varlen"] is second
+
+
 def _reference_varlen(q, k, v, *, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, **kwargs):
     outputs = []
     for index in range(cu_seqlens_q.numel() - 1):

@@ -130,7 +130,18 @@ decode only needs a 2D key-validity mask. On ROCm, BF16, SP1 forwards with a
 resolved `FLASH_ATTN` backend and unquantized prefix K/V, the model prepares
 `qwen21_decode_varlen` once per forward and CFG branch and shares it across
 layers. Each layer still gathers its own K/V and invokes the existing varlen
-provider. Metadata is rebuilt from the current mask, never cached by shape.
+provider. Eligible ROCm text-to-image prompt encoding retains both the encoder
+validity mask and image-slot mask on CPU. Prompt caching and request-major
+expansion preserve these masks; batch assembly pads/gathers them in the current
+request order and keeps the prefix widths recorded during prefill. The transformer
+transfers both masks before graph eligibility and sequence preparation.
+When both original masks are on CPU, decode metadata is built from their current
+contents, with image slots expanded fourfold and text positions kept in order.
+The resulting indices and offsets are transferred to the attention device.
+GPU masks and unsupported execution paths retain the existing preparation.
+Metadata is rebuilt per forward, never cached by shape. This does not extend
+the step batcher's existing right-padding contract to arbitrary holes; direct
+transformer metadata construction preserves arbitrary valid positions.
 Publishing `attention_mask_mode="padding"` also avoids each layer checking
 mask contents to select the masked route.
 Preparation is skipped for SDPA, including platform fallback, and when the
