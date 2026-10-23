@@ -30,6 +30,7 @@ from vllm_omni.entrypoints.openai.image_api_utils import (
     parse_size,
 )
 from vllm_omni.entrypoints.openai.images.helpers import _check_max_generated_image_size
+from vllm_omni.entrypoints.openai.images.response_executor import install_image_response_executor
 from vllm_omni.entrypoints.openai.models.serving import _DiffusionServingModels
 from vllm_omni.entrypoints.openai.serving_chat import OmniOpenAIServingChat
 from vllm_omni.errors import GuardrailViolationError
@@ -231,7 +232,9 @@ def test_client(mock_async_diffusion):
         max_generated_image_size=1024 * 1792,
     )
 
-    return TestClient(app)
+    install_image_response_executor(app)
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture
@@ -310,7 +313,9 @@ def async_omni_test_client():
         default_sampling_params='{"1": {"num_inference_steps":4, "guidance_scale":7.5, "generator_device":"cpu"}}',
         max_generated_image_size=1048576,  # 1024*1024 to support resolution tests
     )
-    return TestClient(app)
+    install_image_response_executor(app)
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture
@@ -374,7 +379,9 @@ def async_omni_rgba_test_client():
         default_sampling_params='{"1": {"num_inference_steps":4, "guidance_scale":7.5, "generator_device":"cpu"}}',
         max_generated_image_size=1048576,
     )
-    return TestClient(app)
+    install_image_response_executor(app)
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture
@@ -435,7 +442,9 @@ def async_omni_stage_configs_only_client():
         default_sampling_params='{"1": {"num_inference_steps":4, "guidance_scale":7.5, "generator_device":"cpu"}}',
         max_generated_image_size=1024 * 1792,
     )
-    return TestClient(app)
+    install_image_response_executor(app)
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture
@@ -519,7 +528,9 @@ def mammoth_moda2_test_client():
         default_sampling_params='{"1": {"num_inference_steps":50, "generator_device":"cpu"}}',
         max_generated_image_size=1024 * 1024,
     )
-    return TestClient(app)
+    install_image_response_executor(app)
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture
@@ -585,7 +596,9 @@ def streaming_image_edit_client():
         default_sampling_params='{"1": {"num_inference_steps":4, "guidance_scale":7.5, "generator_device":"cpu"}}',
         max_generated_image_size=1024 * 1792,
     )
-    return TestClient(app)
+    install_image_response_executor(app)
+    with TestClient(app) as client:
+        yield client
 
 
 def test_health_endpoint(test_client):
@@ -854,17 +867,17 @@ def test_generate_images_async_omni_glm_image_sets_stage0_max_tokens():
         default_sampling_params='{"1": {"num_inference_steps":4, "guidance_scale":7.5, "generator_device":"cpu"}}',
         max_generated_image_size=1048576,
     )
-    client = TestClient(app)
-
-    response = client.post(
-        "/v1/images/generations",
-        json={
-            "prompt": "a coral reef",
-            "n": 1,
-            "size": "1024x1024",
-            "seed": 7,
-        },
-    )
+    install_image_response_executor(app)
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/images/generations",
+            json={
+                "prompt": "a coral reef",
+                "n": 1,
+                "size": "1024x1024",
+                "seed": 7,
+            },
+        )
     assert response.status_code == 200
 
     captured = engine.captured_sampling_params_list

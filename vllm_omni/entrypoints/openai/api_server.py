@@ -146,6 +146,7 @@ from vllm_omni.entrypoints.openai.images.helpers import (
     _load_input_images,
     _update_if_not_none,
 )
+from vllm_omni.entrypoints.openai.images.response_executor import install_image_response_executor
 from vllm_omni.entrypoints.openai.lora import _get_lora_from_json_str, _parse_lora_request
 from vllm_omni.entrypoints.openai.models import serving as openai_models_serving
 from vllm_omni.entrypoints.openai.protocol.audio import (
@@ -396,6 +397,7 @@ async def omni_run_server_worker(
 
         # OMNI: Pass supported_tasks to build_app (required by upstream vLLM)
         app = build_openai_app(args, supported_tasks)
+        install_image_response_executor(app)
         app.state.api_server_count = api_server_count
 
         # OMNI: Remove upstream routes that we override with omni-specific handlers
@@ -2234,7 +2236,8 @@ async def generate_images(
                     content=generation_result.model_dump(),
                 )
             flat_images, stage_durations, peak_memory_mb, _, response_metrics = generation_result
-            return _build_image_generation_response(
+            return await raw_request.app.state.image_response_executor.run(
+                _build_image_generation_response,
                 images=flat_images,
                 request=request,
                 stage_durations=stage_durations,
@@ -2331,7 +2334,8 @@ async def generate_images(
         stage_durations = getattr(result, "stage_durations", None)
         peak_memory_mb = getattr(result, "peak_memory_mb", None)
         response_metrics = getattr(result, "metrics", None) if request.return_stage_metrics else None
-        return _build_image_generation_response(
+        return await raw_request.app.state.image_response_executor.run(
+            _build_image_generation_response,
             images=images,
             request=request,
             stage_durations=stage_durations,

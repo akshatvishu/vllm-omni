@@ -500,6 +500,13 @@ async def test_api_server_assembly_replaces_upstream_routes_and_mounts_omni_rout
 
     async def fake_serve_http(app, **_kwargs):
         captured["served_app"] = app
+        inner = app._inner
+        async with inner.router.lifespan_context(inner):
+            pool = inner.state.image_response_executor
+            assert pool._executor._max_workers == 2
+            assert await pool.run(lambda: "encoded") == "encoded"
+        assert pool._closed and not pool._pending
+        assert not any(thread.is_alive() for thread in pool._executor._threads)
         task = asyncio.create_task(asyncio.sleep(0))
         await asyncio.sleep(0)
         return task

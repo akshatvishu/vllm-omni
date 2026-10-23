@@ -101,6 +101,13 @@ optional `/tokenizer_info` routes when no tokenization handler is configured
 (including pure diffusion mode). These endpoints return HTTP 404 and are absent
 from OpenAPI in that mode; configured handlers retain upstream vLLM routing.
 
+Image-generation responses use an app-owned pool of two CPU workers for image
+encoding and response-object construction. Each request preserves image order;
+JSON rendering remains on the API event loop. The pool limits submitted,
+unfinished jobs, including jobs whose HTTP waiter has been cancelled. It retains
+their inputs until completion and drains before the enclosing app lifespan
+exits. Requests waiting for a worker are not covered by this submission limit.
+
 When `--api-server-count` is greater than one, the serve composition root
 starts the frontend process manager while a parent-owned `StageRuntime`
 launches the shared local stage engines. Each frontend receives only its own
