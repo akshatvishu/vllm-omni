@@ -125,7 +125,15 @@ instead owns communication and requires `skip_sequence_parallel=True`.
 
 Qwen-Image-2.1's padded prefill uses a complete 4D boolean visibility mask.
 The FlashAttention masked route passes that mask to PyTorch SDPA because
-2D varlen unpadding cannot express its block-causal structure. Padded cached
+2D varlen unpadding cannot express its block-causal structure. On ROCm BF16,
+SP1 inference with ordinary prefix K/V and resolved `FLASH_ATTN`, known-padded
+prefill publishes `attention_mask_mode="arbitrary"` before the layer loop.
+The known invalid keys prove that the mask contains exclusions, so each layer
+can retain the SDPA route without checking mask contents again. Unpadded
+forced-mask calls retain runtime inspection because their masks may be entirely
+visible. Publication remains outside whole-transformer compilation; regional
+blocks can now trace beyond the former tensor-dependent dispatch condition.
+Padded cached
 decode only needs a 2D key-validity mask. On ROCm, BF16, SP1 forwards with a
 resolved `FLASH_ATTN` backend and unquantized prefix K/V, the model prepares
 `qwen21_decode_varlen` once per forward and CFG branch and shares it across

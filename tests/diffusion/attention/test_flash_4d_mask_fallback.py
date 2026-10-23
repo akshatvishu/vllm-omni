@@ -107,7 +107,8 @@ def test_4d_masked_fallback_with_key_padding():
     assert torch.allclose(out, ref, atol=1e-6)
 
 
-def test_forward_cuda_dispatches_4d_mask_to_sdpa(monkeypatch):
+@pytest.mark.parametrize("published", [False, True])
+def test_forward_cuda_dispatches_4d_mask_to_sdpa(monkeypatch, published):
     """Regression guard: forward_cuda must route a 4D mask to the SDPA fallback.
 
     Patches HAS_FLASH_ATTN so the CUDA-only kernel gate passes on CPU, then drives
@@ -132,15 +133,38 @@ def test_forward_cuda_dispatches_4d_mask_to_sdpa(monkeypatch):
     mask = _block_causal_mask(sq, [(1, 3), (4, 6)]).expand(b, 1, -1, -1).to(torch.bool)
 
     impl = _make_impl()
+    if published:
+
+        def unexpected_mask_scan(*args, **kwargs):
+            raise AssertionError("Published arbitrary masks must not be scanned again")
+
+        monkeypatch.setattr(torch, "any", unexpected_mask_scan)
     out = impl.forward_cuda(
         q,
         k,
         v,
-        AttentionMetadata(attn_mask=mask, full_attn_spans=None, extra={"attention_mask_mode": "arbitrary"}),
+        AttentionMetadata(attn_mask=mask, extra={"attention_mask_mode": "arbitrary"} if published else {}),
     )
     ref = _reference_attn(q, k, v, mask, impl.softmax_scale)
     assert out.shape == q.shape
     assert torch.allclose(out, ref, atol=1e-6)
+
+
+def test_unpublished_all_visible_4d_mask_retains_dense_dispatch(monkeypatch):
+    monkeypatch.setattr(fa, "HAS_FLASH_ATTN", True)
+    monkeypatch.setattr(fa, "IS_FLASH_ATTN_4", False)
+    calls = []
+
+    def dense(q, k, v, **kwargs):
+        calls.append("dense")
+        return q
+
+    monkeypatch.setattr(fa, "dense_flash_attn_func_for", lambda dtype: dense)
+    q = torch.zeros(2, 6, 4, 8)
+    impl = _make_impl()
+    actual = impl.forward_cuda(q, q, q, AttentionMetadata(attn_mask=torch.ones(2, 1, 6, 6, dtype=torch.bool)))
+    assert actual is q
+    assert calls == ["dense"]
 
 
 def test_forward_cuda_keeps_2d_mask_on_varlen_path(monkeypatch):

@@ -171,7 +171,7 @@ def test_decode_preparation_exclusions(monkeypatch, decode_model, exclusion):
 
 @torch.no_grad()
 def test_prefill_does_not_prepare_decode_metadata(monkeypatch, decode_model):
-    model, inputs = decode_model()
+    model, inputs = decode_model(num_blocks=32)
     _, target, _, freqs = model.sequence_prepare.return_value
     model.sequence_prepare.return_value = (target[:, :3], target, freqs[:3], freqs)
     model.txt_in = nn.Identity()
@@ -185,6 +185,57 @@ def test_prefill_does_not_prepare_decode_metadata(monkeypatch, decode_model):
         metadata = block.call_args.kwargs["attn_metadata"]
         assert metadata.attn_mask.ndim == 4
         assert "qwen21_decode_varlen" not in metadata.extra
+        assert metadata.extra["attention_mask_mode"] == "arbitrary"
+        assert metadata is model.transformer_blocks[0].call_args.kwargs["attn_metadata"]
+
+
+@pytest.mark.parametrize(
+    "exclusion",
+    [
+        "not_hip",
+        "cpu",
+        "fp32",
+        "prefix_fp8",
+        "sp",
+        "grad",
+        "compile",
+        "unpadded",
+        "no_backend",
+        "sdpa",
+        "piecewise",
+        "noncausal",
+    ],
+)
+def test_prefill_mask_publication_exclusions(monkeypatch, decode_model, exclusion):
+    backend = None if exclusion == "no_backend" else SDPABackend if exclusion == "sdpa" else FlashAttentionBackend
+    model, inputs = decode_model(backend=backend, dtype=torch.float32 if exclusion == "fp32" else torch.bfloat16)
+    _, target, _, freqs = model.sequence_prepare.return_value
+    if exclusion == "cpu":
+        target = target.as_subclass(torch.Tensor)
+    model.sequence_prepare.return_value = (target[:, :3], target, freqs[:3], freqs)
+    model.txt_in = nn.Identity()
+    inputs["encoder_hidden_states"] = torch.zeros(2, 3, 8, dtype=target.dtype)
+    inputs["kv_cache"] = [{} for _ in model.transformer_blocks]
+    inputs["attention_kwargs"] = {"attn_path": "mask"}
+    if exclusion == "not_hip":
+        monkeypatch.setattr(torch.version, "hip", None)
+    elif exclusion == "prefix_fp8":
+        model.prefix_kv_cache_dtype = "fp8_e4m3"
+    elif exclusion == "sp":
+        model.parallel_config = DiffusionParallelConfig(ulysses_degree=2)
+    elif exclusion == "compile":
+        monkeypatch.setattr(torch.compiler, "is_compiling", lambda: True)
+    elif exclusion == "unpadded":
+        inputs["encoder_hidden_states_mask"].fill_(True)
+    elif exclusion == "piecewise":
+        inputs["attention_kwargs"] = {"attn_path": "piecewise"}
+    elif exclusion == "noncausal":
+        model.causal_block = False
+    with torch.set_grad_enabled(exclusion == "grad"):
+        model(**inputs)
+    for block in model.transformer_blocks:
+        metadata = block.call_args.kwargs["attn_metadata"]
+        assert "attention_mask_mode" not in metadata.extra
 
 
 def _reference_varlen(q, k, v, *, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, **kwargs):

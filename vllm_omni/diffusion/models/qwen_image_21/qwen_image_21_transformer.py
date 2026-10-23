@@ -1400,6 +1400,23 @@ class QwenImage21Transformer2DModel(CachedTransformer):
                         image_ids, joint_key_valid, batch_size, padded_seq_len, hidden_states.device
                     )
                 )
+                backend = self.transformer_blocks[0].attn.attn.attn_backend
+                if (
+                    has_padding
+                    and backend is not None
+                    and backend.get_name() == "FLASH_ATTN"
+                    and torch.version.hip is not None
+                    and joint_hidden_states.device.type == "cuda"
+                    and joint_hidden_states.dtype == torch.bfloat16
+                    and self.prefix_kv_cache_dtype is None
+                    and not sp_active
+                    and not torch.is_grad_enabled()
+                    and not torch.compiler.is_compiling()
+                ):
+                    # Invalid keys prove this mask has exclusions. Publish the
+                    # full block-causal semantics, not a 2D padding assertion.
+                    # Unpadded forced masks can be all-visible; leave them alone.
+                    attn_metadata.extra["attention_mask_mode"] = "arbitrary"
             elif joint_key_valid is not None:
                 attn_metadata = AttentionMetadata(attn_mask=joint_key_valid)
 
