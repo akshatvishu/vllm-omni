@@ -961,7 +961,15 @@ class TestSpeechAPI:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("request_seed", "extra_seed", "expected_seed"),
-        [(None, None, 99), (None, 17, 17), (42, 17, 42)],
+        [
+            (None, None, 99),
+            (None, 17, 17),
+            (42, 17, 42),
+            (None, -1, -1),
+            (None, -(2**63), -(2**63)),
+            (-1, 17, -1),
+            (-(2**63), 17, -(2**63)),
+        ],
     )
     async def test_create_diffusion_speech_extra_params(
         self,
@@ -1116,7 +1124,7 @@ class TestSpeechAPI:
         mock_engine.generate.assert_not_called()
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("seed", [True, 1.5, "17", -1, 2**63])
+    @pytest.mark.parametrize("seed", [True, 1.5, "17", -(2**63) - 1, 2**63])
     async def test_create_diffusion_speech_rejects_invalid_extra_seed(self, mocker: MockerFixture, seed):
         mock_engine = mocker.MagicMock()
         mock_engine.default_sampling_params_list = [mocker.MagicMock(seed=99, extra_args={})]

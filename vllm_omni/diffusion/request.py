@@ -20,8 +20,8 @@ _DUMMY_DIFFUSION_REQUEST_ID_PREFIX = f"{DUMMY_DIFFUSION_REQUEST_ID}/"
 def validate_diffusion_seed(seed: Any) -> int:
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise ValueError("seed must be an integer")
-    if not 0 <= seed <= 2**63 - 1:
-        raise ValueError("seed must be between 0 and 2**63 - 1")
+    if not -(2**63) <= seed <= 2**63 - 1:
+        raise ValueError("seed must be between -(2**63) and 2**63 - 1")
     return seed
 
 
