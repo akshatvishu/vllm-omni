@@ -485,8 +485,6 @@ class FlashAttentionImpl(AttentionImpl[AttentionMetadata]):
             # geometry checks cannot detect stale metadata for a same-shaped mask.
             if (
                 qwen21_decode_varlen is not None
-                and torch.version.hip is not None
-                and query.dtype == key.dtype == value.dtype == torch.bfloat16
                 and query_length != key.size(1)
                 and qwen21_decode_varlen.max_seqlen_q == query_length
                 and attention_mask.shape == key.shape[:2]

@@ -1369,12 +1369,8 @@ class QwenImage21Transformer2DModel(CachedTransformer):
                 if (
                     backend is not None
                     and backend.get_name() == "FLASH_ATTN"
-                    and torch.version.hip is not None
                     and joint_hidden_states.device.type == "cuda"
-                    and joint_hidden_states.dtype == torch.bfloat16
-                    and self.prefix_kv_cache_dtype is None
                     and not sp_active
-                    and not torch.is_grad_enabled()
                     and not torch.compiler.is_compiling()
                     and joint_hidden_states.shape[1] > 0
                     and joint_hidden_states.shape[1] != joint_key_valid.shape[1]
@@ -1382,6 +1378,8 @@ class QwenImage21Transformer2DModel(CachedTransformer):
                     # Rebuild for this forward and CFG branch, even if the mask
                     # shape is unchanged. Preparation stays outside regionally
                     # compiled blocks; each layer still gathers its own K/V.
+                    # These integer offsets depend only on the mask and layout,
+                    # not the K/V storage dtype or autograd state.
                     attn_metadata.extra["qwen21_decode_varlen"] = _prepare_qwen21_decode_varlen(
                         joint_key_valid, joint_hidden_states.shape[1]
                     )
