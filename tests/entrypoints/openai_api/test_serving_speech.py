@@ -969,19 +969,24 @@ class TestSpeechAPI:
             (-(2**63), 17, -(2**63)),
         ],
     )
+    @pytest.mark.parametrize("default_legacy_seed", [None, 3])
     async def test_create_diffusion_speech_extra_params(
         self,
         mocker: MockerFixture,
         request_seed,
         extra_seed,
         expected_seed,
+        default_legacy_seed,
     ):
         """Test diffusion speech extra_params and seed propagation."""
         # Mock the engine client
         mock_engine = mocker.MagicMock()
 
         # Mock default sampling params
-        mock_sampling_param = OmniDiffusionSamplingParams(seed=99, extra_args={"existing_arg": "value"})
+        default_extra = {"existing_arg": "value"}
+        if default_legacy_seed is not None:
+            default_extra["seed"] = default_legacy_seed
+        mock_sampling_param = OmniDiffusionSamplingParams(seed=99, extra_args=default_extra.copy())
         mock_engine.default_sampling_params_list = [mock_sampling_param]
 
         # Mock generate to yield a valid OmniRequestOutput
@@ -1027,12 +1032,19 @@ class TestSpeechAPI:
         # Verify it was deepcopied and updated
         assert passed_params is not mock_engine.default_sampling_params_list
         assert passed_params[0].seed == expected_seed
-        assert passed_params[0].extra_args == {
+        expected_extra = {
             "existing_arg": "new_value",
             "new_arg": 123,
             "num_inference_steps": 12,
             "guidance_scale": 7.0,
         }
+        if default_legacy_seed is not None:
+            expected_extra["seed"] = (
+                expected_seed if request_seed is not None or extra_seed is not None else default_legacy_seed
+            )
+        assert passed_params[0].extra_args == expected_extra
+        assert mock_sampling_param.seed == 99
+        assert mock_sampling_param.extra_args == default_extra
         assert passed_params[0].num_inference_steps == 12
         assert passed_params[0].guidance_scale == 7.0
 

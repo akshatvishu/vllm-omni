@@ -2629,6 +2629,8 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                     sampling_params_list[0].seed = seed
                 if sampling_params_list[0].extra_args is None:
                     sampling_params_list[0].extra_args = {}
+                if seed is not None and "seed" in sampling_params_list[0].extra_args:
+                    sampling_params_list[0].extra_args["seed"] = seed
                 sampling_params_list[0].extra_args.update(extra)
 
                 sampling = sampling_params_list[0]
