@@ -134,6 +134,7 @@ def lifecycle(monkeypatch):
         clients=clients,
         replacements=replacements,
         logger=logger,
+        registry=registry,
         values=values,
         run=run,
     )
@@ -258,3 +259,51 @@ async def test_detached_rpc_cannot_overwrite_replacement_snapshot(lifecycle, sou
                 await startup_task
 
     await env.run(scenario)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shutdown_error", [False, True])
+async def test_shutdown_removes_memory_snapshots(lifecycle, monkeypatch, shutdown_error):
+    env = lifecycle
+    await env.orchestrator.publish_stage_post_warmup_memory()
+    assert env.values(0) == (11, 13)
+    assert env.values(1) == (17, 19)
+    if shutdown_error:
+
+        def fail_shutdown():
+            raise RuntimeError("client shutdown failed")
+
+        monkeypatch.setattr(env.clients[0], "shutdown", fail_shutdown)
+
+    env.orchestrator._shutdown_stages()
+    assert env.values(0) == (None, None)
+    assert env.values(1) == (None, None)
+    # A recreated logger reuses these families in the same process. An
+    # unsupported replacement must not inherit the previous engine's values.
+    replacement_logger = OmniPrometheusStatLogger.__new__(OmniPrometheusStatLogger)
+    replacement_logger._init_stage_post_warmup_memory_families(env.registry)
+    assert (
+        replacement_logger._stage_post_warmup_memory_allocated_family
+        is env.logger._stage_post_warmup_memory_allocated_family
+    )
+    assert env.values(0) == (None, None)
+    assert env.values(1) == (None, None)
+    env.orchestrator._shutdown_stages()
+    await env.orchestrator.publish_stage_post_warmup_memory()
+    assert [client.calls for client in env.clients] == [1, 1]
+    assert env.values(0) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_discards_pending_memory_reply(lifecycle):
+    env = lifecycle
+    client = env.clients[0]
+    client.release.clear()
+    task = asyncio.create_task(env.orchestrator._publish_replica_post_warmup_memory(0, 0, client))
+    try:
+        await asyncio.wait_for(client.started.wait(), timeout=2)
+        env.orchestrator._shutdown_stages()
+    finally:
+        client.release.set()
+        await task
+    assert env.values(0) == (None, None)

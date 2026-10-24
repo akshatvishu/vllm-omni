@@ -307,9 +307,13 @@ class RecordingOutputProcessor(FakeOutputProcessor):
 class RecordingStatLogger:
     def __init__(self) -> None:
         self.records: list[tuple[Any, Any, int]] = []
+        self.removed_memory_snapshots: list[int] = []
 
     def record(self, scheduler_stats, iteration_stats, *, engine_idx: int = 0) -> None:
         self.records.append((scheduler_stats, iteration_stats, engine_idx))
+
+    def remove_stage_post_warmup_memory(self, *, engine_idx: int) -> None:
+        self.removed_memory_snapshots.append(engine_idx)
 
 
 def _sampling_params(max_tokens: int = 4) -> SamplingParams:
@@ -3222,6 +3226,7 @@ async def test_publish_stage_post_warmup_memory_records_initialized_replica():
     orchestrator._stat_logger = logger
     orchestrator.stage_pools = [pool]
     orchestrator._stage_replica_to_engine_idx = {(0, 0): 4}
+    orchestrator._stages_shutdown = False
 
     await orchestrator.publish_stage_post_warmup_memory()
 

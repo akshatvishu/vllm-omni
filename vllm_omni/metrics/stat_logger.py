@@ -58,14 +58,20 @@ def _get_stage_post_warmup_memory_families(registry: CollectorRegistry) -> tuple
             families = (
                 Gauge(
                     defs.STAGE_POST_WARMUP_MEMORY_ALLOCATED_BYTES,
-                    "Rank-0 worker CUDA allocator bytes allocated after decoder CUDA-graph warmup.",
+                    "Rank-0 worker process PyTorch allocator bytes allocated on its device "
+                    "after decoder graph warmup during model loading, before KV-cache allocation "
+                    "and later graph captures.",
                     labelnames=labels,
+                    multiprocess_mode="mostrecent",
                     registry=registry,
                 ),
                 Gauge(
                     defs.STAGE_POST_WARMUP_MEMORY_RESERVED_BYTES,
-                    "Rank-0 worker CUDA allocator bytes reserved after decoder CUDA-graph warmup.",
+                    "Rank-0 worker process PyTorch allocator bytes reserved on its device "
+                    "after decoder graph warmup during model loading, before KV-cache allocation "
+                    "and later graph captures.",
                     labelnames=labels,
+                    multiprocess_mode="mostrecent",
                     registry=registry,
                 ),
             )

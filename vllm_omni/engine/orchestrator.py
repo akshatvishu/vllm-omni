@@ -582,15 +582,20 @@ class OrchestratorBase:
         self, stage_id: int, replica_id: int, client: StagePoolClient
     ) -> None:
         pool = self.stage_pools[stage_id]
-        if self._stat_logger is None or pool.stage_vllm_config is None or pool.clients[replica_id] is not client:
+        if (
+            self._stages_shutdown
+            or self._stat_logger is None
+            or pool.stage_vllm_config is None
+            or pool.clients[replica_id] is not client
+        ):
             return
         worker_results = await pool.collective_rpc(
             replica_id=replica_id,
             method="get_stage_post_warmup_memory_stats",
         )
-        # A detached worker's late reply must not recreate or overwrite the
-        # series belonging to a replacement in the same replica slot.
-        if pool.clients[replica_id] is not client or not isinstance(worker_results, list):
+        # A late reply after shutdown or detach must not recreate removed
+        # series or overwrite a replacement in the same replica slot.
+        if self._stages_shutdown or pool.clients[replica_id] is not client or not isinstance(worker_results, list):
             return
         snapshot = next(
             (
@@ -3452,6 +3457,9 @@ class OrchestratorBase:
             return
 
         self._stages_shutdown = True
+        if self._stat_logger is not None:
+            for engine_idx in self._stage_replica_to_engine_idx.values():
+                self._stat_logger.remove_stage_post_warmup_memory(engine_idx=engine_idx)
         total = sum(pool.live_num_replicas for pool in self.stage_pools)
         logger.info("[Orchestrator] Shutting down all %d client(s)", total)
         for pool in self.stage_pools:

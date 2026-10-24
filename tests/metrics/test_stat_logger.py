@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
+from contextlib import suppress
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from prometheus_client import REGISTRY, CollectorRegistry, generate_latest
+from prometheus_client import REGISTRY, CollectorRegistry, generate_latest, multiprocess
 from vllm.config import ModelConfig, ObservabilityConfig, SpeculativeConfig, VllmConfig
 from vllm.v1.engine import EngineCoreOutputs
 from vllm.v1.metrics.loggers import PrometheusStatLogger
@@ -34,6 +36,98 @@ from vllm_omni.metrics.stat_logger import (
 from vllm_omni.outputs import StagePostWarmupMemoryStats
 
 pytestmark = [pytest.mark.core_model, pytest.mark.cpu]
+
+
+def _publish_memory_snapshots(connection):
+    # Spawn imports Prometheus after inheriting PROMETHEUS_MULTIPROC_DIR,
+    # matching API frontend startup. Only publication time is controlled.
+    logger = OmniPrometheusStatLogger.__new__(OmniPrometheusStatLogger)
+    logger._omni_per_engine_labelvalues = {index: ["m", "1", str(index)] for index in (0, 1)}
+    logger._init_stage_post_warmup_memory_families()
+    while (command := connection.recv()) is not None:
+        engine_idx, allocated, reserved, timestamp = command
+        with patch("prometheus_client.metrics.time.time", return_value=timestamp):
+            logger.record_stage_post_warmup_memory(
+                StagePostWarmupMemoryStats(allocated_bytes=allocated, reserved_bytes=reserved),
+                engine_idx=engine_idx,
+            )
+        connection.send("recorded")
+    connection.close()
+
+
+def test_memory_snapshots_aggregate_shared_frontends(monkeypatch, tmp_path):
+    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
+    context = multiprocessing.get_context("spawn")
+    frontends = []
+    registry = CollectorRegistry()
+    multiprocess.MultiProcessCollector(registry, path=str(tmp_path))
+
+    def start_frontend():
+        parent, child = context.Pipe()
+        process = context.Process(target=_publish_memory_snapshots, args=(child,))
+        process.start()
+        child.close()
+        frontends.append((process, parent))
+        return process, parent
+
+    def publish(frontend, replica, allocated, reserved, timestamp):
+        process, connection = frontend
+        connection.send((replica, allocated, reserved, timestamp))
+        assert connection.poll(45), f"Snapshot writer did not reply (exitcode={process.exitcode})"
+        assert connection.recv() == "recorded"
+
+    def assert_snapshots(expected, families=None):
+        names = (defs.STAGE_POST_WARMUP_MEMORY_ALLOCATED_BYTES, defs.STAGE_POST_WARMUP_MEMORY_RESERVED_BYTES)
+        families = registry.collect() if families is None else families
+        samples = [sample for family in families for sample in family.samples if sample.name in names]
+        assert len(samples) == 2 * len(expected)
+        for sample in samples:
+            replica = int(sample.labels["replica"])
+            assert sample.labels == {"model_name": "m", "stage": "1", "replica": str(replica)}
+            assert sample.value == expected[replica][names.index(sample.name)]
+
+    try:
+        first, second = start_frontend(), start_frontend()
+        assert first[0].pid != second[0].pid
+        publish(first, 0, 101, 103, 1)
+        publish(second, 0, 101, 103, 2)
+        assert_snapshots({0: (101, 103)})
+
+        # The latest observation may be smaller; neither sum nor max is valid.
+        publish(second, 0, 11, 13, 3)
+        publish(first, 1, 17, 19, 4)
+        assert_snapshots({0: (11, 13), 1: (17, 19)})
+
+        # Collection order must not replace a newer observation with an older one.
+        publish(first, 0, 101, 103, 2)
+        files = sorted(str(path) for path in tmp_path.glob("gauge_*.db"))
+        for order in (files, files[::-1]):
+            assert_snapshots(
+                {0: (11, 13), 1: (17, 19)},
+                multiprocess.MultiProcessCollector.merge(order),
+            )
+
+        # API process exit does not retire the shared GPU worker's snapshot.
+        second[1].send(None)
+        second[0].join(timeout=10)
+        assert second[0].exitcode == 0
+        multiprocess.mark_process_dead(second[0].pid, path=str(tmp_path))
+        assert_snapshots({0: (11, 13), 1: (17, 19)})
+
+        replacement = start_frontend()
+        publish(replacement, 0, 23, 29, 5)
+        assert_snapshots({0: (23, 29), 1: (17, 19)})
+    finally:
+        for process, connection in frontends:
+            if process.is_alive():
+                with suppress(BrokenPipeError):
+                    connection.send(None)
+                process.join(timeout=10)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=10)
+            connection.close()
+            process.close()
 
 
 @pytest.fixture(autouse=True)

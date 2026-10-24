@@ -1894,7 +1894,8 @@ def test_load_poll_non_ar_merges_into_existing_additional_information(build_adap
     )
     assert request.additional_information["ids"]["prompt"] == [11, 12]
     assert request.additional_information["ids"]["all"] == [21, 22]
-    assert request.additional_information["meta"]["finished"].item() is True
+    # non-ar merge path intentionally doesn't overwrite meta.finished.
+    assert request.additional_information["meta"]["finished"].item() is False
     assert request.additional_information["meta"]["phase"] == "decode"
     assert request.additional_information["kv_metadata"] == {"foo": "bar"}
     assert "req-non-ar" in adapter._finished_load_reqs

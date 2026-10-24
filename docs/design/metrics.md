@@ -104,14 +104,17 @@ Defensive fail-safe: if `transfer_emitter` or `replica_resolver` is missing, or 
 
 The Orchestrator instantiates `OmniPrometheusStatLogger` (a thin subclass of upstream `vllm.v1.metrics.loggers.PrometheusStatLogger`) and feeds it scheduler stats and iteration stats after processing each batch of engine outputs. This populates the standard ~37 vLLM metric families (TTFT, ITL, TPOT, KV cache usage, etc.) using the same upstream code path — but with the `engine` label reshaped into `stage` + `replica` so multi-replica deployments produce distinct series per replica. See the next section for the wrap mechanics.
 
-After stage workers finish warmup, the orchestrator requests an optional
-allocator snapshot once over the worker control-plane RPC and records it before
-frontend readiness. The snapshot never enters model-runner, request, or API
-output. Code2Wav currently supplies this post-warmup snapshot. In distributed
-mode, the orchestrator also collects a snapshot when a remote replica attaches.
-Detaching or evicting a replica removes its memory series. A replacement in the
-same slot publishes its own values, and late replies from a removed worker are
-ignored.
+At stage readiness, the orchestrator requests the worker's saved allocator
+snapshot through a control-plane remote procedure call (RPC) and publishes it
+before the frontend becomes ready. Qwen3-TTS Code2Wav supplies the snapshot.
+The snapshot does not travel through model-runner, request, or API output.
+
+Remote replica attachment triggers another snapshot request. A replacement in
+the same slot publishes its own values, and the orchestrator ignores late
+replies from a removed worker. Detachment and eviction remove memory series
+from the ordinary process-local registry. See
+[post-warmup memory](#generation-stage-post-warmup-memory-2) for measurement
+scope and the separate Prometheus multiprocess storage limitation.
 
 ### Shared State Between Threads
 
@@ -148,7 +151,13 @@ stage_replica_map = {
 
 A reverse map `(stage_id, replica_id) -> flat_idx` is maintained on the Orchestrator so the per-replica `record(engine_idx=...)` call site can look up the right flat index.
 
-> Dynamic add/remove of replicas at runtime is intentionally out of scope — the upstream `PrometheusStatLogger` materializes per-engine_idx child metrics at init time, and supporting hot-add would require non-trivial intervention into upstream's per-family child dictionaries.
+New replicas receive metric slots when they attach or first report statistics.
+Existing flat indexes and cumulative counters remain across detachment and
+rejoining. Attachment refreshes post-warmup memory samples from the new worker,
+including replacements that reuse a slot. Detachment removes those samples
+from the ordinary process-local registry; the
+[multiprocess storage limitation](#multiprocess-storage-retains-removed-labels)
+still applies.
 
 ## Gating: `--log-stats` and `--collect-stage-metrics`
 
@@ -268,16 +277,68 @@ Labels: `{model_name, from_stage, from_replica, to_stage, to_replica}`.
 
 ### Generation-stage post-warmup memory (2)
 
-Labels: `{model_name, stage, replica}`. These `vllm_omni:` gauges are emitted
-at stage readiness and remote replica attachment when statistics are enabled
-and rank 0 supplies a memory snapshot. The series are removed on detachment or
-eviction. Values describe that worker's device and are not aggregated across
-tensor- or pipeline-parallel ranks.
+Qwen3-TTS exposes a saved memory snapshot for each generation-stage replica.
+The snapshot describes memory held by the rank-0 worker's PyTorch allocator
+immediately after decoder graph warmup. The values are static and do not track
+request-time memory use.
+
+Both gauges use the labels `{model_name, stage, replica}` and report bytes:
 
 | Metric | Description |
 | --- | --- |
-| `vllm_omni:stage_post_warmup_memory_allocated_bytes` | CUDA allocator bytes allocated after decoder CUDA-graph warmup |
-| `vllm_omni:stage_post_warmup_memory_reserved_bytes` | CUDA allocator bytes reserved after decoder CUDA-graph warmup |
+| `vllm_omni:stage_post_warmup_memory_allocated_bytes` | Worker PyTorch allocator bytes allocated after decoder graph warmup |
+| `vllm_omni:stage_post_warmup_memory_reserved_bytes` | Worker PyTorch allocator bytes reserved after decoder graph warmup |
+
+#### Measurement happens during model loading
+
+The decoder records the snapshot after successful graph warmup during model
+loading. Publication happens later, at stage readiness or remote replica
+attachment, when statistics are enabled and rank 0 supplies a snapshot.
+The saved values are reused without per-request or per-step sampling.
+
+The values are absolute allocator totals for the rank-0 worker on its device.
+They include other PyTorch allocations held by that worker at capture time.
+They do not isolate the decoder's allocation increase or include non-PyTorch
+device allocations. Values are not summed across tensor- or pipeline-parallel
+ranks.
+
+Capture precedes engine key-value (KV) cache allocation and later graph
+captures. The snapshot therefore does not represent the final stage memory
+footprint.
+
+CUDA and ROCm decoder graphs can supply a snapshot. Eager decoders, unsuccessful
+graph warmup, models without the snapshot hook, and NPU workers emit no samples.
+The default ROCm deployment runs Code2Wav in eager mode and therefore emits no
+snapshot samples. An eager serving check does not validate graph-based memory
+collection.
+
+#### Replica attachment refreshes the saved values
+
+The orchestrator fetches the attached worker's snapshot, including when a new
+worker reuses an existing replica slot. It rejects late replies from detached
+workers and replies that arrive after shutdown.
+
+Detachment, eviction, and engine shutdown remove the memory series from the
+ordinary process-local Prometheus registry. Multiprocess storage has the
+separate removal limitation described below.
+
+#### Multiple API frontends publish one observation per replica
+
+Each API frontend publishes the same shared worker's snapshot. The gauges use
+`multiprocess_mode="mostrecent"` to export the latest observation once per
+`{model_name, stage, replica}`. The collector neither adds a `pid` label nor
+sums duplicate observations. A shared worker's saved snapshot remains available
+after an API process exits.
+
+#### Multiprocess storage retains removed labels
+
+Prometheus multiprocess storage retains samples for removed label sets.
+`mostrecent` controls aggregation; it does not enable label removal. Multi-API
+serving currently excludes remote replica membership changes.
+
+Let vLLM create a fresh multiprocess directory for each server run. If setting
+`PROMETHEUS_MULTIPROC_DIR` manually, use an empty directory at startup to avoid
+mixing files from older runs or gauge modes.
 
 ### LLM stage-level (wrapped `vllm:*`)
 
