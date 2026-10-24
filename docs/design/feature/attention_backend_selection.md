@@ -79,15 +79,6 @@ preserve common `self` or `cross` policies. A model also decides whether its
 path is compatible with automatic TRTLLM selection, because only the model
 knows whether masking and packing satisfy the kernel contract.
 
-Qwen-Image-2.1 prepares variable-length key-padding metadata once per padded
-decode forward when the resolved backend is `FLASH_ATTN` on ROCm, using BF16
-with SP1 and ordinary prefix KV storage. It shares the indices and sequence
-lengths across transformer layers, while each layer still gathers its own
-K/V values. The metadata is rebuilt for each forward and is not cached by
-mask shape. Preparation is skipped when platform resolution selects SDPA.
-This optimization retains the existing padded-decode graph fallback and does
-not change backend selection or the prefill mask semantics.
-
 ### Model-owned implementation specializations
 
 Use `Attention(..., impl_overrides={backend_name: implementation_class})`
@@ -113,8 +104,45 @@ incompatible platform implementations raise `TypeError`. Unselected overrides
 have no effect. Backend capabilities, constructor options, and shared
 parallel dispatch remain unchanged and must be honored by the specialization.
 
+For explicit block-sparse attention, the model owns tiling, routing and any
+compression correction. The shared provider layer consumes that mask, its
+logical block size and valid-token counts. It owns kernel availability,
+provider-specific sparse metadata, transport padding and execution. The cuDNN
+provider consumes tile64 or tile128 directly; selecting it does not change
+the model's top-k policy. Startup checks and execution use the same provider
+resolution path.
+
+The explicit Triton provider accepts H3 tile64/128 on SM80+ in BF16.
+For tile128 it expands the selected mask into 64-token compute blocks
+without recomputing top-k or splitting the softmax reduction. Ada tile128
+auto selection uses this provider. Explicit unsupported precision and
+missing-kernel errors remain startup failures, not runtime fallbacks.
+
 Use a new backend for a new provider/capability contract. `custom_attention`
 instead owns communication and requires `skip_sequence_parallel=True`.
+
+### Qwen-Image-2.1 masked attention
+
+Qwen-Image-2.1's padded prefill uses a complete 4D boolean visibility mask.
+The FlashAttention masked route passes that mask to PyTorch SDPA because
+2D varlen unpadding cannot express its block-causal structure. Padded cached
+decode only needs a 2D key-validity mask. On CUDA and ROCm, SP1 forwards
+with a resolved `FLASH_ATTN` backend, the model prepares
+`qwen21_decode_varlen` once per forward and CFG branch and shares it across
+layers. Each layer still gathers its own K/V and invokes the existing varlen
+provider. Metadata is rebuilt from the current mask, never cached by shape.
+The shared metadata does not change the provider's FlashAttention version selection.
+Metadata depends only on the mask and sequence layout; it is independent of
+activation dtype, prefix-cache storage dtype, and whether gradients are enabled.
+Quantized prefix K/V is dequantized before attention, and each layer's gathers
+remain differentiable. Attention dtype and backward support remain the selected
+provider's responsibility.
+Publishing `attention_mask_mode="padding"` also avoids each layer checking
+mask contents to select the masked route.
+Preparation is skipped for SDPA, including platform fallback, and when the
+whole transformer is being compiled. Regional block
+compilation can consume the prepared metadata; padded decode still uses the
+existing eager fallback instead of captured decode graphs.
 
 ## Adding or changing a backend
 

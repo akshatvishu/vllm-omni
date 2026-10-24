@@ -50,7 +50,7 @@ logger = init_logger(__name__)
 
 
 def _prepare_qwen21_decode_varlen(mask: torch.Tensor, query_length: int) -> _Qwen21DecodeVarlen:
-    """Prepare key-padding metadata once per forward, before compiled blocks."""
+    """Prepare key-padding metadata once per forward and CFG branch, before compiled blocks."""
     from vllm_omni.diffusion.attention.backends.flash_attn import _Qwen21DecodeVarlen
     from vllm_omni.diffusion.attention.backends.utils.fa import _get_unpad_data
 
@@ -1363,23 +1363,27 @@ class QwenImage21Transformer2DModel(CachedTransformer):
             # Decode: block-causal degenerates to full attention for target rows; only key padding applies.
             if joint_key_valid is not None:
                 attn_metadata = AttentionMetadata(attn_mask=joint_key_valid)
+                # All blocks use the same backend configuration. Inspect the
+                # resolved backend: requested FLASH_ATTN can fall back to SDPA.
                 backend = self.transformer_blocks[0].attn.attn.attn_backend
                 if (
                     backend is not None
                     and backend.get_name() == "FLASH_ATTN"
-                    and torch.version.hip is not None
                     and joint_hidden_states.device.type == "cuda"
-                    and joint_hidden_states.dtype == torch.bfloat16
-                    and self.prefix_kv_cache_dtype is None
                     and not sp_active
-                    and not torch.is_grad_enabled()
                     and not torch.compiler.is_compiling()
                     and joint_hidden_states.shape[1] > 0
                     and joint_hidden_states.shape[1] != joint_key_valid.shape[1]
                 ):
+                    # Rebuild for this forward and CFG branch, even if the mask
+                    # shape is unchanged. Preparation stays outside regionally
+                    # compiled blocks; each layer still gathers its own K/V.
+                    # These integer offsets depend only on the mask and layout,
+                    # not the K/V storage dtype or autograd state.
                     attn_metadata.extra["qwen21_decode_varlen"] = _prepare_qwen21_decode_varlen(
                         joint_key_valid, joint_hidden_states.shape[1]
                     )
+                    # Publish known padding semantics to avoid per-layer GPU mask checks.
                     attn_metadata.extra["attention_mask_mode"] = "padding"
         else:
             attn_path = self._resolve_attn_path(attn_path_hint, has_padding, sp_padding > 0)
