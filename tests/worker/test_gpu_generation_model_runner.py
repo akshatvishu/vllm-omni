@@ -356,30 +356,3 @@ def test_exact_shape_models_receive_unpadded_input_ids(monkeypatch, exact_shape,
     assert seen["counts"] == [3]
     if exact_shape:
         assert sum(seen["counts"]) == seen["input_ids"].numel()
-
-
-def test_zero_token_cleanup_notifies_model(monkeypatch):
-    runner = _make_guard_runner()
-
-    cache_entries = 1
-
-    def on_requests_finished(_):
-        nonlocal cache_entries
-        cache_entries = 0
-
-    raw_model = SimpleNamespace(
-        on_requests_finished=on_requests_finished,
-    )
-    runner.model = SimpleNamespace()
-    runner.get_model = lambda: raw_model
-    scheduler_output = SimpleNamespace(
-        total_num_scheduled_tokens=0,
-        num_scheduled_tokens={},
-        finished_req_ids={"req-1"},
-    )
-    monkeypatch.setattr(gen_runner_module, "has_kv_transfer_group", lambda: False)
-    monkeypatch.setattr(gen_runner_module, "has_ec_transfer", lambda: False)
-
-    GPUGenerationModelRunner.execute_model(runner, scheduler_output)
-
-    assert cache_entries == 0

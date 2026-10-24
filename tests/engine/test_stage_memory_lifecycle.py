@@ -7,7 +7,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from prometheus_client import CollectorRegistry
+from prometheus_client import CollectorRegistry, generate_latest
+from prometheus_client.parser import text_string_to_metric_families
 from vllm.v1.engine.exceptions import EngineDeadError
 
 from vllm_omni.distributed.omni_coordinator.messages import ReplicaStatus
@@ -165,6 +166,52 @@ async def test_unregister_and_rejoin_refreshes_snapshot_through_run(lifecycle):
         assert env.orchestrator._stage_replica_to_engine_idx[(0, 0)] == 0
 
     await env.run(scenario)
+
+
+@pytest.mark.asyncio
+async def test_dead_replica_eviction_preserves_live_memory_samples(lifecycle):
+    env = lifecycle
+    await env.orchestrator.publish_stage_post_warmup_memory()
+    assert env.values(0) == (11, 13)
+    assert env.values(1) == (17, 19)
+
+    await env.orchestrator._handle_dead_replica(0, 0, EngineDeadError("engine failure"))
+
+    assert env.pool.live_replica_ids() == [1]
+    assert env.values(0) == (None, None)
+    assert env.values(1) == (17, 19)
+
+
+@pytest.mark.asyncio
+async def test_public_exposition_absent_then_zero(lifecycle):
+    env = lifecycle
+    names = (
+        "vllm_omni:stage_post_warmup_memory_allocated_bytes",
+        "vllm_omni:stage_post_warmup_memory_reserved_bytes",
+    )
+
+    def families():
+        return {
+            family.name: family for family in text_string_to_metric_families(generate_latest(env.registry).decode())
+        }
+
+    before = families()
+    for name in names:
+        assert before[name].type == "gauge"
+        assert before[name].samples == []
+
+    env.clients[0].snapshot = {"allocated_bytes": 0, "reserved_bytes": 0}
+    await env.orchestrator.publish_stage_post_warmup_memory()
+
+    after = families()
+    for name, other_value in zip(names, (17, 19)):
+        assert after[name].type == "gauge"
+        samples = after[name].samples
+        assert len(samples) == 2
+        assert {(sample.name, tuple(sorted(sample.labels.items())), sample.value) for sample in samples} == {
+            (name, (("model_name", "m"), ("replica", "0"), ("stage", "0")), 0),
+            (name, (("model_name", "m"), ("replica", "1"), ("stage", "0")), other_value),
+        }
 
 
 @pytest.mark.asyncio

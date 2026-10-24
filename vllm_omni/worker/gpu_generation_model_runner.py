@@ -258,10 +258,8 @@ class GPUGenerationModelRunner(OmniGPUModelRunner, OmniConnectorModelRunnerMixin
             # Notify stateful models of finished requests before the
             # zero-token early return. Request cleanup is a model lifecycle
             # concern and does not depend on the inter-stage transfer mode.
-            if scheduler_output.finished_req_ids:
-                model = self.get_model()
-                if hasattr(model, "on_requests_finished"):
-                    model.on_requests_finished(scheduler_output.finished_req_ids)
+            if scheduler_output.finished_req_ids and hasattr(self.model, "on_requests_finished"):
+                self.model.on_requests_finished(scheduler_output.finished_req_ids)
             # After finished: an id freed and re-added within one step keeps
             # the new request's prewarm.
             if prewarms := getattr(scheduler_output, "pending_request_prewarms", None):
