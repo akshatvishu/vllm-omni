@@ -9,7 +9,11 @@ import torch
 from torch import nn
 
 from vllm_omni.diffusion.attention.backends.abstract import AttentionMetadata
-from vllm_omni.diffusion.attention.backends.flash_attn import FlashAttentionBackend, FlashAttentionImpl
+from vllm_omni.diffusion.attention.backends.flash_attn import (
+    FlashAttentionBackend,
+    FlashAttentionImpl,
+    _Qwen21DecodeVarlen,
+)
 from vllm_omni.diffusion.attention.backends.sdpa import SDPABackend, SDPAImpl
 from vllm_omni.diffusion.attention.backends.utils import fa
 from vllm_omni.diffusion.attention.selector import _load_backend_cls
@@ -178,6 +182,14 @@ def test_decode_preparation_exclusions(monkeypatch, decode_model, exclusion, hip
     monkeypatch.setattr(fa, "_get_unpad_data", prepare)
     model(**inputs)
     prepare.assert_not_called()
+    for block in model.transformer_blocks:
+        metadata = block.call_args.kwargs["attn_metadata"]
+        if exclusion == "unpadded":
+            assert metadata is None
+        else:
+            assert metadata.attn_mask is not None
+            assert "qwen21_decode_varlen" not in metadata.extra
+            assert "attention_mask_mode" not in metadata.extra
 
 
 @torch.no_grad()
@@ -372,3 +384,118 @@ def test_mismatched_mask_shape_bypasses_prepared_metadata(monkeypatch):
             impl._forward_varlen_masked(query, key, key, invalid_mask, metadata)
         unpad.assert_called_once_with(key, invalid_mask)
     kernel.assert_not_called()
+
+
+@pytest.mark.parametrize("exclusion", ["absent_mask", "ring"])
+@torch.no_grad()
+def test_decode_mask_and_parallel_config_exclusions(monkeypatch, decode_model, exclusion):
+    model, inputs = decode_model()
+    if exclusion == "absent_mask":
+        inputs["encoder_hidden_states_mask"] = None
+    else:
+        model.parallel_config = DiffusionParallelConfig(**{f"{exclusion}_degree": 2})
+        assert model.parallel_config.sequence_parallel_size == 2
+    prepare = Mock(side_effect=AssertionError("excluded decode must not prepare metadata"))
+    monkeypatch.setattr(fa, "_get_unpad_data", prepare)
+
+    model(**inputs)
+
+    prepare.assert_not_called()
+    for block in model.transformer_blocks:
+        metadata = block.call_args.kwargs["attn_metadata"]
+        if exclusion == "absent_mask":
+            assert metadata is None
+        else:
+            assert metadata.attn_mask is not None
+            assert "qwen21_decode_varlen" not in metadata.extra
+            assert "attention_mask_mode" not in metadata.extra
+            assert block.call_args.kwargs["sp_decode"] is True
+
+
+@torch.no_grad()
+def test_decode_cfg_branches_keep_independent_mask_indices(monkeypatch, decode_model):
+    model, inputs = decode_model()
+    for cache in inputs["kv_cache"]:
+        cache["uncond"] = {"key": torch.empty(2, 3, 1, 8)}
+    cond_mask = inputs["encoder_hidden_states_mask"]
+    uncond_mask = torch.tensor([[False, True, False, True], [True, False, True, True]])
+    prepare = Mock(wraps=fa._get_unpad_data)
+    monkeypatch.setattr(fa, "_get_unpad_data", prepare)
+    expected_indices = {
+        "cond": torch.tensor([0, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13]),
+        "uncond": torch.tensor([1, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13]),
+    }
+    previous: list[tuple[str, _Qwen21DecodeVarlen]] = []
+    for branch in ("cond", "uncond", "cond", "uncond"):
+        inputs["encoder_hidden_states_mask"] = cond_mask if branch == "cond" else uncond_mask
+        model(**inputs, cache_branch=branch)
+        metadata = model.transformer_blocks[0].call_args.kwargs["attn_metadata"]
+        prepared = metadata.extra["qwen21_decode_varlen"]
+        torch.testing.assert_close(prepared.indices_k, expected_indices[branch])
+        assert all(prepared is not earlier for _, earlier in previous)
+        for block in model.transformer_blocks:
+            assert block.call_args.kwargs["attn_metadata"] is metadata
+            assert block.call_args.kwargs["cache_branch"] == branch
+        previous.append((branch, prepared))
+        for earlier_branch, earlier in previous:
+            torch.testing.assert_close(earlier.indices_k, expected_indices[earlier_branch])
+    assert prepare.call_count == 4
+
+
+@torch.no_grad()
+def test_prepared_single_query_decode_matches_key_only_padding(monkeypatch):
+    kernel = Mock(side_effect=_reference_varlen)
+    monkeypatch.setattr(fa, "flash_attn_varlen_func", kernel)
+    monkeypatch.setattr(fa, "_is_vllm_flash_attn_varlen", lambda func: False)
+    impl = FlashAttentionImpl(num_heads=1, head_size=2, softmax_scale=2**-0.5)
+    generator = torch.Generator().manual_seed(53)
+    query = torch.randn(2, 1, 1, 2, generator=generator)
+    key = torch.randn(2, 4, 1, 2, generator=generator)
+    value = torch.randn(2, 4, 1, 2, generator=generator)
+    mask = torch.tensor([[False, True, True, False], [True, False, True, True]])
+    expected = impl._forward_varlen_masked(query, key, value, mask)
+    dense_expected = nn.functional.scaled_dot_product_attention(
+        query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2), attn_mask=mask[:, None, None, :]
+    ).transpose(1, 2)
+    prepared = transformer._prepare_qwen21_decode_varlen(mask, 1)
+    unpad = Mock(wraps=fa._unpad_input)
+    monkeypatch.setattr(fa, "_unpad_input", unpad)
+
+    actual = impl._forward_varlen_masked(query, key, value, mask, prepared)
+
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    torch.testing.assert_close(actual, dense_expected)
+    assert kernel.call_args.kwargs["cu_seqlens_q"] is prepared.cu_seqlens_q
+    torch.testing.assert_close(prepared.cu_seqlens_q, torch.tensor([0, 1, 2], dtype=torch.int32))
+    unpad.assert_not_called()
+
+
+@pytest.mark.parametrize("role", ["self", "cross"])
+@torch.no_grad()
+def test_equal_length_attention_ignores_prepared_decode_and_preserves_query_rows(monkeypatch, role):
+    kernel = Mock(side_effect=_reference_varlen)
+    monkeypatch.setattr(fa, "flash_attn_varlen_func", kernel)
+    monkeypatch.setattr(fa, "_is_vllm_flash_attn_varlen", lambda func: False)
+    impl = FlashAttentionImpl(num_heads=1, head_size=2, softmax_scale=2**-0.5, role=role)
+    query = torch.zeros(2, 4, 1, 2)
+    key = torch.zeros_like(query)
+    value = torch.arange(1, 17, dtype=torch.float32).reshape_as(query)
+    mask = torch.tensor([[True, False, True, False], [False, True, True, True]])
+    expected = impl._forward_varlen_masked(query, key, value, mask)
+    # Deliberately unrelated offsets prove this geometry must use the ordinary
+    # path, even though the supplied query length and batch size match.
+    prepared = transformer._prepare_qwen21_decode_varlen(~mask, query.shape[1])
+
+    actual = impl._forward_varlen_masked(query, key, value, mask, prepared)
+
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    dense_expected = nn.functional.scaled_dot_product_attention(
+        query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2), attn_mask=mask[:, None, None, :]
+    ).transpose(1, 2)
+    if role == "self":
+        dense_expected = dense_expected.masked_fill(~mask[:, :, None, None], 0)
+        assert torch.count_nonzero(actual[~mask]) == 0
+    else:
+        assert torch.count_nonzero(actual[~mask]) > 0
+    torch.testing.assert_close(actual, dense_expected)
+    assert kernel.call_args.kwargs["cu_seqlens_q"] is not prepared.cu_seqlens_q
