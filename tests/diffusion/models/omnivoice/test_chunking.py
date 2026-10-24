@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 
+from collections import OrderedDict
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -232,7 +234,9 @@ class _RecordingPipeline(OmniVoicePipeline):
         self.sample_rate = 10
         self.tokenizer = SimpleNamespace(encode=lambda text: SimpleNamespace(ids=[1]))
         self.duration_estimator = SimpleNamespace(estimate_duration=lambda text, ref_text, ref_len: len(text))
-        self.audio_tokenizer = object()
+        self.audio_tokenizer = SimpleNamespace(config=SimpleNamespace(sample_rate=10, hop_length=1))
+        self._inline_reference_cache = OrderedDict()
+        self._initialize_asr(None)
         self.num_step = 2
         self.guidance_scale = 2.0
         self.t_shift = 0.1
@@ -246,9 +250,13 @@ class _RecordingPipeline(OmniVoicePipeline):
     def _encode_ref_audio(self, audio_signal, sr):
         return self.reference
 
-    def _prepare_chunk_input(self, text, lang, instruct, ref_text, ref_audio_tokens, seed, chunks=None):
+    def _prepare_chunk_input(
+        self, text, lang, instruct, ref_text, ref_audio_tokens, seed, chunks=None, *, reference_rms=None
+    ):
         self.calls.append({"text": text, "ref_text": ref_text, "ref_audio_tokens": ref_audio_tokens})
-        return super()._prepare_chunk_input(text, lang, instruct, ref_text, ref_audio_tokens, seed, chunks)
+        return super()._prepare_chunk_input(
+            text, lang, instruct, ref_text, ref_audio_tokens, seed, chunks, reference_rms=reference_rms
+        )
 
     def generator(self, *, target_lens, generators, **kwargs):
         tokens = []
@@ -526,7 +534,7 @@ def test_duration_estimate_uses_reference_text_and_token_count_together():
     pipeline = SimpleNamespace(duration_estimator=SimpleNamespace(estimate_duration=estimate_duration))
     ref_audio_tokens = torch.zeros(8, 17)
 
-    target_length = OmniVoicePipeline._estimate_target_length(
+    target_length = OmniVoicePipeline._estimate_target_len(
         pipeline,
         "Target text.",
         "Reference text.",
@@ -544,6 +552,7 @@ def test_short_clone_uses_reference_duration_before_chunking_threshold():
     text = "One short sentence."
     prompt = {"input": text, "ref_text": text, "ref_audio": (torch.ones(4), 10)}
     for ref_length in (100, 200):
+        pipeline._inline_reference_cache.clear()
         pipeline.reference = torch.zeros(8, ref_length, dtype=torch.long)
         prepared = pipeline._prepare_request_input(prompt, {})
         assert prepared.chunks is None
@@ -556,9 +565,7 @@ def test_duration_without_complete_reference_retains_default_estimate(ref_text, 
     pipeline.duration_estimator = RuleDurationEstimator()
     text = "One short sentence."
     tokens = torch.zeros(8, 200) if has_audio else None
-    assert pipeline._estimate_target_length(text, ref_text, tokens) == pipeline._estimate_target_length(
-        text, None, None
-    )
+    assert pipeline._estimate_target_len(text, ref_text, tokens) == pipeline._estimate_target_len(text, None, None)
 
 
 def test_reference_duration_changes_whether_chunking_starts():
@@ -570,5 +577,46 @@ def test_reference_duration_changes_whether_chunking_starts():
     extra = {"audio_chunk_threshold": 6.0, "audio_chunk_duration": 3.0}
     pipeline.reference = torch.zeros(8, 100, dtype=torch.long)
     assert pipeline._prepare_request_input(prompt, extra).chunks is None
+    pipeline._inline_reference_cache.clear()
     pipeline.reference = torch.zeros(8, 200, dtype=torch.long)
     assert len(pipeline._prepare_request_input(prompt, extra).chunks.texts) > 1
+
+
+@pytest.mark.parametrize("step_mode", [False, True])
+@pytest.mark.parametrize("use_asr", [False, True])
+def test_chunked_clone_keeps_reference_and_postprocesses_joined_audio_once(step_mode, use_asr):
+    pipeline = _RecordingPipeline()
+    pipeline._asr_pipeline = Mock(return_value={"text": "Reference transcript"})
+    pipeline._postprocess_audio = Mock(wraps=pipeline._postprocess_audio)
+    prompt = {
+        "input": "First sentence. Second sentence. Third sentence.",
+        "ref_audio": (torch.full((4,), 0.05), 10),
+    }
+    if not use_asr:
+        prompt["ref_text"] = "Reference transcript"
+    request = _request(prompt, audio_chunk_threshold=0)
+
+    if step_mode:
+        state = SimpleNamespace(prompt=request.prompt, sampling=request.sampling_params, extra={}, step_index=0)
+        pipeline.prepare_encode(state)
+        chunk_count = len(state.extra["prepared"].chunks.texts)
+        for index in range(chunk_count):
+            state.extra["tokens"].fill_(3)
+            state.step_index = len(state.timesteps)
+            output = pipeline.post_decode(state)
+            if index < chunk_count - 1:
+                assert output is None
+                pipeline._postprocess_audio.assert_not_called()
+    else:
+        output = pipeline(SimpleNamespace(requests=[request]))[0]
+
+    assert output.error is None
+    assert len(pipeline.calls) > 1
+    assert all(call["ref_text"] == "Reference transcript." for call in pipeline.calls)
+    assert all(call["ref_audio_tokens"] is pipeline.reference for call in pipeline.calls)
+    assert pipeline._asr_pipeline.call_count == int(use_asr)
+    pipeline._postprocess_audio.assert_called_once()
+    joined_audio, reference_rms = pipeline._postprocess_audio.call_args.args
+    assert reference_rms == pytest.approx(0.05)
+    assert joined_audio.shape[-1] > max(len(call["text"]) for call in pipeline.calls)
+    assert output.output.max().item() == pytest.approx(1.5)
