@@ -65,7 +65,8 @@ unstructured keyword dictionaries:
   validation;
 - `skip_softmax` is consumed by TRTLLM; and
 - `block_sparse` is consumed by block-sparse backends such as RainFusion; and
-- `fastvideo_vsa_topk` is consumed by FastVideo VSA.
+- `fastvideo_vsa_topk` is consumed by FastVideo VSA; and
+- `sparge` is consumed by the XPU SPARGE INT8 sparse attention backend.
 
 A backend reads only the fields it owns and rejects incompatible values. New
 options should be added to a shared typed spec only when more than one backend
@@ -124,9 +125,11 @@ instead owns communication and requires `skip_sequence_parallel=True`.
 ### Qwen-Image-2.1 masked attention
 
 Qwen-Image-2.1's padded prefill uses a complete 4D boolean visibility mask.
-The FlashAttention masked route passes that mask to PyTorch SDPA because
-2D varlen unpadding cannot express its block-causal structure. Padded cached
-decode only needs a 2D key-validity mask. On CUDA and ROCm, SP1 forwards
+On CUDA and ROCm, the shared attention layer routes that mask to PyTorch SDPA
+when FlashAttention was selected automatically, because 2D varlen unpadding
+cannot express its block-causal structure. Explicit FlashAttention selections
+and active paged KV reject this unsupported 4D mask instead of falling back.
+Padded cached decode only needs a 2D key-validity mask. On CUDA and ROCm, SP1 forwards
 with a resolved `FLASH_ATTN` backend, the model prepares
 `qwen21_decode_varlen` once per forward and CFG branch and shares it across
 layers. Each layer still gathers its own K/V and invokes the existing varlen
