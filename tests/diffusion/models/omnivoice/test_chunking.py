@@ -451,6 +451,10 @@ def test_step_decode_resets_schedule_and_retains_generator_until_final_chunk():
     count = len(state.extra["prepared"].chunks.texts)
     assert count > 1
     for index in range(count):
+        schedule = state.extra["schedules"]
+        assert all(isinstance(count, int) for count in schedule)
+        assert schedule == state.timesteps.tolist()
+        assert sum(schedule) == state.extra["target_len"] * 8
         state.extra["tokens"].fill_(index + 1)
         state.step_index = len(state.timesteps)
         output = pipeline.post_decode(state)
@@ -459,7 +463,6 @@ def test_step_decode_resets_schedule_and_retains_generator_until_final_chunk():
             assert output is None
             assert state.step_index == 0
             assert torch.all(state.extra["tokens"] == pipeline.config.audio_mask_id)
-            assert state.timesteps.sum().item() == state.extra["target_len"] * 8
         else:
             assert output.output.shape[-1] > state.extra["target_len"]
             assert state.step_index == len(state.timesteps)

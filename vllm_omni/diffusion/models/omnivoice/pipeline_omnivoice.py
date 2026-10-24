@@ -769,7 +769,8 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
         state.latents = input_ids
         state.timesteps = schedules
         state.guidance = guidance_scale
-        state.extra["schedules"] = schedules
+        # Sampling needs Python counts; reading GPU scalars would synchronize every step.
+        state.extra["schedules"] = sched
         state.extra["layer_ids"] = layer_ids
         state.extra["t_shift"] = t_shift
         state.extra["cond_len"] = cond_len
@@ -789,7 +790,7 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
         cond_lens: list[int] = []
 
         steps: list[int] = []
-        schedules: list[torch.Tensor] = []
+        schedules: list[list[int]] = []
         generators: list[torch.Generator] = []
         guidance_scales: list[float] = []
 

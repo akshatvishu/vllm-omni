@@ -40,8 +40,9 @@ class _Generator:
     def _get_logits(self, hidden_states):
         return torch.zeros(8, hidden_states.shape[0], 1)
 
-    def _unmask_one_request(self, c_logits, u_logits, tokens, *, generator, **kwargs):
+    def _unmask_one_request(self, c_logits, u_logits, tokens, *, generator, num_to_unmask, **kwargs):
         assert c_logits.shape[2] == u_logits.shape[2] == tokens.shape[-1]
+        assert isinstance(num_to_unmask, int)
         self.draws.append((generator.initial_seed(), torch.rand((), generator=generator).item()))
         tokens.fill_(generator.initial_seed())
 
@@ -178,6 +179,25 @@ def test_cached_batch_reuses_storage_across_steps_and_chunk_resets(runtime):
     assert runner.input_batch is batch
     assert batch.latents.data_ptr() == storage
     assert state.step_index == 0
+
+
+def test_zero_count_steps_skip_sampling_and_still_finish(runtime):
+    pipeline, runner, scheduler = runtime
+    request = _request("short", "Hi")
+    request.sampling_params.num_inference_steps = 32
+    scheduler.add_request(request)
+    _step(runner, scheduler)
+    state = runner.state_cache["short"]
+    schedule = state.extra["schedules"]
+    assert 0 in schedule
+    for step in range(1, len(schedule)):
+        draws_before = len(pipeline.generator.draws)
+        _, output = _step(runner, scheduler)
+        assert len(pipeline.generator.draws) - draws_before == int(schedule[step] > 0)
+        assert output.get_request_output("short").finished == (step == len(schedule) - 1)
+    assert len(pipeline.generator.draws) == sum(count > 0 for count in schedule)
+    assert output.get_request_output("short").result.error is None
+    assert not runner.state_cache
 
 
 def test_abort_releases_completed_chunks_and_preserves_other_request(runtime):
