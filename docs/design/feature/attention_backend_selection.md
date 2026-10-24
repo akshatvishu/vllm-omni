@@ -61,12 +61,13 @@ policy that belongs to the platform.
 Backend-specific settings remain typed fields on `AttentionSpec` rather than
 unstructured keyword dictionaries:
 
-- `quant` is consumed by FlashInfer and TRTLLM with backend-specific value
-  validation;
-- `skip_softmax` is consumed by TRTLLM; and
-- `block_sparse` is consumed by block-sparse backends such as RainFusion; and
-- `fastvideo_vsa_topk` is consumed by FastVideo VSA; and
-- `sparge` is consumed by the XPU SPARGE INT8 sparse attention backend.
+| Option | Backend |
+| --- | --- |
+| `quant` | FlashInfer and TRTLLM, with backend-specific value validation |
+| `skip_softmax` | TRTLLM |
+| `block_sparse` | Block-sparse backends such as RainFusion |
+| `fastvideo_vsa_topk` | FastVideo VSA |
+| `sparge` | XPU SPARGE INT8 sparse attention |
 
 A backend reads only the fields it owns and rejects incompatible values. New
 options should be added to a shared typed spec only when more than one backend
@@ -124,28 +125,42 @@ instead owns communication and requires `skip_sequence_parallel=True`.
 
 ### Qwen-Image-2.1 masked attention
 
-Qwen-Image-2.1's padded prefill uses a complete 4D boolean visibility mask.
-On CUDA and ROCm, the shared attention layer routes that mask to PyTorch SDPA
-when FlashAttention was selected automatically, because 2D varlen unpadding
-cannot express its block-causal structure. Explicit FlashAttention selections
-and active paged KV reject this unsupported 4D mask instead of falling back.
-Padded cached decode only needs a 2D key-validity mask. On CUDA and ROCm, SP1 forwards
-with a resolved `FLASH_ATTN` backend, the model prepares
-`qwen21_decode_varlen` once per forward and CFG branch and shares it across
-layers. Each layer still gathers its own K/V and invokes the existing varlen
-provider. Metadata is rebuilt from the current mask, never cached by shape.
-The shared metadata does not change the provider's FlashAttention version selection.
-Metadata depends only on the mask and sequence layout; it is independent of
-activation dtype, prefix-cache storage dtype, and whether gradients are enabled.
-Quantized prefix K/V is dequantized before attention, and each layer's gathers
-remain differentiable. Attention dtype and backward support remain the selected
-provider's responsibility.
-Publishing `attention_mask_mode="padding"` also avoids each layer checking
-mask contents to select the masked route.
-Preparation is skipped for SDPA, including platform fallback, and when the
-whole transformer is being compiled. Regional block
-compilation can consume the prepared metadata; padded decode still uses the
-existing eager fallback instead of captured decode graphs.
+#### Prefill preserves the full visibility mask
+
+Qwen-Image-2.1's padded prefill uses a 4D boolean visibility mask.
+FlashAttention's variable-length (varlen) unpadding cannot represent its
+block-causal structure with a 2D key-validity mask.
+
+On CUDA and ROCm, the shared attention layer uses PyTorch scaled dot product
+attention (SDPA) when FlashAttention was selected automatically and paged
+key/value (KV) caching is inactive. An explicit selection or active paged KV
+cache raises an error if the selected backend cannot handle the 4D mask.
+
+#### Decode shares mask metadata across layers
+
+Padded cached decode uses a 2D key-validity mask. On CUDA and ROCm, the model
+prepares `qwen21_decode_varlen` once per forward and classifier-free guidance
+branch. Preparation requires a resolved `FLASH_ATTN` backend and disabled
+sequence parallelism.
+
+The model shares metadata across layers and rebuilds it from the current mask
+on every forward, even when the mask shape is unchanged. Each layer still
+gathers its own KV tensors and invokes the existing varlen provider. Publishing
+`attention_mask_mode="padding"` avoids each layer checking mask contents to
+select the masked route.
+
+Preparing metadata depends only on the mask and sequence layout. Activation
+dtype, prefix-cache storage dtype, and gradient settings do not affect preparation.
+Quantized prefix KV is dequantized before attention, and each layer's gathers
+remain differentiable. Supported attention dtypes, backward support, and
+FlashAttention version selection remain the provider's responsibility.
+
+#### Compilation limits metadata preparation
+
+Metadata preparation is skipped for SDPA, including platform fallback, and
+when the whole transformer is being compiled. Regional compilation of
+individual blocks can consume the prepared metadata. Padded decode still uses
+the existing eager fallback instead of captured decode graphs.
 
 ## Adding or changing a backend
 
