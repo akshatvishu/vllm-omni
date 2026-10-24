@@ -999,6 +999,12 @@ Unlike the upstream OmniVoice splitter, this implementation protects periods and
 
 Use the defaults unless you have tested output quality for your workload. To retain protection from long text word loss, keep `audio_chunk_duration` at or below 15 seconds and `audio_chunk_threshold` at or below 30 seconds. Lower values create more chunks and audio joins, which can increase generation time and introduce audible pauses.
 
+OmniVoice accepts at most 64 text chunks per request. Requests that exceed this limit return HTTP 400 before audio generation starts. Increase `audio_chunk_duration` within the recommended range, or send less text. At the default target duration, 64 chunks represent roughly 16 minutes of estimated audio. The limit bounds the number of generation passes, not the total response duration.
+
+The default `omnivoice.yaml` uses step execution so a completed short request can return while a longer request continues. New requests can join when a scheduler slot is available. If you disable `step_execution`, every request in a batch waits for the longest request to finish all its chunks. Setting `max_num_seqs: 1` prevents shared batches, but requests still wait behind the running request.
+
+Voice cloning uses the reference transcript and reference audio length to estimate the target duration. Short voice-cloning requests can therefore change duration and pacing even when chunking does not activate. If either reference input is missing, duration estimation retains the fixed text-based heuristic.
+
 ```json
 {
     "input": "A long passage to synthesize...",

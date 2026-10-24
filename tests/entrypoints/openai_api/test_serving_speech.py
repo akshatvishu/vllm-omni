@@ -224,7 +224,6 @@ class TestAudioMixin:
 def create_mock_audio_output_for_test(
     request_id: str = "speech-mock-123",
     metrics: dict | None = None,
-    peak_memory_mb: float = 0.0,
 ) -> OmniRequestOutput:
     class MockCompletionOutput:
         def __init__(self, index: int = 0):
@@ -260,7 +259,6 @@ def create_mock_audio_output_for_test(
         final_output_type="audio",
     )
     output.metrics = metrics
-    output.peak_memory_mb = peak_memory_mb
     return output
 
 
@@ -988,7 +986,7 @@ class TestSpeechAPI:
 
         # Mock generate to yield a valid OmniRequestOutput
         async def mock_generate(*args, **kwargs):
-            yield create_mock_audio_output_for_test(peak_memory_mb=1234.25)
+            yield create_mock_audio_output_for_test()
 
         mock_engine.generate = mocker.MagicMock(side_effect=mock_generate)
 
@@ -1018,7 +1016,6 @@ class TestSpeechAPI:
         assert response.status_code == 200
         assert response.media_type == "audio/wav"
         assert response.body == b"dummy"
-        assert response.headers["x-peak-memory-mb"] == "1234.250"
 
         # Verify generate was called
         mock_engine.generate.assert_called_once()
@@ -1121,18 +1118,6 @@ class TestSpeechAPI:
 
         assert response.status_code == 400
         assert expected_message in response.body.decode()
-        mock_engine.generate.assert_not_called()
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("seed", [True, 1.5, "17", -(2**63) - 1, 2**63])
-    async def test_create_diffusion_speech_rejects_invalid_extra_seed(self, mocker: MockerFixture, seed):
-        mock_engine = mocker.MagicMock()
-        mock_engine.default_sampling_params_list = [mocker.MagicMock(seed=99, extra_args={})]
-        server = OmniOpenAIServingSpeech.for_diffusion(diffusion_engine=mock_engine, model_name="test-model")
-
-        response = await server.create_speech(OpenAICreateSpeechRequest(input="Hello", extra_params={"seed": seed}))
-
-        assert response.status_code == 400
         mock_engine.generate.assert_not_called()
 
 

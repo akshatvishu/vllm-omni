@@ -12,11 +12,15 @@ from vllm_omni.diffusion.models.omnivoice.chunking import (
     split_text_into_chunks,
 )
 from vllm_omni.diffusion.models.omnivoice.pipeline_omnivoice import (
+    _MAX_AUDIO_CHUNKS,
     OmniVoicePipeline,
     _copy_audio_to_cpu,
     _parse_chunking_seconds,
 )
+from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.errors import OmniClientError
+from vllm_omni.inputs.data import OmniDiffusionSamplingParams
+from vllm_omni.model_executor.models.omnivoice.duration import RuleDurationEstimator
 from vllm_omni.model_executor.models.omnivoice.omnivoice_generator import OmniVoiceGenerator
 from vllm_omni.transformers_utils.configs.omnivoice import OmniVoiceConfig
 
@@ -43,6 +47,8 @@ def test_chunking_config_uses_upstream_defaults_and_accepts_overrides():
         ("invalid", False),
         (float("nan"), False),
         (float("inf"), False),
+        pytest.param(10**1000, False, id="overflow-duration"),
+        pytest.param(10**1000, True, id="overflow-threshold"),
         (0, False),
         (-1, True),
     ],
@@ -300,6 +306,65 @@ def test_pipeline_marks_invalid_chunking_values_as_client_errors():
     assert error.value.error_type == "BadRequestError"
 
 
+@pytest.mark.parametrize("chunk_count", [_MAX_AUDIO_CHUNKS, _MAX_AUDIO_CHUNKS + 1, 386])
+@pytest.mark.parametrize("step_mode", [False, True])
+def test_chunk_count_limit_rejects_before_generation(chunk_count, step_mode):
+    pipeline = _RecordingPipeline()
+    request = _request("A" * chunk_count, audio_chunk_duration=0.001, audio_chunk_threshold=0)
+    state = SimpleNamespace(prompt=request.prompt, sampling=request.sampling_params, extra={})
+    if chunk_count <= _MAX_AUDIO_CHUNKS:
+        prepared = (
+            pipeline.prepare_encode(state).extra["prepared"]
+            if step_mode
+            else pipeline._prepare_request_input(request.prompt, request.sampling_params.extra_args)
+        )
+        assert len(prepared.chunks.texts) == chunk_count
+    else:
+        message = f"at most {_MAX_AUDIO_CHUNKS} audio chunks"
+        if step_mode:
+            with pytest.raises(OmniClientError, match=message) as error:
+                pipeline.prepare_encode(state)
+            assert error.value.status_code == 400
+        else:
+            output = pipeline(SimpleNamespace(requests=[request]))[0]
+            assert message in output.error
+            assert output.error_status_code == 400
+        assert not pipeline.calls
+    assert not pipeline.draws
+
+
+@pytest.mark.parametrize("canonical_seed,legacy_seed", [(7, None), (None, 3), (7, 3)])
+@pytest.mark.parametrize("step_mode", [False, True])
+def test_omnivoice_preserves_model_owned_seed_over_random_default(canonical_seed, legacy_seed, step_mode):
+    pipeline = _RecordingPipeline()
+    extra = {"seed": legacy_seed} if legacy_seed is not None else {}
+    request = OmniDiffusionRequest(
+        prompt="Short",
+        sampling_params=OmniDiffusionSamplingParams(seed=canonical_seed, extra_args=extra),
+        request_id="seed-test",
+    )
+    expected_seed = legacy_seed if legacy_seed is not None else canonical_seed
+    if step_mode:
+        state = SimpleNamespace(prompt=request.prompt, sampling=request.sampling_params, extra={})
+        pipeline.prepare_encode(state)
+        generator = state.extra["generator"]
+    else:
+        pipeline(SimpleNamespace(requests=[request]))
+        generator = pipeline.draws[0][0]
+    assert generator.initial_seed() == expected_seed
+
+
+@pytest.mark.parametrize("seed", [-(2**63), -1])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_step_generator_accepts_negative_canonical_and_legacy_seeds(seed, legacy):
+    pipeline = _RecordingPipeline()
+    sampling = OmniDiffusionSamplingParams(seed=None if legacy else seed, extra_args={"seed": seed} if legacy else {})
+    request = OmniDiffusionRequest(prompt="Short", sampling_params=sampling, request_id="negative-seed")
+    state = SimpleNamespace(prompt=request.prompt, sampling=request.sampling_params, extra={})
+    pipeline.prepare_encode(state)
+    assert state.extra["generator"].initial_seed() == torch.Generator().manual_seed(seed).initial_seed()
+
+
 def test_threshold_is_inclusive_and_one_frame_over_uses_chunking():
     text = "One. Two. Three."
     pipeline = _RecordingPipeline()
@@ -470,3 +535,40 @@ def test_duration_estimate_uses_reference_text_and_token_count_together():
 
     assert target_length == 42
     assert calls == [("Target text.", "Reference text.", 17)]
+
+
+def test_short_clone_uses_reference_duration_before_chunking_threshold():
+    pipeline = _RecordingPipeline()
+    pipeline.duration_estimator = RuleDurationEstimator()
+    pipeline.config.frame_rate = 25
+    text = "One short sentence."
+    prompt = {"input": text, "ref_text": text, "ref_audio": (torch.ones(4), 10)}
+    for ref_length in (100, 200):
+        pipeline.reference = torch.zeros(8, ref_length, dtype=torch.long)
+        prepared = pipeline._prepare_request_input(prompt, {})
+        assert prepared.chunks is None
+        assert prepared.target_len == ref_length
+
+
+@pytest.mark.parametrize("ref_text,has_audio", [(None, True), ("Reference text.", False), (None, False)])
+def test_duration_without_complete_reference_retains_default_estimate(ref_text, has_audio):
+    pipeline = _RecordingPipeline()
+    pipeline.duration_estimator = RuleDurationEstimator()
+    text = "One short sentence."
+    tokens = torch.zeros(8, 200) if has_audio else None
+    assert pipeline._estimate_target_length(text, ref_text, tokens) == pipeline._estimate_target_length(
+        text, None, None
+    )
+
+
+def test_reference_duration_changes_whether_chunking_starts():
+    pipeline = _RecordingPipeline()
+    pipeline.duration_estimator = RuleDurationEstimator()
+    pipeline.config.frame_rate = 25
+    text = "First sentence. Second sentence."
+    prompt = {"input": text, "ref_text": text, "ref_audio": (torch.ones(4), 10)}
+    extra = {"audio_chunk_threshold": 6.0, "audio_chunk_duration": 3.0}
+    pipeline.reference = torch.zeros(8, 100, dtype=torch.long)
+    assert pipeline._prepare_request_input(prompt, extra).chunks is None
+    pipeline.reference = torch.zeros(8, 200, dtype=torch.long)
+    assert len(pipeline._prepare_request_input(prompt, extra).chunks.texts) > 1

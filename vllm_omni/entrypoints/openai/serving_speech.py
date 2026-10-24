@@ -42,7 +42,6 @@ from vllm.v1.engine.exceptions import EngineDeadError, EngineGenerateError
 
 from vllm_omni.config.speech_cache import SpeechCacheConfig
 from vllm_omni.config.stage_config import StagePipelineConfig
-from vllm_omni.diffusion.request import validate_diffusion_seed
 from vllm_omni.entrypoints.openai.audio_utils_mixin import AudioMixin, StreamingAudioResampler
 from vllm_omni.entrypoints.openai.errors import InvalidPresetVoiceReferenceError, InvalidVoiceReferenceError
 from vllm_omni.entrypoints.openai.protocol.audio import (
@@ -2622,8 +2621,6 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
             seed = extra.pop("seed", None)
             if request.seed is not None:
                 seed = request.seed
-            if seed is not None:
-                seed = validate_diffusion_seed(seed)
             # Apply extra_params from the request to sampling params
             sampling_params_list = self._diffusion_engine.default_sampling_params_list
             if extra or seed is not None:
@@ -2695,13 +2692,7 @@ class OmniOpenAIServingSpeech(OpenAIServing, AudioMixin):
                 base64_encode=False,
             )
             audio_response: AudioResponse = self.create_audio(audio_obj)
-            peak_memory_mb = float(final_output.peak_memory_mb or 0.0)
-            headers = {"X-Peak-Memory-MB": f"{peak_memory_mb:.3f}"} if peak_memory_mb > 0 else None
-            return Response(
-                content=audio_response.audio_data,
-                media_type=audio_response.media_type,
-                headers=headers,
-            )
+            return Response(content=audio_response.audio_data, media_type=audio_response.media_type)
 
         except asyncio.CancelledError:
             return self._diffusion_error_response("Client disconnected")

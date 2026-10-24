@@ -54,6 +54,9 @@ import torchaudio
 
 logger = init_logger(__name__)
 
+# Bound full generation passes even when clients request very small chunks.
+_MAX_AUDIO_CHUNKS = 64
+
 
 @dataclass
 class _OmniVoiceChunks:
@@ -168,7 +171,7 @@ def _parse_chunking_seconds(
         raise OmniClientError(f"{name} must be a number")
     try:
         seconds = float(value)
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
         raise OmniClientError(f"{name} must be a number") from error
 
     if not math.isfinite(seconds) or seconds < 0 or (seconds == 0 and not allow_zero):
@@ -384,6 +387,14 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
                 len(text) if frame_budget >= target_len else max(1, int(frame_budget * len(text) / target_len))
             )
             texts = split_text_into_chunks(text, max_characters)
+            if len(texts) > _MAX_AUDIO_CHUNKS:
+                return DiffusionOutput.from_exception(
+                    OmniClientError(
+                        f"OmniVoice requests support at most {_MAX_AUDIO_CHUNKS} audio chunks; "
+                        f"the requested settings produce {len(texts)}. "
+                        "Use a larger audio_chunk_duration or send less text."
+                    )
+                )
             chunks = _OmniVoiceChunks(texts, lang, instruct, ref_text, ref_audio_tokens)
             text = texts[0]
         return self._prepare_chunk_input(text, lang, instruct, ref_text, ref_audio_tokens, seed, chunks)
@@ -470,7 +481,8 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
         if isinstance(prepared, DiffusionOutput):
             raise OmniClientError(prepared.error or "OmniVoice request preparation failed")
 
-        seed = state.sampling.seed if state.sampling.seed is not None else prepared.seed
+        # Legacy model seeds take precedence over the shared request's random default.
+        seed = prepared.seed if prepared.seed is not None else state.sampling.seed
         state.extra["generator"] = torch.Generator(device=self.device).manual_seed(
             seed if seed is not None else random.randint(0, 2**63 - 1)
         )
@@ -695,9 +707,7 @@ class OmniVoicePipeline(nn.Module, SupportAudioOutput):
                 continue
             prepared_indices.append(i)
             prepared_requests.append(prepared)
-            seed = request.sampling_params.seed
-            if seed is None:
-                seed = prepared.seed
+            seed = prepared.seed if prepared.seed is not None else request.sampling_params.seed
             generators.append(
                 torch.Generator(device=self.device).manual_seed(
                     seed if seed is not None else random.randint(0, 2**63 - 1)
