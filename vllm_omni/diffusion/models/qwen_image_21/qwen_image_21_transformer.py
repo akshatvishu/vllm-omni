@@ -37,6 +37,8 @@ from vllm_omni.diffusion.forward_context import get_forward_context, is_forward_
 from vllm_omni.diffusion.layers.exact_bf16_pointwise import eligible as pointwise_eligible
 from vllm_omni.diffusion.layers.exact_bf16_pointwise import residual, rotary, silu_mul
 from vllm_omni.diffusion.layers.exact_bf16_qk_norm_rope import qk_rotary
+from vllm_omni.diffusion.layers.qwen21_kv_pack import eligible as pack_eligible
+from vllm_omni.diffusion.layers.qwen21_kv_pack import pack
 from vllm_omni.diffusion.models.qwen_image_21.decode_graph import QwenImage21DecodeGraphManager
 from vllm_omni.diffusion.models.qwen_image_21.npu_attention import QwenImage21SDPAImpl
 from vllm_omni.diffusion.offloader.config import OffloadStrategy, resolve_offload_strategy
@@ -663,8 +665,11 @@ class QwenImage21Attention(nn.Module):
                 attn_output = self.attn(query, key, value, metadata)
             else:
                 # Decode: the block-causal mask degenerates to full attention for target rows.
-                key = torch.cat([cached_key, key], dim=1)
-                value = torch.cat([cached_value, value], dim=1)
+                if self.prefix_kv_cache_dtype is None and pack_eligible(cached_key, cached_value, key, value):
+                    key, value = pack(cached_key, cached_value, key, value)
+                else:
+                    key = torch.cat([cached_key, key], dim=1)
+                    value = torch.cat([cached_value, value], dim=1)
                 attn_output = self.attn(query, key, value, metadata)
         else:
             attn_output = self.attn(query, key, value, metadata)
