@@ -52,6 +52,8 @@ def metadata(tensor):
 
 
 def raw_bits(tensor):
+    if tensor.numel() == 0:
+        return torch.empty(0, dtype=torch.uint8, device=tensor.device)
     integer_dtype = torch.int32 if tensor.dtype == torch.float32 else torch.int16
     return tensor.view(integer_dtype).contiguous().view(torch.uint8)
 
