@@ -36,6 +36,8 @@ from diffusers.utils.accelerate_utils import apply_forward_hook
 
 from vllm_omni.diffusion.layers.vae_rms_norm import kernels_allowed, rms_norm_fastpath
 
+from . import vae_experiment
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 CACHE_T = 2
@@ -436,8 +438,7 @@ class QwenImage21ResidualBlock(nn.Module):
         h = self.conv_shortcut(x)
 
         # First normalization and activation
-        x = self.norm1(x)
-        x = self.nonlinearity(x)
+        x = vae_experiment.norm_silu(self, self.norm1, self.nonlinearity, x)
 
         if feat_cache is not None:
             idx = feat_idx[0]
@@ -452,8 +453,7 @@ class QwenImage21ResidualBlock(nn.Module):
             x = self.conv1(x)
 
         # Second normalization and activation
-        x = self.norm2(x)
-        x = self.nonlinearity(x)
+        x = vae_experiment.norm_silu(self, self.norm2, self.nonlinearity, x)
 
         # Dropout
         x = self.dropout(x)
@@ -985,8 +985,7 @@ class QwenImage21Decoder3d(nn.Module):
             x = up_block(x, feat_cache=feat_cache, feat_idx=feat_idx, first_chunk=first_chunk)
 
         ## head
-        x = self.norm_out(x)
-        x = self.nonlinearity(x)
+        x = vae_experiment.norm_silu(self, self.norm_out, self.nonlinearity, x)
         if feat_cache is not None:
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
@@ -1243,6 +1242,9 @@ class AutoencoderKLQwenImage21(ModelMixin, AutoencoderMixin, ConfigMixin, FromOr
             out_channels=out_channels,
             is_residual=is_residual,
         )
+
+        for module in self.decoder.modules():
+            module._qwen_decoder_experiment = True
 
         # Derive the spatial compression ratio from the architecture: one
         # downsampling stage per `temperal_downsample` entry. The checkpoint's
