@@ -310,6 +310,10 @@ def patch_pipeline(module):
 
     cls.encode_prompt = encode_prompt
     cls.__init__ = initialize
+    if os.environ.get("QWEN_PRODUCTION_TIMING") == "1":
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "production-attribution-20261028"))
+        import production_timing
+        production_timing.install_pipeline(module, identify)
     if not CAPTURE:
         return
     stats_cls = getattr(module, "_VaeLatentStats", None)
@@ -439,6 +443,10 @@ def patch_pipeline(module):
 
 
 def patch_graph(module):
+    if os.environ.get("QWEN_PRODUCTION_TIMING") == "1":
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "production-attribution-20261028"))
+        import production_timing
+        production_timing.install_graph(module)
     if not CAPTURE:
         return
     cls = module.QwenImage21DecodeGraphManager
