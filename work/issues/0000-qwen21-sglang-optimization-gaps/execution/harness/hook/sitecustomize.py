@@ -1,0 +1,372 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+
+"""Common experiment policy and optional diagnostics outside compiled blocks.
+
+All arms disable the native prompt cache identically. Captures and replay are
+diagnostic-only; ordinary latency processes do not copy tensors or write files
+per request. No Q/K arithmetic or attention implementation is replaced here.
+"""
+
+import functools
+import hashlib
+import importlib.abc
+import importlib.machinery
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+PIPELINE = "vllm_omni.diffusion.models.qwen_image_21.pipeline_qwen_image_21"
+GRAPH = "vllm_omni.diffusion.models.qwen_image_21.decode_graph"
+RUNNER = "vllm_omni.diffusion.worker.diffusion_model_runner"
+CAPTURE = os.environ.get("QWEN_EXPERIMENT_CAPTURE_DIR")
+REPLAY = os.environ.get("QWEN_EXPERIMENT_REPLAY_DIR")
+VARIANT = os.environ.get("QWEN_EXPERIMENT_VARIANT", "B0")
+DISABLE_CACHE = os.environ.get("QWEN_EXPERIMENT_DISABLE_PROMPT_CACHE") == "1"
+ACTIVE = None
+
+
+def write_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2, default=str) + "\n")
+
+
+def cpu_tree(value):
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        return value.detach().to("cpu").clone()
+    if isinstance(value, dict):
+        return {k: cpu_tree(v) for k, v in value.items()}
+    if isinstance(value, (tuple, list)):
+        return type(value)(cpu_tree(v) for v in value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise TypeError(f"Unsupported capture value {type(value)}")
+
+
+def describe(value):
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        return {
+            "shape": list(value.shape),
+            "dtype": str(value.dtype),
+            "stride": list(value.stride()),
+            "storage_offset": value.storage_offset(),
+            "device": str(value.device),
+        }
+    if isinstance(value, dict):
+        return {k: describe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [describe(v) for v in value]
+    return value
+
+
+def save(name, value):
+    import torch
+
+    if ACTIVE is None:
+        return
+    directory = ACTIVE["directory"]
+    directory.mkdir(parents=True, exist_ok=True)
+    torch.save(cpu_tree(value), directory / name)
+    write_json(directory / (name + ".metadata.json"), describe(value))
+
+
+def load(name):
+    import torch
+
+    if REPLAY is None or ACTIVE is None:
+        return None
+    path = Path(REPLAY) / ACTIVE["case"] / name
+    if not path.is_file():
+        raise FileNotFoundError(f"Required saved baseline operand missing: {path}")
+    return torch.load(path, map_location="cpu", weights_only=True)
+
+
+def to_like(value, reference):
+    import torch
+
+    if isinstance(reference, torch.Tensor):
+        if value.shape != reference.shape or value.dtype != reference.dtype:
+            raise ValueError("Saved baseline operand shape/dtype differs from current request")
+        return value.to(reference.device)
+    return value
+
+
+def identify(kwargs):
+    source = Path(os.environ["QWEN_EXPERIMENT_INPUTS"])
+    data = json.loads(source.read_text())
+    prompt = kwargs["prompt"]
+    prompt = prompt[0] if isinstance(prompt, list) and len(prompt) == 1 else prompt
+    for case in data["cases"]:
+        request = case["request"]
+        if (
+            prompt == request["prompt"]
+            and kwargs["height"] == request["height"]
+            and kwargs["width"] == request["width"]
+        ):
+            return case["id"]
+    raise ValueError("Diagnostic capture requires one named batch-one workload from inputs/workloads.json")
+
+
+def attach_diagnostics(pipeline):
+    original_encode = pipeline.vae.encode
+    original_decode = pipeline.vae.decode
+    original_encoder = pipeline.text_encoder.forward
+
+    @functools.wraps(original_encode)
+    def encode(*args, **kwargs):
+        result = original_encode(*args, **kwargs)
+        if ACTIVE is not None:
+            slot = ACTIVE["encode_slot"]
+            ACTIVE["encode_slot"] += 1
+            distribution = result.latent_dist
+            if VARIANT == "S1" and REPLAY:
+                saved = load(f"raw-encode-{slot}.pt")
+                params = to_like(saved["parameters"], distribution.parameters)
+                result.latent_dist = distribution = type(distribution)(params)
+            save(
+                f"raw-encode-{slot}.pt",
+                {
+                    "input": args[0] if args else kwargs["x"],
+                    "parameters": distribution.parameters,
+                    "latent": distribution.mode(),
+                },
+            )
+        return result
+
+    @functools.wraps(original_decode)
+    def decode(*args, **kwargs):
+        if ACTIVE is not None:
+            save("vae-decode-input.pt", {"latents": args[0] if args else kwargs["z"]})
+        output = original_decode(*args, **kwargs)
+        if ACTIVE is not None:
+            save("vae-decode-output.pt", {"output": output[0]})
+        return output
+
+    @functools.wraps(original_encoder)
+    def encoder(*args, **kwargs):
+        if ACTIVE is not None:
+            slot = ACTIVE["encoder_slot"]
+            ACTIVE["encoder_slot"] += 1
+            save(f"encoder-{slot}-input.pt", kwargs)
+        result = original_encoder(*args, **kwargs)
+        if ACTIVE is not None:
+            save(f"encoder-{slot}-output.pt", {"hidden_states": result.hidden_states[-1]})
+        return result
+
+    pipeline.vae.encode = encode
+    pipeline.vae.decode = decode
+    pipeline.text_encoder.forward = encoder
+    pipeline._experiment_original_vae_decode = original_decode
+
+
+def stage_benchmark(pipeline, case):
+    """Separate synchronized saved-input decoder timing, never HTTP timing."""
+    import torch
+
+    directory = case["directory"]
+    packed = torch.load(directory / "vae-decode-input.pt", weights_only=True)["latents"]
+    operand = packed.to(device=pipeline.device, dtype=pipeline.vae.dtype)
+    decode = pipeline._experiment_original_vae_decode
+    from vllm_omni.platforms import current_omni_platform
+
+    samples = []
+    with torch.inference_mode():
+        for i in range(25):
+            current_omni_platform.synchronize()
+            start = time.perf_counter()
+            output = decode(operand, return_dict=False)[0]
+            current_omni_platform.synchronize()
+            elapsed = time.perf_counter() - start
+            if i >= 5:
+                samples.append(elapsed)
+            del output
+    write_json(
+        directory / "vae-stage-timing.json",
+        {
+            "warmups": 5,
+            "measured": 20,
+            "seconds": samples,
+            "scope": "Synchronized VAE decode on saved checkpoint latents; no HTTP or capture overhead",
+            "shape": list(operand.shape),
+            "dtype": str(operand.dtype),
+        },
+    )
+
+
+def patch_pipeline(module):
+    cls = module.QwenImage21Pipeline
+    original_encode_prompt = cls.encode_prompt
+    original_init = cls.__init__
+
+    @functools.wraps(original_encode_prompt)
+    def encode_prompt(self, *args, **kwargs):
+        if DISABLE_CACHE:
+            cache = getattr(self, "_prompt_embedding_cache", None)
+            if cache is not None:
+                cache.clear()
+        return original_encode_prompt(self, *args, **kwargs)
+
+    @functools.wraps(original_init)
+    def initialize(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        if CAPTURE:
+            attach_diagnostics(self)
+
+    cls.encode_prompt = encode_prompt
+    cls.__init__ = initialize
+    if not CAPTURE:
+        return
+    original_prepare = cls._prepare_generation_context
+    original_finish = cls._decode_latents
+
+    @functools.wraps(original_prepare)
+    def prepare(self, **kwargs):
+        global ACTIVE
+        case = identify(kwargs)
+        directory = Path(CAPTURE) / case
+        if (directory / "context.pt").exists():
+            raise RuntimeError(f"Refusing to overwrite diagnostic capture for {case}")
+        ACTIVE = {
+            "case": case,
+            "directory": directory,
+            "encode_slot": 0,
+            "encoder_slot": 0,
+            "graphs": [],
+            "replayed_fields": [],
+        }
+        result = original_prepare(self, **kwargs)
+        save("fresh-context.pt", result)
+        if REPLAY and VARIANT in {"K1", "P1", "O1"}:
+            frozen = load("context.pt")
+            fields = ("latents", "image_latents") if VARIANT == "O1" else tuple(frozen)
+            for field in fields:
+                result[field] = to_like(frozen[field], result[field])
+            ACTIVE["replayed_fields"] = list(fields)
+        save("context.pt", result)
+        return result
+
+    @functools.wraps(original_finish)
+    def finish(self, latents, height, width, output_type="pil"):
+        global ACTIVE
+        if ACTIVE is None:
+            raise RuntimeError("Decode occurred without a diagnostic request context")
+        if REPLAY and VARIANT in {"V1", "V2", "V3", "S2"}:
+            latents = to_like(load("decode-input.pt")["packed_latents"], latents)
+            ACTIVE["replayed_fields"].append("final_denoiser_latents")
+        save("decode-input.pt", {"packed_latents": latents})
+        result = original_finish(self, latents, height, width, output_type)
+        save("decode-output.pt", {"output": result.output})
+        case = ACTIVE
+        write_json(
+            case["directory"] / "metadata.json",
+            {
+                "case_id": case["case"],
+                "variant": VARIANT,
+                "height": height,
+                "width": width,
+                "encoder_calls": case["encoder_slot"],
+                "vae_encode_calls": case["encode_slot"],
+                "replayed_fields": case["replayed_fields"],
+                "graph_calls": case["graphs"],
+                "instrumentation": "outer pipeline/encoder/VAE wrappers; no compiled-block wrappers",
+            },
+        )
+        ACTIVE = None
+        if os.environ.get("QWEN_EXPERIMENT_STAGE_BENCH") == "1":
+            stage_benchmark(self, case)
+        return result
+
+    cls._prepare_generation_context = prepare
+    cls._decode_latents = finish
+
+
+def patch_graph(module):
+    if not CAPTURE:
+        return
+    cls = module.QwenImage21DecodeGraphManager
+    original = cls.try_decode
+
+    @functools.wraps(original)
+    def call(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        if ACTIVE is not None:
+            ACTIVE["graphs"].append(
+                {
+                    "replayed": result is not None,
+                    "entries": len(self.entries),
+                    "captures": sum(e.captures for e in self.entries.values() if e is not None),
+                    "retained_pairs": sum(
+                        len(e.packed_k)
+                        for e in self.entries.values()
+                        if e is not None and getattr(e, "packed_k", None) is not None
+                    ),
+                }
+            )
+        return result
+
+    cls.try_decode = call
+
+
+def patch_runner(module):
+    cls = module.DiffusionModelRunner
+    original = cls.load_model
+
+    @functools.wraps(original)
+    def load_model(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        output = os.environ.get("QWEN_EXPERIMENT_RUN_DIR")
+        if output:
+            pipeline = self.pipeline
+            blocks = pipeline.transformer.transformer_blocks
+            write_json(
+                Path(output) / f"worker-provenance-{os.getpid()}.json",
+                {
+                    "pid": os.getpid(),
+                    "pipeline_file": sys.modules[PIPELINE].__file__,
+                    "hook_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                    "native_prompt_cache_disabled": DISABLE_CACHE,
+                    "diagnostic": bool(CAPTURE),
+                    "variant": VARIANT,
+                    "enforce_eager": self.od_config.enforce_eager,
+                    "compiled_blocks": sum(hasattr(block.forward, "_torchdynamo_orig_callable") for block in blocks),
+                    "decode_graphs_enabled": pipeline.transformer.enable_cuda_graph_decode,
+                },
+            )
+        return result
+
+    cls.load_model = load_model
+
+
+class Loader(importlib.abc.Loader):
+    def __init__(self, original):
+        self.original = original
+
+    def create_module(self, spec):
+        return self.original.create_module(spec)
+
+    def exec_module(self, module):
+        self.original.exec_module(module)
+        {PIPELINE: patch_pipeline, GRAPH: patch_graph, RUNNER: patch_runner}[module.__name__](module)
+
+    def __getattr__(self, name):
+        return getattr(self.original, name)
+
+
+class Finder(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname not in {PIPELINE, GRAPH, RUNNER}:
+            return None
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        if spec and spec.loader:
+            spec.loader = Loader(spec.loader)
+        return spec
+
+
+if DISABLE_CACHE or CAPTURE:
+    sys.meta_path.insert(0, Finder())
