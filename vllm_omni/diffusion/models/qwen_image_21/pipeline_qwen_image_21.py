@@ -294,6 +294,38 @@ def get_qwen_image_21_post_process_func(
     return post_process_func
 
 
+class _VaeLatentStats(nn.Module):
+    """One device/dtype entry, owned and invalidated with its VAE."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("mean", None, persistent=False)
+        self.register_buffer("std", None, persistent=False)
+        self._key = None
+
+    def clear(self):
+        self.mean = None
+        self.std = None
+        self._key = None
+
+    def _apply(self, fn, recurse=True):
+        # Rebuilding from config avoids rounding through an intermediate dtype.
+        self.clear()
+        return super()._apply(fn, recurse=recurse)
+
+    def get(self, config, channels, latent):
+        mean_values = tuple(config.latents_mean)
+        std_values = tuple(config.latents_std)
+        key = (mean_values, std_values, channels, latent.device, latent.dtype, torch.get_default_dtype())
+        if self._key != key:
+            # Keep the incumbent CPU construction precision and operation order.
+            mean = torch.tensor(mean_values).view(1, channels, 1, 1, 1).to(latent.device, latent.dtype)
+            std = torch.tensor(std_values).view(1, channels, 1, 1, 1).to(latent.device, latent.dtype)
+            self.mean, self.std = mean, std
+            self._key = key
+        return self.mean, self.std
+
+
 class QwenImage21Pipeline(
     nn.Module,
     QwenImage21CFGParallelMixin,
@@ -320,6 +352,10 @@ class QwenImage21Pipeline(
         The runner looks this up on the pipeline, not on the transformer.
         """
         self._prompt_embedding_cache = OrderedDict()
+        vae = getattr(self, "vae", None)
+        stats = getattr(vae, "_qwen21_encode_stats", None)
+        if stats is not None:
+            stats.clear()
         transformer = getattr(self, "transformer", None)
         release = getattr(transformer, "release_captured_graphs", None)
         if callable(release):
@@ -820,16 +856,11 @@ class QwenImage21Pipeline(
             image_latents = torch.cat(image_latents, dim=0)
         else:
             image_latents = retrieve_latents(self.vae.encode(image), generator=generator, sample_mode="argmax")
-        latents_mean = (
-            torch.tensor(self.vae.config.latents_mean)
-            .view(1, self.latent_channels, 1, 1, 1)
-            .to(image_latents.device, image_latents.dtype)
-        )
-        latents_std = (
-            torch.tensor(self.vae.config.latents_std)
-            .view(1, self.latent_channels, 1, 1, 1)
-            .to(image_latents.device, image_latents.dtype)
-        )
+        stats = getattr(self.vae, "_qwen21_encode_stats", None)
+        if stats is None:
+            stats = _VaeLatentStats()
+            self.vae.add_module("_qwen21_encode_stats", stats)
+        latents_mean, latents_std = stats.get(self.vae.config, self.latent_channels, image_latents)
         image_latents = (image_latents - latents_mean) / latents_std
 
         return image_latents
