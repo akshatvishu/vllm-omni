@@ -210,6 +210,8 @@ def main():
                 raise TimeoutError("server readiness timeout")
             time.sleep(1)
         mark("ready")
+        if env.get("QWEN_PRODUCTION_TIMING") == "1":
+            (run / "enable-production-timing").touch()
         if args.diagnostic:
             (run / "enable-capture").touch()
         doc = json.loads((inputs / ("historical-16.json" if args.historical else "workloads.json")).read_text())
@@ -231,7 +233,13 @@ def main():
                 ("measured", 1 if args.historical else args.samples),
             ]
         )
+        if env.get("QWEN_PRODUCTION_PROFILE") == "1":
+            phases += [("profiled", 1)]
         for phase, count in phases:
+            if env.get("QWEN_PRODUCTION_TIMING") == "1":
+                (run / "production-phase.txt").write_text(phase)
+            if phase == "profiled":
+                (run / "enable-production-profile").touch()
             mark(phase + "_start")
             jobs = (
                 [(cases[i % len(cases)], i) for i in range(count)]
