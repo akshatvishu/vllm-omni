@@ -33,6 +33,12 @@ def normalized(prov, launch, policy):
     # Interpreter and source/checkpoint locations are transport-specific; model content is hashed.
     command[0] = "<python>"
     command[command.index("serve") + 1] = "<checkpoint>"
+    if "--diffusion-offload-config" in command:
+        index = command.index("--diffusion-offload-config")
+        offload_policy = json.loads(command[index + 1])
+        if prov["arguments"]["variant"] != "O1" or offload_policy != {"mode": "layer", "components": ["text_encoder"]}:
+            raise ValueError("Unexpected offload treatment")
+        del command[index : index + 2]
     return {
         "model": prov["checkpoint_files"],
         "inputs": {Path(k).name: v for k, v in prov["inputs"].items()},
@@ -147,6 +153,10 @@ def build(args):
             "required_domains": args.domains,
             "cases": rows,
             "selection": {"tensor_names": args.tensor_names, "image_source": "diagnostic" if diag else "measured"},
+            "variant": prov["arguments"]["variant"],
+            "treatment": {"mode": "layer", "components": ["text_encoder"]}
+            if prov["arguments"]["variant"] == "O1"
+            else None,
         }
         if args.baseline_manifest:
             manifest["baseline_manifest_sha256"] = digest(args.baseline_manifest)
