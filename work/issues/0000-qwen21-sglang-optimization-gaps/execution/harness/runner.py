@@ -113,6 +113,7 @@ def main():
             HF_HUB_OFFLINE="1",
             TOKENIZERS_PARALLELISM="false",
             VLLM_LOGGING_COLOR="0",
+            VLLM_LOGGING_LEVEL="INFO",
             QWEN_EXPERIMENT_RUN_DIR=str(run),
             QWEN_EXPERIMENT_DISABLE_PROMPT_CACHE="1",
             QWEN_EXPERIMENT_VARIANT=args.variant,
@@ -172,6 +173,8 @@ def main():
             if args.mode == "eager"
             else ["--diffusion-compile-granularity", "regional", "--enable-cuda-graph-decode"]
         )
+        if args.variant == "O1":
+            command += ["--diffusion-offload-config", '{"mode":"layer","components":["text_encoder"]}']
         write(
             run / "launch.json",
             {
@@ -179,7 +182,8 @@ def main():
                 "environment": {
                     k: v
                     for k, v in env.items()
-                    if k.startswith(("QWEN_EXPERIMENT_", "TORCHINDUCTOR_", "TRITON_")) or k == "PYTHONPATH"
+                    if k.startswith(("QWEN_EXPERIMENT_", "TORCHINDUCTOR_", "TRITON_", "VLLM_", "MIOPEN_", "AITER_"))
+                    or k in {"PYTHONPATH", "HIP_VISIBLE_DEVICES", "HF_HUB_OFFLINE", "TOKENIZERS_PARALLELISM"}
                 },
             },
         )
