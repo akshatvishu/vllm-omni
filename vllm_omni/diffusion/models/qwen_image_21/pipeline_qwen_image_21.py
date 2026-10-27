@@ -48,7 +48,8 @@ from vllm_omni.diffusion.models.qwen_image_21.qwen_image_21_transformer import (
     QwenImage21Transformer2DModel,
 )
 from vllm_omni.diffusion.models.utils import create_transformers_model
-from vllm_omni.diffusion.offloader.config import offload_enabled
+from vllm_omni.diffusion.offloader.config import offload_enabled, resolve_offload, should_offload_component
+from vllm_omni.diffusion.offloader.offload_plan import OffloadPlan
 from vllm_omni.diffusion.profiler.diffusion_pipeline_profiler import DiffusionPipelineProfilerMixin
 from vllm_omni.diffusion.request import OmniDiffusionRequest
 from vllm_omni.diffusion.utils.prompt_utils import (
@@ -313,6 +314,15 @@ class QwenImage21Pipeline(
     _dit_modules: ClassVar[list[str]] = ["transformer"]
     _encoder_modules: ClassVar[list[str]] = ["text_encoder"]
     _vae_modules: ClassVar[list[str]] = ["vae"]
+    _offload_plan = OffloadPlan(
+        encoder_block_attrs={
+            "text_encoder": (
+                "model.language_model.layers",
+                "model.visual.blocks",
+                "model.visual.deepstack_merger_list",
+            )
+        },
+    )
 
     def release_captured_graphs(self) -> None:
         """Drop decode graphs before sleep level 2 discards their capture storage.
@@ -369,14 +379,47 @@ class QwenImage21Pipeline(
         # Unlike the 2.0 T2I pipeline, the vision tower is required: condition
         # images are encoded jointly with the prompt by the VLM.
         text_encoder_quant_config = _resolve_text_encoder_quant_config(od_config.quantization_config)
+        stream_encoder = should_offload_component(od_config, "text_encoder")
+        if stream_encoder:
+            if getattr(od_config, "custom_pipeline_args", None) is not None:
+                raise ValueError("Qwen21 encoder-offload experiment requires the default registry loader")
+            if getattr(od_config, "diffusion_load_format", "default") != "default":
+                raise ValueError("Qwen21 encoder-offload experiment requires diffusion_load_format=default")
+            if getattr(od_config.parallel_config, "use_hsdp", False):
+                raise ValueError("Qwen21 encoder-offload experiment does not support HSDP")
+            policy = resolve_offload(od_config)
+            if policy.components != frozenset({"text_encoder"}) or policy.uses_allgather("text_encoder"):
+                raise ValueError("Qwen21 encoder-offload experiment requires encoder-only rank-local transfer")
+            if text_encoder_quant_config is not None:
+                raise ValueError("Qwen21 encoder-offload experiment requires an unquantized encoder")
+            parallel = od_config.parallel_config
+            if any(
+                (getattr(parallel, name, 1) or 1) != 1
+                for name in (
+                    "tensor_parallel_size",
+                    "sequence_parallel_size",
+                    "data_parallel_size",
+                    "cfg_parallel_size",
+                    "pipeline_parallel_size",
+                )
+            ):
+                raise ValueError("Qwen21 encoder-offload experiment requires TP1/SP1/DP1/CFG1/PP1")
         if text_encoder_quant_config is None:
-            self.text_encoder = from_pretrained_with_prefetch(
-                Qwen3VLForConditionalGeneration.from_pretrained,
-                model,
-                subfolder="text_encoder",
-                prefetch_list=qwen_subfolders,
-                local_files_only=local_files_only,
-            ).to(self.device)
+            encoder_device = torch.device("cpu") if stream_encoder else self.device
+            # Override the loader's ambient accelerator context before allocation.
+            with torch.device(encoder_device):
+                self.text_encoder = from_pretrained_with_prefetch(
+                    Qwen3VLForConditionalGeneration.from_pretrained,
+                    model,
+                    subfolder="text_encoder",
+                    prefetch_list=qwen_subfolders,
+                    local_files_only=local_files_only,
+                ).to(encoder_device)
+            if stream_encoder:
+                for path in self._offload_plan.encoder_block_attrs["text_encoder"]:
+                    blocks = self.text_encoder.get_submodule(path)
+                    if not isinstance(blocks, nn.ModuleList) or len(blocks) < 2:
+                        raise ValueError(f"Qwen21 encoder offload requires at least two blocks at {path}")
         else:
             # Quantized path: build the HF model on meta, swap its nn.Linear
             # modules for vLLM quantizable linears, and stream the weights
