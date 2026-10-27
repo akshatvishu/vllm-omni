@@ -1,0 +1,39 @@
+{
+  "experiment": "K1 revision: conversion+packing",
+  "base": "af6b55dd09d4dddd338b182e651cad003b78be5d",
+  "phase": "bounded correctness first, component latency second",
+  "hardware": "single MI300X gfx942, existing container",
+  "scope": "BF16 prefix/V, FP32 post-RoPE K, B1 H32 D128 SP1 native-cache decode",
+  "hypothesis": "remove separate target-K BF16 materialization without changing normalization/complex RoPE",
+  "correctness": [
+    "393216 FP32 encodings and65536BF16encodings across6edge layouts",
+    "9 saved conditional/unconditional geometries",
+    "compiled native oracle and uint8 equality",
+    "fake shapes/dtypes/strides; no inputmutation",
+    "changedinput HIPgraph replay",
+    "actual production boundary operands and separate reconstructed compiled producer",
+    "samequery SDPA incumbent repeat andcandidate comparison"
+  ],
+  "timing": {
+    "reference": "compilednative Kconversion+cat andVcat, notoldK1",
+    "pairs": 12,
+    "order": "alternatingABBA",
+    "warm_replays": 40,
+    "after512MiBwrite_replays": 1,
+    "eviction_guaranteed": false
+  },
+  "stop": "No timing if edge/component exactness fails. Report thisexperiment beforeP1. Preserveallfailures; no tuning inthisrevision.",
+  "baseline": "SavedB0reused, remainsunsealed; no full baseline rerun and no request-level speed/quality claim",
+  "expected_structure": "KV2kernels->1; including unchangedQcast3->2, verifytrace",
+  "logical_traffic": "removes64MiB T2I or48MiB edit relativeoldK1, notB0; notmeasuredHBM/peakmemory",
+  "contract_version": 2,
+  "authorization": "User approved the revised NaN comparison rule and requested immediate measurement against baseline.",
+  "source_parent": "b6b6ce71c0b759c27be41d2b919074c754870fba",
+  "kernel_changes": false,
+  "comparison_rule": {
+    "candidate_copies": "Exact bytes against original kp, vp, v, including all NaN encodings.",
+    "target_k": "Exact bytes against compiled native FP32-to-BF16 conversion, including NaNs.",
+    "native_copy_comparison": "Only both-NaN encoding differences allowed in copied regions. All other bytes, including signed zero and infinities, exact. No added or removed NaNs."
+  },
+  "reuse_evidence": "Actual production CFG capture/attention replay unchanged from b6b6ce71c. Rerun the replay probe on saved actual operands; no model baseline rerun."
+}
