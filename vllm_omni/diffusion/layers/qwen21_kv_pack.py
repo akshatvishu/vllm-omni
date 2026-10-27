@@ -3,6 +3,7 @@
 """Experimental MI300X Qwen21 K conversion and functional K/V packing."""
 
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version
 
 import torch
 from vllm.triton_utils import HAS_TRITON, tl, triton
@@ -11,11 +12,16 @@ from vllm.triton_utils import HAS_TRITON, tl, triton
 @lru_cache(maxsize=1)
 def qualified_device() -> torch.device | None:
     """Resolve the pinned experiment stack outside model compilation."""
+    try:
+        triton_revision = version("triton")
+    except PackageNotFoundError:
+        return None
     if not (
         HAS_TRITON
         and str(torch.__version__) == "2.13.0+git733fca1"
         and torch.version.hip == "7.2.53211"
-        and str(triton.__version__) == "3.8.0+git669b31ac"
+        and str(triton.__version__) == "3.8.0"
+        and triton_revision == "3.8.0+git669b31ac"
     ):
         return None
     backend = torch.get_device_module("cuda")
