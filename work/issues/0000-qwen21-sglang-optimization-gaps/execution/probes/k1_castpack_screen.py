@@ -51,40 +51,68 @@ def metadata(tensor):
     }
 
 
+def raw_bits(tensor):
+    integer_dtype = torch.int32 if tensor.dtype == torch.float32 else torch.int16
+    return tensor.view(integer_dtype).contiguous().view(torch.uint8)
+
+
 def bits_equal(left, right):
     return (
         left.shape == right.shape
         and left.dtype == right.dtype
-        and torch.equal(left.contiguous().view(torch.uint8), right.contiguous().view(torch.uint8))
+        and torch.equal(raw_bits(left), raw_bits(right))
     )
+
+
+def difference(left, right):
+    if left.shape != right.shape or left.dtype != right.dtype:
+        return {"incompatible_metadata": True}
+    integer_dtype = torch.int32 if left.dtype == torch.float32 else torch.int16
+    a = left.view(integer_dtype).contiguous().flatten()
+    b = right.view(integer_dtype).contiguous().flatten()
+    indices = (a != b).nonzero().flatten()
+    selected = indices[:8]
+    mask = (1 << (left.element_size() * 8)) - 1
+    return {"different_elements": indices.numel(), "first_indices": selected.cpu().tolist(),
+            "actual_hex": [hex(x & mask) for x in a[selected].cpu().tolist()],
+            "expected_hex": [hex(x & mask) for x in b[selected].cpu().tolist()]}
 
 
 def require(row, label, passed, **details):
     row.setdefault("checks", []).append({"check": label, "passed": bool(passed), **details})
-    if not passed:
+    if not passed and not row.get("collect_failures", False):
         raise AssertionError(f"{row['case']}: {label}: {details}")
 
 
 def compare(row, label, actual, expected, inputs):
     require(row, label + "/arity", len(actual) == len(expected) == 2)
     for index, (got, want) in enumerate(zip(actual, expected, strict=True)):
+        same_bits = bits_equal(got, want)
         require(
             row,
             f"{label}/output{index}",
-            bits_equal(got, want) and got.stride() == want.stride() and got.is_contiguous(),
+            same_bits and got.stride() == want.stride() and got.is_contiguous(),
             actual=metadata(got),
             expected=metadata(want),
+            difference=None if same_bits else difference(got, want),
         )
         prefix = inputs[index]
-        require(row, f"{label}/prefix{index}_unchanged_bits", bits_equal(got[:, : prefix.shape[1]], prefix))
-    require(row, label + "/target_v_unchanged_bits", bits_equal(actual[1][:, inputs[0].shape[1] :], inputs[3]))
+        prefix_out = got[:, : prefix.shape[1]]
+        same_prefix = bits_equal(prefix_out, prefix)
+        require(row, f"{label}/prefix{index}_unchanged_bits", same_prefix,
+                difference=None if same_prefix else difference(prefix_out, prefix))
+    target_v = actual[1][:, inputs[0].shape[1] :]
+    same_v = bits_equal(target_v, inputs[3])
+    require(row, label + "/target_v_unchanged_bits", same_v,
+            difference=None if same_v else difference(target_v, inputs[3]))
     pointers = [tensor.untyped_storage().data_ptr() for tensor in actual]
     input_pointers = {tensor.untyped_storage().data_ptr() for tensor in inputs}
     require(row, label + "/functional_outputs", len(set(pointers)) == 2 and not input_pointers.intersection(pointers))
 
 
 def snapshot(owners):
-    return [owner.clone() for owner in owners]
+    return [owner.view(torch.int32 if owner.dtype == torch.float32 else torch.int16).clone().view(owner.dtype)
+            for owner in owners]
 
 
 def unmutated(row, label, owners, before):
@@ -213,7 +241,7 @@ def qualification(row, candidate, functions, inputs, owners):
     unmutated(row, "compiled_candidate_inputs_unchanged", owners, before)
     graphs, outputs = capture(functions, inputs)
     unmutated(row, "capture_inputs_unchanged", owners, before)
-    original_expected = tuple(tensor.clone() for tensor in expected)
+    original_expected = tuple(snapshot(expected))
     for iteration in range(2):
         if iteration:
             change_inputs(inputs)
@@ -417,7 +445,8 @@ def main():
             # Prefix 25 and target 97 each hold all 65536 BF16 encodings.
             for strided in (False, True):
                 for prefix, target in ((0, 3), (1, 17), (25, 97)):
-                    row = {"case": f"edge-p{prefix}-t{target}-strided{int(strided)}", "checks": []}
+                    row = {"case": f"edge-p{prefix}-t{target}-strided{int(strided)}", "checks": [],
+                           "collect_failures": True}
                     result["edge_cases"].append(row)
                     inputs, owners = edge_inputs(prefix, target, strided, patterns)
                     graphs, outputs = qualification(row, candidate, functions, inputs, owners)
@@ -425,6 +454,7 @@ def main():
                     save()
             # Qualify every production-derived geometry before ANY performance.
             for row in result["cases"]:
+                row["collect_failures"] = True
                 inputs, owners = component_inputs(row["prefix"], row["target"])
                 graphs, outputs = qualification(row, candidate, functions, inputs, owners)
                 trace_graphs(row, graphs, args.output)
@@ -434,6 +464,14 @@ def main():
             if not activated:
                 raise AssertionError("Candidate custom operation absent from compiled graph")
             result["compiled_candidate_activation"] = activated
+            failures = [{"case": row["case"], "check": check["check"]}
+                        for row in result["edge_cases"] + result["cases"]
+                        for check in row["checks"] if not check["passed"]]
+            result["qualification_failures"] = failures
+            if failures:
+                raise AssertionError(f"Strict qualification failed {len(failures)} checks; performance remains blocked")
+            for row in result["cases"]:
+                row["collect_failures"] = False
             result["correctness_passed"] = True
             save()
             flush = torch.empty(512 * 1024 * 1024, device="cuda", dtype=torch.uint8)
