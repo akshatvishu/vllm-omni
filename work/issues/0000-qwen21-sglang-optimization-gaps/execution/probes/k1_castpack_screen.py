@@ -72,10 +72,16 @@ def difference(left, right):
     integer_dtype = torch.int32 if left.dtype == torch.float32 else torch.int16
     a = left.view(integer_dtype).contiguous().flatten()
     b = right.view(integer_dtype).contiguous().flatten()
-    indices = (a != b).nonzero().flatten()
+    different = a != b
+    indices = different.nonzero().flatten()
     selected = indices[:8]
     mask = (1 << (left.element_size() * 8)) - 1
-    return {"different_elements": indices.numel(), "first_indices": selected.cpu().tolist(),
+    exponent, mantissa = (0x7F800000, 0x007FFFFF) if left.dtype == torch.float32 else (0x7F80, 0x007F)
+    a_nan = ((a & exponent) == exponent) & ((a & mantissa) != 0)
+    b_nan = ((b & exponent) == exponent) & ((b & mantissa) != 0)
+    both_nan = (different & a_nan & b_nan).sum().item()
+    return {"different_elements": indices.numel(), "both_nan_differences": both_nan,
+            "non_nan_pair_differences": indices.numel() - both_nan, "first_indices": selected.cpu().tolist(),
             "actual_hex": [hex(x & mask) for x in a[selected].cpu().tolist()],
             "expected_hex": [hex(x & mask) for x in b[selected].cpu().tolist()]}
 
@@ -107,6 +113,11 @@ def compare(row, label, actual, expected, inputs):
     same_v = bits_equal(target_v, inputs[3])
     require(row, label + "/target_v_unchanged_bits", same_v,
             difference=None if same_v else difference(target_v, inputs[3]))
+    target_k = actual[0][:, inputs[0].shape[1] :]
+    native_k = expected[0][:, inputs[0].shape[1] :]
+    same_k = bits_equal(target_k, native_k)
+    require(row, label + "/target_k_native_cast_bits", same_k,
+            difference=None if same_k else difference(target_k, native_k))
     pointers = [tensor.untyped_storage().data_ptr() for tensor in actual]
     input_pointers = {tensor.untyped_storage().data_ptr() for tensor in inputs}
     require(row, label + "/functional_outputs", len(set(pointers)) == 2 and not input_pointers.intersection(pointers))
