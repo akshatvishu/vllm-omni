@@ -288,6 +288,164 @@ def stage_benchmark(pipeline, case):
     )
 
 
+def debug_scheduler(scheduler):
+    """Capture scheduler state that context replay does not restore."""
+    return {
+        "class": type(scheduler).__module__ + "." + type(scheduler).__name__,
+        "config": dict(scheduler.config),
+        "sigmas": getattr(scheduler, "sigmas", None),
+        "timesteps": getattr(scheduler, "timesteps", None),
+        "step_index": getattr(scheduler, "_step_index", None),
+        "begin_index": getattr(scheduler, "_begin_index", None),
+        "num_inference_steps": getattr(scheduler, "num_inference_steps", None),
+    }
+
+
+def debug_model_manifest(transformer):
+    import torch
+
+    rows = []
+    # Sequential CPU copies bound host memory to the largest parameter. Do not
+    # retain copies of the whole DiT. This diagnostic is not timed inference.
+    for name, tensor in list(transformer.named_parameters()) + list(transformer.named_buffers()):
+        value = tensor.detach().contiguous().to("cpu")
+        raw = value.reshape(-1).view(torch.uint8).numpy()
+        rows.append(
+            {
+                "name": name,
+                "shape": list(tensor.shape),
+                "dtype": str(tensor.dtype),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        )
+        del value, raw
+    payload = json.dumps(rows, sort_keys=True).encode()
+    return {
+        "tensor_manifest_sha256": hashlib.sha256(payload).hexdigest(),
+        "tensors": rows,
+        "torch": torch.__version__,
+        "hip": torch.version.hip,
+        "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+        "float32_matmul_precision": torch.get_float32_matmul_precision(),
+        "cudnn_benchmark": torch.backends.cudnn.benchmark,
+        "cudnn_deterministic": torch.backends.cudnn.deterministic,
+        "matmul_allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+        "bf16_reduced_precision_reduction": torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
+        "environment": {
+            k: v
+            for k, v in os.environ.items()
+            if k
+            in {
+                "TORCHINDUCTOR_CACHE_DIR",
+                "TRITON_CACHE_DIR",
+                "TORCHINDUCTOR_COMPILE_THREADS",
+                "HIP_VISIBLE_DEVICES",
+                "VLLM_ROCM_USE_AITER",
+                "QWEN_EXPERIMENT_BASELINE_DEBUG",
+                "QWEN_EXPERIMENT_REPLAY_DIR",
+                "QWEN_EXPERIMENT_VARIANT",
+            }
+        },
+        "scope": "B1 T2I first-divergence debug only; CPU copies synchronize GPU and invalidate timing claims.",
+    }
+
+
+def install_first_divergence_debug(cls):
+    if os.environ.get("QWEN_EXPERIMENT_BASELINE_DEBUG") != "1":
+        return
+    original_encode = cls.prepare_encode
+    original_step = cls._denoise_step_homogeneous
+    original_scheduler = cls.step_scheduler
+
+    @functools.wraps(original_encode)
+    def encode(self, state, **kwargs):
+        result = original_encode(self, state, **kwargs)
+        if ACTIVE is None:
+            return result
+        if state.latents.shape[0] != 1 or state.extra["image_latents"] is not None or state.do_true_cfg:
+            raise RuntimeError("Baseline-debug requires one B1 T2I case without CFG")
+        save("debug-scheduler-initial.pt", debug_scheduler(state.scheduler))
+        if not getattr(self, "_experiment_debug_weights_saved", False):
+            write_json(Path(CAPTURE).parent / "debug-transformer-manifest.json", debug_model_manifest(self.transformer))
+            self._experiment_debug_weights_saved = True
+        import torch
+
+        save("debug-rng-initial.pt", {"cpu": torch.random.get_rng_state(), "cuda": torch.cuda.get_rng_state()})
+        if not getattr(self.transformer, "_experiment_debug_forward_wrapped", False):
+            forward = self.transformer.forward
+
+            @functools.wraps(forward)
+            def outer_forward(*args, **kw):
+                value = forward(*args, **kw)
+                if ACTIVE is not None and "debug_step" in ACTIVE:
+                    branch = kw.get("cache_branch", "cond")
+                    payload = value[0] if isinstance(value, tuple) else value.sample
+                    save(f"debug-step-{ACTIVE['debug_step']:03d}-transformer-{branch}.pt", payload)
+                return value
+
+            # Only the outer model forward is wrapped. Regional block forwards
+            # and _decode_graph_forward remain unchanged; saves run after replay.
+            self.transformer.forward = outer_forward
+            self.transformer._experiment_debug_forward_wrapped = True
+        return result
+
+    @functools.wraps(original_step)
+    def step(self, batch):
+        if ACTIVE is None:
+            return original_step(self, batch)
+        if len(batch.states) != 1:
+            raise RuntimeError("Baseline-debug requires exactly one state")
+        index = batch.states[0].step_index
+        ACTIVE["debug_step"] = index
+        save(
+            f"debug-step-{index:03d}-input.pt",
+            {
+                "latents": batch.latents,
+                "timesteps": batch.timesteps,
+                "prompt_embeds": batch.prompt_embeds,
+                "prompt_embeds_mask": batch.prompt_embeds_mask,
+                "img_shapes": batch.img_shapes,
+                "true_cfg_scale": batch.true_cfg_scale,
+                "do_true_cfg": batch.do_true_cfg,
+            },
+        )
+        result = original_step(self, batch)
+        save(f"debug-step-{index:03d}-noise.pt", result)
+        if index == 0:
+            save("debug-prefill-kv.pt", [dict(layer) for layer in batch.states[0].extra["kv_cache"]])
+        ACTIVE.pop("debug_step", None)
+        return result
+
+    @functools.wraps(original_scheduler)
+    def scheduler(self, state, noise_pred, **kwargs):
+        if ACTIVE is None:
+            return original_scheduler(self, state, noise_pred, **kwargs)
+        index = state.step_index
+        save(
+            f"debug-step-{index:03d}-scheduler-before.pt",
+            {
+                "latents": state.latents,
+                "noise_pred": noise_pred,
+                "current_timestep": state.current_timestep,
+                "scheduler": debug_scheduler(state.scheduler),
+            },
+        )
+        result = original_scheduler(self, state, noise_pred, **kwargs)
+        save(
+            f"debug-step-{index:03d}-scheduler-after.pt",
+            {
+                "latents": state.latents,
+                "step_index": state.step_index,
+                "scheduler": debug_scheduler(state.scheduler),
+            },
+        )
+        return result
+
+    cls.prepare_encode = encode
+    cls._denoise_step_homogeneous = step
+    cls.step_scheduler = scheduler
+
+
 def patch_pipeline(module):
     cls = module.QwenImage21Pipeline
     original_encode_prompt = cls.encode_prompt
@@ -436,6 +594,7 @@ def patch_pipeline(module):
         return original_step(self, batch)
 
     cls._denoise_step_homogeneous = step
+    install_first_divergence_debug(cls)
 
 
 def patch_graph(module):
