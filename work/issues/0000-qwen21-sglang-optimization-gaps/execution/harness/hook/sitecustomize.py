@@ -116,6 +116,7 @@ def identify(kwargs):
 def attach_diagnostics(pipeline):
     original_encode = pipeline.vae.encode
     original_decode = pipeline.vae.decode
+    original_decoder = pipeline.vae.decoder.forward
     original_encoder = pipeline.text_encoder.forward
 
     @functools.wraps(original_encode)
@@ -161,6 +162,25 @@ def attach_diagnostics(pipeline):
 
     pipeline.vae.encode = encode
     pipeline.vae.decode = decode
+
+    @functools.wraps(original_decoder)
+    def decoder(*args, **kwargs):
+        if ACTIVE is not None:
+            index = ACTIVE["decoder_calls"]
+            ACTIVE["decoder_calls"] += 1
+            save(
+                f"decoder-call-{index:03d}-input.pt",
+                {
+                    "input": args[0],
+                    "first_chunk": kwargs.get("first_chunk", False),
+                },
+            )
+        result = original_decoder(*args, **kwargs)
+        if ACTIVE is not None:
+            save(f"decoder-call-{index:03d}-output.pt", {"output": result})
+        return result
+
+    pipeline.vae.decoder.forward = decoder
     pipeline.text_encoder.forward = encoder
     pipeline._experiment_original_vae_decode = original_decode
 
@@ -237,6 +257,7 @@ def patch_pipeline(module):
             "directory": directory,
             "encode_slot": 0,
             "encoder_slot": 0,
+            "decoder_calls": 0,
             "graphs": [],
             "replayed_fields": [],
         }
@@ -263,6 +284,7 @@ def patch_pipeline(module):
         result = original_finish(self, latents, height, width, output_type)
         save("decode-output.pt", {"output": result.output})
         case = ACTIVE
+        fusion_module = sys.modules.get("vllm_omni.diffusion.models.qwen_image_21.vae_experiment")
         write_json(
             case["directory"] / "metadata.json",
             {
@@ -272,6 +294,8 @@ def patch_pipeline(module):
                 "width": width,
                 "encoder_calls": case["encoder_slot"],
                 "vae_encode_calls": case["encode_slot"],
+                "decoder_calls": case["decoder_calls"],
+                "vae_fusion_counts": dict(getattr(fusion_module, "COUNTS", {})),
                 "replayed_fields": case["replayed_fields"],
                 "graph_calls": case["graphs"],
                 "instrumentation": "outer pipeline/encoder/VAE wrappers; no compiled-block wrappers",
@@ -284,6 +308,23 @@ def patch_pipeline(module):
 
     cls._prepare_generation_context = prepare
     cls._decode_latents = finish
+    original_step = cls._denoise_step_homogeneous
+
+    @functools.wraps(original_step)
+    def step(self, batch):
+        if ACTIVE is not None and batch.states[0].step_index == 2 and not ACTIVE.get("profiled"):
+            import torch
+
+            ACTIVE["profiled"] = True
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]
+            ) as profile:
+                result = original_step(self, batch)
+            profile.export_chrome_trace(str(ACTIVE["directory"] / "decode-step-trace.json"))
+            return result
+        return original_step(self, batch)
+
+    cls._denoise_step_homogeneous = step
 
 
 def patch_graph(module):
