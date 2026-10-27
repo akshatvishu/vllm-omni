@@ -16,6 +16,7 @@ def request(case, assets, source, output, request_id, phase, timeout=1800):
 
     output.mkdir(parents=True, exist_ok=False)
     payload = dict(case["request"])
+    payload.setdefault("generator_device", "cuda")
     payload.update(model="Qwen/Qwen-Image-2.1", response_format="b64_json", output_format="png")
     if "width" in payload:
         payload["size"] = f"{payload.pop('width')}x{payload.pop('height')}"

@@ -206,6 +206,8 @@ def main():
                 raise TimeoutError("server readiness timeout")
             time.sleep(1)
         mark("ready")
+        if args.diagnostic:
+            (run / "enable-capture").touch()
         doc = json.loads((inputs / ("historical-16.json" if args.historical else "workloads.json")).read_text())
         assets = {x["id"]: x for x in json.loads((inputs / "workloads.json").read_text()).get("assets", [])}
         cases = doc["cases"] if args.historical else [c for c in doc["cases"] if c["id"] in args.cases]

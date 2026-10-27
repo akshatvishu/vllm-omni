@@ -91,9 +91,26 @@ def to_like(value, reference):
     import torch
 
     if isinstance(reference, torch.Tensor):
-        if value.shape != reference.shape or value.dtype != reference.dtype:
+        if not isinstance(value, torch.Tensor) or value.shape != reference.shape or value.dtype != reference.dtype:
             raise ValueError("Saved baseline operand shape/dtype differs from current request")
-        return value.to(reference.device)
+        result = value.to(reference.device)
+        if result.stride() != reference.stride():
+            if torch._debug_has_internal_overlap(reference) != 0:
+                raise ValueError("Cannot restore a saved overlapping operand layout")
+            result = torch.empty_strided(
+                reference.shape, reference.stride(), dtype=reference.dtype, device=reference.device
+            ).copy_(result)
+        return result
+    if isinstance(reference, dict):
+        if not isinstance(value, dict) or value.keys() != reference.keys():
+            raise ValueError("Saved baseline dictionary differs")
+        return {key: to_like(value[key], item) for key, item in reference.items()}
+    if isinstance(reference, (tuple, list)):
+        if type(value) is not type(reference) or len(value) != len(reference):
+            raise ValueError("Saved baseline sequence differs")
+        return type(reference)(to_like(x, y) for x, y in zip(value, reference))
+    if type(value) is not type(reference) or value != reference:
+        raise ValueError("Saved baseline non-tensor metadata differs")
     return value
 
 
@@ -102,6 +119,7 @@ def identify(kwargs):
     data = json.loads(source.read_text())
     prompt = kwargs["prompt"]
     prompt = prompt[0] if isinstance(prompt, list) and len(prompt) == 1 else prompt
+    matches = []
     for case in data["cases"]:
         request = case["request"]
         if (
@@ -109,8 +127,10 @@ def identify(kwargs):
             and kwargs["height"] == request["height"]
             and kwargs["width"] == request["width"]
         ):
-            return case["id"]
-    raise ValueError("Diagnostic capture requires one named batch-one workload from inputs/workloads.json")
+            matches.append(case["id"])
+    if len(matches) != 1:
+        raise ValueError("Diagnostic capture requires exactly one named batch-one workload")
+    return matches[0]
 
 
 def attach_diagnostics(pipeline):
@@ -217,6 +237,28 @@ def stage_benchmark(pipeline, case):
             "dtype": str(operand.dtype),
         },
     )
+    packed = torch.load(directory / "decode-input.pt", weights_only=True)["packed_latents"].to(pipeline.device)
+    samples = []
+    with torch.inference_mode():
+        for i in range(25):
+            current_omni_platform.synchronize()
+            start = time.perf_counter()
+            output = pipeline._experiment_original_pipeline_decode(packed, case["height"], case["width"])
+            current_omni_platform.synchronize()
+            if i >= 5:
+                samples.append(time.perf_counter() - start)
+            del output
+    write_json(
+        directory / "decode-helper-stage-timing.json",
+        {
+            "warmups": 5,
+            "measured": 20,
+            "seconds": samples,
+            "scope": "Full decode helper including unpack, mean/std construction and normalization, plus VAE",
+            "shape": list(packed.shape),
+            "dtype": str(packed.dtype),
+        },
+    )
 
 
 def patch_pipeline(module):
@@ -237,6 +279,7 @@ def patch_pipeline(module):
         original_init(self, *args, **kwargs)
         if CAPTURE:
             attach_diagnostics(self)
+            self._experiment_original_pipeline_decode = original_finish.__get__(self, cls)
 
     cls.encode_prompt = encode_prompt
     cls.__init__ = initialize
@@ -248,6 +291,8 @@ def patch_pipeline(module):
     @functools.wraps(original_prepare)
     def prepare(self, **kwargs):
         global ACTIVE
+        if not (Path(os.environ["QWEN_EXPERIMENT_RUN_DIR"]) / "enable-capture").exists():
+            return original_prepare(self, **kwargs)
         case = identify(kwargs)
         directory = Path(CAPTURE) / case
         if (directory / "context.pt").exists():
@@ -255,15 +300,20 @@ def patch_pipeline(module):
         ACTIVE = {
             "case": case,
             "directory": directory,
+            "height": kwargs["height"],
+            "width": kwargs["width"],
             "encode_slot": 0,
             "encoder_slot": 0,
             "decoder_calls": 0,
             "graphs": [],
             "replayed_fields": [],
+            "fusion_counts_before": dict(
+                getattr(sys.modules.get("vllm_omni.diffusion.models.qwen_image_21.vae_experiment"), "COUNTS", {})
+            ),
         }
         result = original_prepare(self, **kwargs)
         save("fresh-context.pt", result)
-        if REPLAY and VARIANT in {"K1", "P1", "O1"}:
+        if REPLAY and VARIANT in {"B0", "K1", "P1", "O1"}:
             frozen = load("context.pt")
             fields = ("latents", "image_latents") if VARIANT == "O1" else tuple(frozen)
             for field in fields:
@@ -276,7 +326,7 @@ def patch_pipeline(module):
     def finish(self, latents, height, width, output_type="pil"):
         global ACTIVE
         if ACTIVE is None:
-            raise RuntimeError("Decode occurred without a diagnostic request context")
+            return original_finish(self, latents, height, width, output_type)
         if REPLAY and VARIANT in {"V1", "V2", "V3", "S2"}:
             latents = to_like(load("decode-input.pt")["packed_latents"], latents)
             ACTIVE["replayed_fields"].append("final_denoiser_latents")
@@ -295,7 +345,10 @@ def patch_pipeline(module):
                 "encoder_calls": case["encoder_slot"],
                 "vae_encode_calls": case["encode_slot"],
                 "decoder_calls": case["decoder_calls"],
-                "vae_fusion_counts": dict(getattr(fusion_module, "COUNTS", {})),
+                "vae_fusion_counts": {
+                    key: value - case["fusion_counts_before"].get(key, 0)
+                    for key, value in getattr(fusion_module, "COUNTS", {}).items()
+                },
                 "replayed_fields": case["replayed_fields"],
                 "graph_calls": case["graphs"],
                 "instrumentation": "outer pipeline/encoder/VAE wrappers; no compiled-block wrappers",
