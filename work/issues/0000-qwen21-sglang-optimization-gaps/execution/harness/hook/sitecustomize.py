@@ -522,3 +522,10 @@ class Finder(importlib.abc.MetaPathFinder):
 
 if DISABLE_CACHE or CAPTURE:
     sys.meta_path.insert(0, Finder())
+
+# Additional diagnostic only: capture the real compiled cast/pack boundary.
+if os.environ.get("QWEN_CASTPACK_BOUNDARY_DIR"):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "probes"))
+    from k1_castpack_boundary import install
+
+    install()

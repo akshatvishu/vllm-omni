@@ -25,7 +25,8 @@ def qualified_device() -> torch.device | None:
     properties = backend.get_device_properties(index)
     if str(getattr(properties, "gcnArchName", "")).split(":")[0] != "gfx942":
         return None
-    if "MI300X" not in properties.name:
+    # The MI300X VF exposes no product-name string through this Torch build.
+    if properties.total_memory < 180 * 1024**3:
         return None
     return torch.device("cuda", index)
 

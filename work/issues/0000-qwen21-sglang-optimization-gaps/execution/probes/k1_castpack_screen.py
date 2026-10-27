@@ -373,10 +373,11 @@ def main():
             torch_git_version=torch.version.git_version,
             hip=torch.version.hip,
             device=torch.cuda.get_device_name(0),
+            total_memory=torch.cuda.get_device_properties(0).total_memory,
             gcn_arch=getattr(torch.cuda.get_device_properties(0), "gcnArchName", None),
             packages=packages,
         )
-        if not str(result["gcn_arch"]).startswith("gfx942") or "MI300X" not in result["device"]:
+        if not str(result["gcn_arch"]).startswith("gfx942") or result["total_memory"] < 180 * 1024**3:
             raise RuntimeError("This screen is pinned to MI300X/gfx942")
         if not str(torch.__version__).startswith("2.13") or not str(torch.version.git_version).startswith("733fca1"):
             raise RuntimeError("This screen is pinned to Torch 2.13+git733fca1")
