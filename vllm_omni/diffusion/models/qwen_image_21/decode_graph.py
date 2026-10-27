@@ -93,6 +93,7 @@ class QwenImage21DecodeGraphEntry:
         kv_shapes: list[torch.Size],
         kv_dtype: torch.dtype,
         freqs: torch.Tensor,
+        retain_attention_buffers: bool = False,
     ):
         self.branch = branch
         self.target_tokens = target_tokens
@@ -100,8 +101,16 @@ class QwenImage21DecodeGraphEntry:
         with torch.inference_mode(False):
             self.hidden = torch.zeros(batch_size, target_tokens, in_channels, dtype=dtype, device=device)
             self.timestep = torch.zeros(batch_size, dtype=dtype, device=device)
-            self.k = [torch.zeros(shape, dtype=kv_dtype, device=device) for shape in kv_shapes]
-            self.v = [torch.zeros(shape, dtype=kv_dtype, device=device) for shape in kv_shapes]
+            self.packed_k = self.packed_v = None
+            if retain_attention_buffers:
+                shapes = [(shape[0], prefix_len + target_tokens, *shape[2:]) for shape in kv_shapes]
+                self.packed_k = [torch.zeros(shape, dtype=kv_dtype, device=device) for shape in shapes]
+                self.packed_v = [torch.zeros_like(tensor) for tensor in self.packed_k]
+                self.k = [tensor[:, :prefix_len] for tensor in self.packed_k]
+                self.v = [tensor[:, :prefix_len] for tensor in self.packed_v]
+            else:
+                self.k = [torch.zeros(shape, dtype=kv_dtype, device=device) for shape in kv_shapes]
+                self.v = [torch.zeros(shape, dtype=kv_dtype, device=device) for shape in kv_shapes]
             self.target_token_mask = torch.ones(target_tokens, dtype=torch.bool, device=device)
             # RoPE frequencies are layout-dependent but step-independent. Clone
             # into a normal (non-inference) tensor: the prefill runs under
@@ -111,6 +120,10 @@ class QwenImage21DecodeGraphEntry:
             self.attn_metadata = None
         # Per-block cache dicts with the same shape as the legacy protocol.
         self.block_caches = [{branch: {"key": self.k[i], "value": self.v[i]}} for i in range(len(kv_shapes))]
+        if self.packed_k is not None:
+            for i, cache in enumerate(self.block_caches):
+                cache[branch]["packed_key"] = self.packed_k[i]
+                cache[branch]["packed_value"] = self.packed_v[i]
         self.graph: torch.cuda.CUDAGraph | None = None
         self.output: torch.Tensor | None = None
         self.captures = 0
@@ -137,9 +150,9 @@ class QwenImage21DecodeGraphEntry:
         """Warm up on a side stream, then capture one decode step.
 
         Warm-up runs the same computation it will record, allocating cuBLAS
-        workspaces and any lazy buffers outside the capture. Decode writes
-        nothing to the cache (prefix K/V are read-only), so warm-up is
-        idempotent.
+        workspaces and any lazy buffers outside the capture. Decode preserves
+        prefix K/V; optional retained target rows are overwritten on every
+        invocation, so warm-up is idempotent.
         """
         side = torch.cuda.Stream()
         side.wait_stream(torch.cuda.current_stream())
@@ -337,6 +350,9 @@ class QwenImage21DecodeGraphManager:
                     kv_shapes=[block_cache[cache_branch]["key"].shape for block_cache in kv_cache],
                     kv_dtype=first["key"].dtype,
                     freqs=target_freqs,
+                    retain_attention_buffers=(
+                        batch_size == 1 and len(img_shapes) > 1 and first["key"].dtype == torch.bfloat16
+                    ),
                 )
             except torch.OutOfMemoryError as exc:
                 allocation_error = str(exc)

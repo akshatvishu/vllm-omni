@@ -663,8 +663,17 @@ class QwenImage21Attention(nn.Module):
                 attn_output = self.attn(query, key, value, metadata)
             else:
                 # Decode: the block-causal mask degenerates to full attention for target rows.
-                key = torch.cat([cached_key, key], dim=1)
-                value = torch.cat([cached_value, value], dim=1)
+                if self.prefix_kv_cache_dtype is None and "packed_key" in branch_cache:
+                    # Graph-entry-owned scratch; never enters request cache scatter/merge.
+                    packed_key = branch_cache["packed_key"]
+                    packed_value = branch_cache["packed_value"]
+                    prefix_len = cached_key.shape[1]
+                    packed_key[:, prefix_len:].copy_(key)
+                    packed_value[:, prefix_len:].copy_(value)
+                    key, value = packed_key, packed_value
+                else:
+                    key = torch.cat([cached_key, key], dim=1)
+                    value = torch.cat([cached_value, value], dim=1)
                 attn_output = self.attn(query, key, value, metadata)
         else:
             attn_output = self.attn(query, key, value, metadata)
