@@ -163,15 +163,16 @@ def main():
         bundle=str(Path(a.bundle).resolve()),
         caveat="Decoder-call replay only; tiled blend, full request and timed performance require common harness.",
     )
-    result["qualified"] = (
+    passed = (
         all(r["qualified"] for r in rows)
         and negative["exact_fallback"]
         and negative["mismatch_seen"]
         and result["state_keys_preserved"]
-        and not a.add_only
     )
+    result["diagnostic_passed"] = passed
+    result["qualified"] = passed and not a.add_only
     Path(a.output).write_text(json.dumps(result, indent=2) + "\n")
-    if not result["qualified"]:
+    if not passed:
         raise SystemExit(2)
 
 
