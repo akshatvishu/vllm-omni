@@ -175,7 +175,34 @@ def attach_diagnostics(pipeline):
             slot = ACTIVE["encoder_slot"]
             ACTIVE["encoder_slot"] += 1
             save(f"encoder-{slot}-input.pt", kwargs)
-        result = original_encoder(*args, **kwargs)
+        if ACTIVE is not None and VARIANT == "O1":
+            import torch
+
+            encoder_module = pipeline.text_encoder
+            paths = ("model.language_model.layers", "model.visual.blocks", "model.visual.deepstack_merger_list")
+            expected = [encoder_module.get_submodule(path) for path in paths]
+            actual = getattr(encoder_module, "_omni_layerwise_block_groups", [])
+            record = {
+                "enabled": bool(getattr(encoder_module, "_omni_layerwise_enabled", False)),
+                "paths": list(paths),
+                "group_lengths": [len(group) for group in actual],
+                "plan_matches": len(actual) == len(expected)
+                and all(list(a) == list(b) for a, b in zip(actual, expected)),
+                "hooks": len(getattr(encoder_module, "_omni_layerwise_hooks", [])),
+                "dit_resident_before": all(p.device.type == "cuda" for p in pipeline.transformer.parameters()),
+                "dit_layerwise_offload": bool(getattr(pipeline.transformer, "_omni_layerwise_enabled", False)),
+            }
+            with torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]
+            ) as profile:
+                result = original_encoder(*args, **kwargs)
+            trace = ACTIVE["directory"] / f"encoder-{slot}-trace.json"
+            profile.export_chrome_trace(str(trace))
+            record["trace"] = trace.name
+            record["dit_resident_after"] = all(p.device.type == "cuda" for p in pipeline.transformer.parameters())
+            ACTIVE["encoder_offload"].append(record)
+        else:
+            result = original_encoder(*args, **kwargs)
         if ACTIVE is not None:
             save(f"encoder-{slot}-output.pt", {"hidden_states": result.hidden_states[-1]})
         return result
@@ -285,6 +312,33 @@ def patch_pipeline(module):
     cls.__init__ = initialize
     if not CAPTURE:
         return
+    stats_cls = getattr(module, "_VaeLatentStats", None)
+    if stats_cls is not None:
+        original_get = stats_cls.get
+
+        @functools.wraps(original_get)
+        def stats_get(self, *args, **kwargs):
+            if ACTIVE is None:
+                return original_get(self, *args, **kwargs)
+            import torch
+
+            before = [x.data_ptr() if x is not None else None for x in (self.mean, self.std)]
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU]) as profile:
+                result = original_get(self, *args, **kwargs)
+            after = [x.data_ptr() for x in result]
+            ACTIVE["latent_stats_calls"].append(
+                {
+                    "before": before,
+                    "after": after,
+                    "device": [str(x.device) for x in result],
+                    "dtype": [str(x.dtype) for x in result],
+                    "identity_reused": before == after and all(x is not None for x in before),
+                    "operators": {event.key: event.count for event in profile.key_averages()},
+                }
+            )
+            return result
+
+        stats_cls.get = stats_get
     original_prepare = cls._prepare_generation_context
     original_finish = cls._decode_latents
 
@@ -306,6 +360,8 @@ def patch_pipeline(module):
             "encoder_slot": 0,
             "decoder_calls": 0,
             "graphs": [],
+            "latent_stats_calls": [],
+            "encoder_offload": [],
             "replayed_fields": [],
             "fusion_counts_before": dict(
                 getattr(sys.modules.get("vllm_omni.diffusion.models.qwen_image_21.vae_experiment"), "COUNTS", {})
@@ -351,6 +407,8 @@ def patch_pipeline(module):
                 },
                 "replayed_fields": case["replayed_fields"],
                 "graph_calls": case["graphs"],
+                "latent_stats_calls": case["latent_stats_calls"],
+                "encoder_offload": case["encoder_offload"],
                 "instrumentation": "outer pipeline/encoder/VAE wrappers; no compiled-block wrappers",
             },
         )

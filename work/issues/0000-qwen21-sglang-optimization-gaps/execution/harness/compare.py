@@ -162,6 +162,11 @@ def compare(baseline, candidate):
     c = json.loads(cpath.read_text())
     if c.get("baseline_manifest_sha256") != digest(bpath):
         raise ValueError("candidate does not reference this sealed B0 manifest")
+    if b.get("treatment") is not None:
+        raise ValueError("B0 must use the resident baseline configuration")
+    expected_treatment = {"mode": "layer", "components": ["text_encoder"]} if c.get("variant") == "O1" else None
+    if c.get("treatment") != expected_treatment:
+        raise ValueError("Unexpected optimization-specific configuration")
     for key in COMPARABLE_KEYS:
         if key not in b.get("provenance", {}) or key not in c.get("provenance", {}):
             raise ValueError(f"missing provenance {key}")
