@@ -295,6 +295,26 @@ def get_qwen_image_21_post_process_func(
     return post_process_func
 
 
+def _initialize_encoder_rope_on_device(encoder: nn.Module, device: torch.device) -> None:
+    """Preserve native RoPE construction arithmetic when weights load on CPU."""
+    # These nonpersistent buffers are absent from the checkpoint. Computing
+    # inverse frequencies on CPU and then copying them changes their FP32 bits
+    # on ROCm. Recreate only the small rotary modules on the compute device;
+    # encoder weights remain on CPU until the offload backend streams them.
+    for parent_path, name in (
+        ("model.visual", "rotary_pos_emb"),
+        ("model.language_model", "rotary_emb"),
+    ):
+        parent = encoder.get_submodule(parent_path)
+        original = getattr(parent, name)
+        if not hasattr(original, "config"):
+            raise ValueError("Qwen21 encoder offload requires config-based Transformers rotary modules")
+        with torch.device(device):
+            rotary = type(original)(original.config).to(device)
+        rotary.train(original.training)
+        setattr(parent, name, rotary)
+
+
 class QwenImage21Pipeline(
     nn.Module,
     QwenImage21CFGParallelMixin,
@@ -416,6 +436,7 @@ class QwenImage21Pipeline(
                     local_files_only=local_files_only,
                 ).to(encoder_device)
             if stream_encoder:
+                _initialize_encoder_rope_on_device(self.text_encoder, self.device)
                 for path in self._offload_plan.encoder_block_attrs["text_encoder"]:
                     blocks = self.text_encoder.get_submodule(path)
                     if not isinstance(blocks, nn.ModuleList) or len(blocks) < 2:

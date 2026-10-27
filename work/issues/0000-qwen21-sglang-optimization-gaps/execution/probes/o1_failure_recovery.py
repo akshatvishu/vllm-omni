@@ -127,6 +127,9 @@ def main():
         from transformers import Qwen3VLForConditionalGeneration
         from vllm.utils.torch_utils import set_default_torch_dtype
 
+        from vllm_omni.diffusion.models.qwen_image_21.pipeline_qwen_image_21 import (
+            _initialize_encoder_rope_on_device,
+        )
         from vllm_omni.diffusion.offloader.layerwise_backend import (
             disable_plan_encoder_layerwise_offload,
             enable_plan_encoder_layerwise_offload,
@@ -159,6 +162,9 @@ def main():
                 args.checkpoint, subfolder="text_encoder", local_files_only=True
             ).to("cpu")
         encoder.eval()
+        with set_default_torch_dtype(torch.bfloat16):
+            _initialize_encoder_rope_on_device(encoder, device)
+        report["rotary_initialization"] = "Actual pipeline helper rebuilds rotary modules on compute device"
         report["parameter_dtypes"] = sorted({str(p.dtype) for p in encoder.parameters()})
         paths = ("model.language_model.layers", "model.visual.blocks", "model.visual.deepstack_merger_list")
         stacks = tuple(BlockStack(tuple(encoder.get_submodule(path))) for path in paths)
