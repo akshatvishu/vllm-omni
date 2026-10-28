@@ -1,0 +1,119 @@
+{
+  "assets": [
+    {
+      "id": "qwen_image_edit_2511_test1.png",
+      "path": "tests/assets/qwen_image_edit/qwen_image_edit_2511_test1.png",
+      "sha256": "ae23dbfe1723f0cae27a4152fa21feea83180437c079dd32d142112c18095b1d"
+    },
+    {
+      "id": "qwen_image_edit_2511_test2.png",
+      "path": "tests/assets/qwen_image_edit/qwen_image_edit_2511_test2.png",
+      "sha256": "b13355115f5e5da9e3d146c4ad942eeba4e1c35005f786f44c0ea07f0298d024"
+    }
+  ],
+  "cases": [
+    {
+      "id": "it2i-accuracy",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "seed": 42,
+        "num_inference_steps": 40,
+        "n": 1,
+        "prompt": "Replace the cat's head inside the green circle in the first image with a 3D cartoon version of the dog in the second image. Preserve the dog's fur colors and ears, the pink costume and hat from the first image. Remove the green circle. Use a transparent background.",
+        "negative_prompt": "blurry, distorted, extra heads, green circle",
+        "true_cfg_scale": 4.0,
+        "width": 768,
+        "height": 1024
+      },
+      "reference_assets": [
+        "qwen_image_edit_2511_test1.png",
+        "qwen_image_edit_2511_test2.png"
+      ],
+      "source": "current tracked accuracy contract"
+    },
+    {
+      "id": "t2i-accuracy",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "seed": 42,
+        "num_inference_steps": 40,
+        "n": 1,
+        "prompt": "A ceramic teapot on a wooden table, warm natural window light, detailed photograph.",
+        "negative_prompt": null,
+        "true_cfg_scale": 1.0,
+        "width": 1024,
+        "height": 1024
+      },
+      "reference_assets": [],
+      "source": "current tracked accuracy contract"
+    },
+    {
+      "id": "it2i-one-reference",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "seed": 43,
+        "num_inference_steps": 40,
+        "n": 1,
+        "prompt": "Turn the subject in the reference image into a 3D cartoon. Preserve the costume colors and use a transparent background.",
+        "negative_prompt": "blurry, distorted, extra heads",
+        "true_cfg_scale": 4.0,
+        "width": 768,
+        "height": 1024
+      },
+      "reference_assets": [
+        "qwen_image_edit_2511_test1.png"
+      ],
+      "source": "new coverage for this campaign"
+    },
+    {
+      "id": "it2i-four-reference",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "seed": 44,
+        "num_inference_steps": 40,
+        "n": 1,
+        "prompt": "Create a four-panel composition using the reference images in order, one image per panel. Preserve each subject and costume.",
+        "negative_prompt": "blurry, distorted, extra heads",
+        "true_cfg_scale": 4.0,
+        "width": 1024,
+        "height": 768
+      },
+      "reference_assets": [
+        "qwen_image_edit_2511_test1.png",
+        "qwen_image_edit_2511_test2.png",
+        "qwen_image_edit_2511_test1.png",
+        "qwen_image_edit_2511_test2.png"
+      ],
+      "source": "new slot/count coverage; repeated pair, not four distinct scene identities"
+    },
+    {
+      "id": "it2i-landscape",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "seed": 42,
+        "num_inference_steps": 40,
+        "n": 1,
+        "prompt": "Replace the cat's head inside the green circle in the first image with a 3D cartoon version of the dog in the second image. Preserve the dog's fur colors and ears, the pink costume and hat from the first image. Remove the green circle. Use a transparent background.",
+        "negative_prompt": "blurry, distorted, extra heads, green circle",
+        "true_cfg_scale": 4.0,
+        "width": 1024,
+        "height": 768
+      },
+      "reference_assets": [
+        "qwen_image_edit_2511_test1.png",
+        "qwen_image_edit_2511_test2.png"
+      ],
+      "source": "current two-reference request with output aspect ratio changed"
+    }
+  ],
+  "modes": [
+    "eager",
+    "regional_compile_decode_graph"
+  ],
+  "precision": "bfloat16",
+  "tensor_parallel_size": 1,
+  "sequence_parallel_size": 1,
+  "batch_size": 1,
+  "attention_backend": "TORCH_SDPA",
+  "note": "Request data only. The common harness must translate to API/offline arguments without changing semantics. Freeze explicit tiling/cache/compile/runtime settings in B0 before execution."
+}

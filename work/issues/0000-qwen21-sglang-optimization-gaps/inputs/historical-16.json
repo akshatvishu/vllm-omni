@@ -1,0 +1,261 @@
+{
+  "cases": [
+    {
+      "id": "historical-00",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 0. Soft morning light enters through a window.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 42,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-01",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 1. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 43,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-02",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 2. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 44,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-03",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 3. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 45,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-04",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 4. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses. Fine ceramic texture and subtle reflections are visible on the glossy red glaze.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 46,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-05",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 5. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses. Fine ceramic texture and subtle reflections are visible on the glossy red glaze. The composition is balanced, with natural colors and realistic photographic detail.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 47,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-06",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 6. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses. Fine ceramic texture and subtle reflections are visible on the glossy red glaze. The composition is balanced, with natural colors and realistic photographic detail. A small handwritten card lies beside a white porcelain cup on the right.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 48,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-07",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 7. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses. Fine ceramic texture and subtle reflections are visible on the glossy red glaze. The composition is balanced, with natural colors and realistic photographic detail. A small handwritten card lies beside a white porcelain cup on the right. Warm sunlight makes delicate shadows across the table and the surrounding objects.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 49,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-08",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 8. Soft morning light enters through a window.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 50,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-09",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 9. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 51,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-10",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 10. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 52,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-11",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 11. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 53,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-12",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 12. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses. Fine ceramic texture and subtle reflections are visible on the glossy red glaze.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 54,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-13",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 13. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses. Fine ceramic texture and subtle reflections are visible on the glossy red glaze. The composition is balanced, with natural colors and realistic photographic detail.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 55,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-14",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 14. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses. Fine ceramic texture and subtle reflections are visible on the glossy red glaze. The composition is balanced, with natural colors and realistic photographic detail. A small handwritten card lies beside a white porcelain cup on the right.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 56,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    },
+    {
+      "id": "historical-15",
+      "request": {
+        "model": "Qwen/Qwen-Image-2.1",
+        "prompt": "A red ceramic teapot on a wooden table, scene 15. Soft morning light enters through a window. Small wildflowers stand in a blue glass vase beside the teapot. A folded linen napkin and a silver spoon rest on the wooden table. The background shows a quiet garden with green leaves and pale pink roses. Fine ceramic texture and subtle reflections are visible on the glossy red glaze. The composition is balanced, with natural colors and realistic photographic detail. A small handwritten card lies beside a white porcelain cup on the right. Warm sunlight makes delicate shadows across the table and the surrounding objects.",
+        "negative_prompt": "blurry, low quality",
+        "true_cfg_scale": 4.0,
+        "size": "512x512",
+        "num_inference_steps": 20,
+        "seed": 57,
+        "n": 1,
+        "response_format": "b64_json"
+      }
+    }
+  ],
+  "concurrency": 8,
+  "max_num_seqs": 8,
+  "execution_mode": "step",
+  "vae_use_tiling": true,
+  "compile_mode": "regional",
+  "decode_graphs": true,
+  "warmups_minimum": 32,
+  "warmup_concurrency": 8,
+  "quality": {
+    "compare_mode": "RGB",
+    "psnr_min_db": 30.0,
+    "ssim_min": 0.99,
+    "require_matching_per_image_batch_schedule": true
+  },
+  "source_sha256": {
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0000.json": "1b9f81ce282b8deb8880cfeb2179038313b78c65c2f00ea2f388896e1e47f6d9",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0001.json": "205d9700203c3d2e2d9dc5863de0208e5689bfa8996bfe438fff52225cf40f5b",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0002.json": "33970941b3b2f21a529b6096fc455c62e771e53743e2cad87c278d204970704f",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0003.json": "603f8162c10613fbc538a33dcd23f32897d87d8b4a7b1bebdaa478b51cd24f4b",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0004.json": "3dab1ebc31764329eb5bfbfa9810f09ae31ce74a41b8b38817ed5165107be591",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0005.json": "adefb2bee4dd971ac00244c7a1c22e3929ea47878bbc8efa166759c3da63d584",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0006.json": "c8cd7a3dc4b48e5a4ca1935c434adf113ea2449e194f67a06ed7db53d76e2bcf",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0007.json": "e2aae5e256722266bc1f42ac1a5ca1a8b77aaf68a6760e8be00e12fa6b02ed8d",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0008.json": "8d70c7b1a4b0aaf63f646d17b29bc1f73d3a4f8a9b813ef4e90d9c1d644339b2",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0009.json": "40e6575f445ac286cd279aab11567e951adaec5df879173f4dfa9b780151729b",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0010.json": "e6d9bce6f62121d7818564bbaa4d74edc1689d21230d67e304a96d53330e8dd9",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0011.json": "5c8272d8fdc2e31ed7229cdacea098d8be13df9f0a5f279276426fe84047c511",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0012.json": "e5372aeec21c4561cd226c3cabe796082c2b20cdcff7524cf69b5d41ea126d38",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0013.json": "c7e10ba2cce3c69731a43d5579afe1d713531c15cc53a2a4a4b4d2d647d2241b",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0014.json": "e04b12c46bcb70d7646f06e28bb598a40c3257429e89c5f2fd450f98275f3b6f",
+    "work/issues/9111-qwen-image-mask/combined-flex/runs/baseline-control-b/requests/concurrency-8/request-0015.json": "99c94d077464d90eb334ee0bcf4f6f6a784834e85e9c3ccbc962c49aea6e57f5"
+  },
+  "note": "Request bodies only; previous outputs and timing are not reused as B0. Match actual schedules and graph coverage before interpreting candidate images."
+}
