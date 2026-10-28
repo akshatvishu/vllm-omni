@@ -1,0 +1,70 @@
+{
+  "source": "work/issues/0000-qwen21-sglang-optimization-gaps/runs/qwen21-main-b06d34f-mi300x-20261027/K1/castpack-nanpolicy-v2-20261028-1/screen/screen.json",
+  "source_sha256": "8bb9da9c500553d26b169c9633eeeb1a6ba32072429a367ca695407d9ddbea3f",
+  "scope": "Saved geometry metadata only; operands generated afresh; no real capture claim",
+  "cases": [
+    {
+      "case": "t2i-accuracy",
+      "branch": "conditional",
+      "prefix": 25,
+      "target": 4096,
+      "context_sha256": "5d4fbad9dbd4decbcc21000dae6887dcafdf495cc4621e78116cfbbe6f887e9f"
+    },
+    {
+      "case": "it2i-one-reference",
+      "branch": "conditional",
+      "prefix": 4070,
+      "target": 3072,
+      "context_sha256": "74d50900d2f2c83d807ce4763e9fb435beb776a1b552caef23ef86351a87f1c7"
+    },
+    {
+      "case": "it2i-one-reference-unconditional",
+      "branch": "unconditional",
+      "prefix": 4053,
+      "target": 3072,
+      "context_sha256": "74d50900d2f2c83d807ce4763e9fb435beb776a1b552caef23ef86351a87f1c7"
+    },
+    {
+      "case": "it2i-accuracy",
+      "branch": "conditional",
+      "prefix": 8205,
+      "target": 3072,
+      "context_sha256": "bca2a30826b27e66e5260beb32053ab85ff90dfc16d80dacb8a4e3bcf6a2f42f"
+    },
+    {
+      "case": "it2i-accuracy-unconditional",
+      "branch": "unconditional",
+      "prefix": 8158,
+      "target": 3072,
+      "context_sha256": "bca2a30826b27e66e5260beb32053ab85ff90dfc16d80dacb8a4e3bcf6a2f42f"
+    },
+    {
+      "case": "it2i-landscape",
+      "branch": "conditional",
+      "prefix": 8205,
+      "target": 3072,
+      "context_sha256": "f433586853854383a8aa27359ae57ac776877b110a1ccdaf7cb27231390a9584"
+    },
+    {
+      "case": "it2i-landscape-unconditional",
+      "branch": "unconditional",
+      "prefix": 8158,
+      "target": 3072,
+      "context_sha256": "f433586853854383a8aa27359ae57ac776877b110a1ccdaf7cb27231390a9584"
+    },
+    {
+      "case": "it2i-four-reference",
+      "branch": "conditional",
+      "prefix": 16311,
+      "target": 3072,
+      "context_sha256": "37592b2597b8acf22c1faf12f7bce55a18090291c5df63d6b40e91cc03eb9c19"
+    },
+    {
+      "case": "it2i-four-reference-unconditional",
+      "branch": "unconditional",
+      "prefix": 16295,
+      "target": 3072,
+      "context_sha256": "37592b2597b8acf22c1faf12f7bce55a18090291c5df63d6b40e91cc03eb9c19"
+    }
+  ]
+}

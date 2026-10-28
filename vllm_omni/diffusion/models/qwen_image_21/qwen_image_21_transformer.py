@@ -34,6 +34,7 @@ from vllm_omni.diffusion.distributed.sp_plan import (
     SequenceParallelOutput,
 )
 from vllm_omni.diffusion.forward_context import get_forward_context, is_forward_context_available
+from vllm_omni.diffusion.layers import qwen21_kv_pack
 from vllm_omni.diffusion.layers.exact_bf16_pointwise import eligible as pointwise_eligible
 from vllm_omni.diffusion.layers.exact_bf16_pointwise import residual, rotary, silu_mul
 from vllm_omni.diffusion.layers.exact_bf16_qk_norm_rope import qk_rotary
@@ -96,17 +97,21 @@ def _normalize_prefix_kv_cache_dtype(value: Any) -> str | None:
     )
 
 
-def _apply_qwen_image21_rotary_emb(x: torch.Tensor, freqs: torch.Tensor) -> torch.Tensor:
+def _apply_qwen_image21_rotary_emb(
+    x: torch.Tensor, freqs: torch.Tensor, *, defer_output_cast: bool = False
+) -> torch.Tensor:
     """Rotate interleaved pairs with complex FP32 multiplication.
 
     Same contract as the reference `apply_rotary_emb_qwen(..., use_real=False)`:
     `x` is [B, S, H, D], `freqs` is the complex frequency tensor [S, D // 2].
     """
-    fused = rotary(x, freqs)
-    if fused is not None:
-        return fused
+    if not defer_output_cast:
+        fused = rotary(x, freqs)
+        if fused is not None:
+            return fused
     paired = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
-    return torch.view_as_real(paired * freqs.unsqueeze(1)).flatten(3).to(x.dtype)
+    rotated = torch.view_as_real(paired * freqs.unsqueeze(1)).flatten(3)
+    return rotated if defer_output_cast else rotated.to(x.dtype)
 
 
 # Hold the freqs object so its id cannot be recycled into a different table.
@@ -534,6 +539,9 @@ class QwenImage21Attention(nn.Module):
             prefix=f"{prefix}.to_out.0",
         )
 
+        # Resolve the experimental device/stack guard before block compilation.
+        self._cast_pack_device = qwen21_kv_pack.qualified_device()
+
         self.attn = Attention(
             num_heads=self.num_heads,
             head_size=dim_head,
@@ -594,6 +602,19 @@ class QwenImage21Attention(nn.Module):
         key = key.unflatten(-1, (self.num_kv_heads, self.head_dim))
         value = value.unflatten(-1, (self.num_kv_heads, self.head_dim))
 
+        branch = kv_cache.get(cache_branch) if kv_cache is not None else None
+        defer_key_cast = (
+            key.device == getattr(self, "_cast_pack_device", None)
+            and self.prefix_kv_cache_dtype is None
+            and cache_write_len is None
+            and sp_prefix_len == 0
+            and not sp_decode
+            and not (is_forward_context_available() and get_forward_context().sp_active)
+            and branch is not None
+            and "key" in branch
+            and "value" in branch
+            and qwen21_kv_pack.producer_eligible(branch["key"], branch["value"], key, value)
+        )
         fused_qk = None
         if self.norm_q.bias is None and self.norm_k.bias is None and self.norm_q.eps == self.norm_k.eps:
             fused_qk = qk_rotary(query, key, self.norm_q.weight, self.norm_k.weight, freqs, self.norm_q.eps)
@@ -603,7 +624,11 @@ class QwenImage21Attention(nn.Module):
             query = self.norm_q(query).to(value.dtype)
             key = self.norm_k(key).to(value.dtype)
             query = self._apply_rotary_emb(query, freqs)
-            key = self._apply_rotary_emb(key, freqs)
+            key = (
+                _apply_qwen_image21_rotary_emb(key, freqs, defer_output_cast=True)
+                if defer_key_cast
+                else self._apply_rotary_emb(key, freqs)
+            )
 
         cached_key = cached_value = None
         if kv_cache is not None:
@@ -663,8 +688,14 @@ class QwenImage21Attention(nn.Module):
                 attn_output = self.attn(query, key, value, metadata)
             else:
                 # Decode: the block-causal mask degenerates to full attention for target rows.
-                key = torch.cat([cached_key, key], dim=1)
-                value = torch.cat([cached_value, value], dim=1)
+                if defer_key_cast and qwen21_kv_pack.eligible(cached_key, cached_value, key, value):
+                    key, value = qwen21_kv_pack.pack(cached_key, cached_value, key, value)
+                else:
+                    # Restore the original dtype if the final packing guard declines.
+                    if defer_key_cast:
+                        key = key.to(value.dtype)
+                    key = torch.cat([cached_key, key], dim=1)
+                    value = torch.cat([cached_value, value], dim=1)
                 attn_output = self.attn(query, key, value, metadata)
         else:
             attn_output = self.attn(query, key, value, metadata)
