@@ -134,7 +134,7 @@ def main():
         check('all_used_weights_loaded', not (set(dict(model.named_parameters())) - loaded))
         attention = model.transformer_blocks[0].attn.attn
         check('rocm_flash_backend', attention.attn_backend.get_name() == 'FLASH_ATTN',
-              name=attention.attn_backend.get_name())
+              backend=attention.attn_backend.get_name())
 
         class Captured(Exception):
             pass
