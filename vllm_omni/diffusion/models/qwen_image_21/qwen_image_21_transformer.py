@@ -663,8 +663,17 @@ class QwenImage21Attention(nn.Module):
                 attn_output = self.attn(query, key, value, metadata)
             else:
                 # Decode: the block-causal mask degenerates to full attention for target rows.
-                key = torch.cat([cached_key, key], dim=1)
-                value = torch.cat([cached_value, value], dim=1)
+                if self.prefix_kv_cache_dtype is None and "packed_key" in branch_cache:
+                    # Graph-entry-owned scratch; never enters request cache scatter/merge.
+                    packed_key = branch_cache["packed_key"]
+                    packed_value = branch_cache["packed_value"]
+                    prefix_len = cached_key.shape[1]
+                    packed_key[:, prefix_len:].copy_(key)
+                    packed_value[:, prefix_len:].copy_(value)
+                    key, value = packed_key, packed_value
+                else:
+                    key = torch.cat([cached_key, key], dim=1)
+                    value = torch.cat([cached_value, value], dim=1)
                 attn_output = self.attn(query, key, value, metadata)
         else:
             attn_output = self.attn(query, key, value, metadata)
@@ -1371,11 +1380,16 @@ class QwenImage21Transformer2DModel(CachedTransformer):
             joint_hidden_states.device.type in {"cuda", "npu"}
             and not torch.is_grad_enabled()
             and not torch.compiler.is_compiling()
+            and not (
+                is_decode
+                and joint_hidden_states.device.type == "cuda"
+                and all(hasattr(block.forward, "_torchdynamo_orig_callable") for block in self.transformer_blocks)
+            )
         ):
-            # Successful graph replay returned above; prefill and graph fallback
-            # still use this eager block loop and can share modulation.
-            # The model shares one modulation across all blocks. Materialize
-            # its token selection/scale/tanh once per step, using the same ops.
+            # Compiled GPU decode must match the graph body's fusion boundaries.
+            # Preparing BF16 scales/gates here would round before the compiled
+            # block's multiply/add. Prefill and uncompiled decode still share
+            # the preparation once per step.
             scale1, gate1, scale2, gate2 = modulation.chunk(4, dim=-1)
             decode_broadcast = (
                 joint_hidden_states.device.type == "npu"
