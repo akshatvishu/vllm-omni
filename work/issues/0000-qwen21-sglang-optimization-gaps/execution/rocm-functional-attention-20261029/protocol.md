@@ -41,3 +41,9 @@ record local findings, restore remote main and stop before the next experiment.
 Reference documentation:
 [PyTorch custom operators](https://docs.pytorch.org/tutorials/advanced/python_custom_ops.html)
 and [functional/fake contracts](https://docs.pytorch.org/docs/2.14/library.html#torch.library.custom_op).
+
+Harness revision 1: the initial attempt c8a43dce passed seven setup checks but
+stopped before attention because generic deepcopy cannot construct a vLLM
+parameter. Copy the block structure while sharing the same read-only loaded
+parameters and buffers through deepcopy's memo. Candidate and criteria are
+unchanged. Retain the original output separately and use a new output directory.

@@ -140,7 +140,11 @@ def main():
             pass
 
         block = model.transformer_blocks[0]
-        reference_block = copy.deepcopy(block)
+        # vLLM parameters have a custom constructor and cannot use Tensor's
+        # generic deepcopy. Both inference arms intentionally share read-only
+        # parameters/buffers; copy only module structure and Python state.
+        shared = {id(t): t for t in (*block.parameters(), *block.buffers())}
+        reference_block = copy.deepcopy(block, shared)
         reference_block.attn.attn.forward = types.MethodType(candidate.reference_forward, reference_block.attn.attn)
         original_flash = fa.flash_attn_func
         options = {'triton.cudagraphs': False, 'triton.cudagraph_trees': False}
