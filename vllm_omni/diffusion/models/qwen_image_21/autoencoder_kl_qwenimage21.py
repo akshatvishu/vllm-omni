@@ -36,6 +36,8 @@ from diffusers.utils.accelerate_utils import apply_forward_hook
 
 from vllm_omni.diffusion.layers.vae_rms_norm import kernels_allowed, rms_norm_fastpath
 
+from . import vae_experiment
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 CACHE_T = 2
@@ -792,6 +794,9 @@ class QwenImage21ResidualUpBlock(nn.Module):
             else:
                 x = resnet(x)
 
+        if self.upsampler is not None and self.avg_shortcut is not None and feat_cache is None:
+            return vae_experiment.bias_upsample(self, x, x_copy, first_chunk)
+
         if self.upsampler is not None:
             if feat_cache is not None:
                 x = self.upsampler(x, feat_cache=feat_cache, feat_idx=feat_idx)
@@ -1243,6 +1248,9 @@ class AutoencoderKLQwenImage21(ModelMixin, AutoencoderMixin, ConfigMixin, FromOr
             out_channels=out_channels,
             is_residual=is_residual,
         )
+
+        for module in self.decoder.modules():
+            module._qwen_decoder_experiment = True
 
         # Derive the spatial compression ratio from the architecture: one
         # downsampling stage per `temperal_downsample` entry. The checkpoint's
