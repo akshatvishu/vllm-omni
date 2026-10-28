@@ -3,6 +3,7 @@
 """Bounded real-operand AITER prefill output-buffer experiment."""
 
 import argparse
+import functools
 import hashlib
 import inspect
 import json
@@ -20,6 +21,11 @@ def bits(a, b):
     return a.shape == b.shape and a.dtype == b.dtype and torch.equal(
         a.contiguous().view(torch.uint8), b.contiguous().view(torch.uint8)
     )
+
+
+@functools.wraps(torch.nn.functional.scaled_dot_product_attention)
+def forbid_sdpa(*args, **kwargs):
+    raise AssertionError('SDPA is forbidden in this experiment')
 
 
 def measure(fn, operands, repeats=10):
@@ -141,7 +147,7 @@ def main():
 
         with set_forward_context(vllm_config=vcfg, omni_diffusion_config=od), torch.inference_mode(), patch(
             'torch.nn.functional.scaled_dot_product_attention',
-            side_effect=AssertionError('SDPA is forbidden in this experiment'),
+            new=forbid_sdpa,
         ):
             model.do_true_cfg = True
             for branch in ('cond', 'uncond'):
