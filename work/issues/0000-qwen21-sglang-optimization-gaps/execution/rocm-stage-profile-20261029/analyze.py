@@ -116,17 +116,18 @@ def analyze(trace_path, output_path):
                          for (s, name), vals in sorted(named.items(), key=lambda pair: -sum(x['dur'] for x in pair[1]))
                          if s == stage][:24],
         )
-    # Source order: QKV projection, attention output projection, FFN input, FFN output.
-    # Only assign blocks with exactly four GEMM kernel events; leave others unclassified.
+    # Source order: QKV, attention output, two independent SwiGLU inputs, FFN output.
+    # Combine the gate/projection inputs because their compiler order can vary.
+    # Only assign blocks with exactly five GEMM kernel events; leave others unclassified.
     order_groups = defaultdict(list)
     for vals in block_gemms.values():
-        if len(vals) == 4:
-            for name, val in zip(('QKV_projection', 'attention_output_projection', 'FFN_input', 'FFN_output'),
+        if len(vals) == 5:
+            for name, val in zip(('QKV_projection', 'attention_output_projection', 'FFN_inputs', 'FFN_inputs', 'FFN_output'),
                                  sorted(vals, key=lambda x: x['ts']), strict=True):
                 order_groups[name].append(val['dur'])
     output['prefill_GEMM_order_mapping'] = dict(
-        block_calls=len(block_gemms), four_GEMM_blocks=sum(len(v) == 4 for v in block_gemms.values()),
+        block_calls=len(block_gemms), five_GEMM_blocks=sum(len(v) == 5 for v in block_gemms.values()),
         groups={k: dict(count=len(v), sum_ms=sum(v) / 1000) for k, v in order_groups.items()},
-        note='Order mapping requires exactly four GEMM events per source block; not an instruction-level profile.')
+        note='Order mapping requires exactly five GEMM events per source block; not an instruction-level profile.')
     Path(output_path).write_text(json.dumps(output, indent=2) + '\n')
     return output

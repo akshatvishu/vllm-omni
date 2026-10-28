@@ -106,8 +106,11 @@ def main():
         import aiter.ops.mha as mha
         check('aiter_binding', fa.IS_AITER and fa.flash_attn_func is mha.flash_attn_func)
         result['aiter_sha256'] = hashlib.sha256(Path(inspect.getfile(mha)).read_bytes()).hexdigest()
-        regionally_compile(model, dynamic=od.diffusion_compile_dynamic,
-            options={'triton.cudagraphs': False, 'triton.cudagraph_trees': False})
+        options = {'triton.cudagraphs': False, 'triton.cudagraph_trees': False,
+                   'enable_auto_functionalized_v2': vcfg.compilation_config.inductor_compile_config['enable_auto_functionalized_v2']}
+        check('vllm_functionalization_compatibility', options['enable_auto_functionalized_v2'] is False)
+        result['compile_options'] = options
+        regionally_compile(model, dynamic=od.diffusion_compile_dynamic, options=options)
         check('regional_compile', all(hasattr(b.forward, '_torchdynamo_orig_callable') for b in model.transformer_blocks),
               dynamic=od.diffusion_compile_dynamic)
 
